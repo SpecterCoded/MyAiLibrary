@@ -552,7 +552,7 @@ export default function App({ theme, setTheme }: RagExplorerPageProps) {
               onClick={() => setCurrentView('explorer')}
               className={`p-3 transition-colors relative group ${currentView === 'explorer' ? 'text-ink' : 'text-ink-faint hover:text-ink'}`}
             >
-              <Database size={24} />
+              <Database size={20} />
               {currentView === 'explorer' && <div className="absolute inset-y-0 -left-5 md:-left-7 w-1 bg-brand" />}
               <span className="absolute left-full ml-4 px-2 py-1 bg-brand text-brand-foreground text-xs font-medium opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50">Library Explorer</span>
             </button>
@@ -856,26 +856,25 @@ export default function App({ theme, setTheme }: RagExplorerPageProps) {
               </motion.div>
             </div>
           ) : filteredResources.length === 0 ? (
-            <div className="flex-1 flex flex-col items-center justify-center p-8 bg-panel">
+            <div className="flex-1 flex flex-col items-center justify-center p-6 bg-panel">
               <motion.div 
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="max-w-xl w-full border border-border p-8 md:p-12 text-center bg-canvas shadow-2xl"
+                className="max-w-lg w-full border border-border p-5 text-center bg-canvas shadow-2xl"
               >
-                <div className="w-16 h-16 bg-surface border border-border flex items-center justify-center mx-auto mb-6 text-ink-faint">
-                  <Database size={32} />
+                <div className="w-10 h-10 bg-surface border border-border flex items-center justify-center mx-auto mb-3 text-ink-faint">
+                  <Database size={20} />
                 </div>
-                <h2 className="text-2xl font-display font-medium text-ink mb-3">Library is Empty</h2>
-                <p className="text-ink-muted text-sm leading-relaxed mb-8">
+                <h2 className="text-lg font-display font-medium text-ink mb-1.5">Library is Empty</h2>
+                <p className="text-ink-muted text-xs leading-relaxed mb-4">
                   {resources.length === 0
                     ? 'Your RAG library does not have any resources yet. To get started, you can ingest your first file (PDF, DOCX, Video, or Audio) which will automatically be chunked, embedded, and indexed for retrieval.'
                     : 'No resources match the current search or filters. Adjust the type or status filters to inspect the rest of your library.'}
                 </p>
                 
-                <div className="text-left bg-panel border border-border p-6 mb-8 relative overflow-hidden group">
-                  <div className="absolute top-0 right-0 p-8 opacity-[0.02] group-hover:opacity-5 transition-opacity pointer-events-none"><Settings size={120}/></div>
-                  <h4 className="text-sm font-medium text-ink mb-4 flex items-center gap-2 relative z-10"><Settings size={16} className="text-ink-faint"/> How to ingest your first file</h4>
-                  <ol className="text-sm text-ink-muted space-y-3 list-decimal list-inside relative z-10 font-sans">
+                <div className="text-left bg-panel border border-border p-3 mb-4 relative overflow-hidden group">
+                  <h4 className="text-xs font-medium text-ink mb-2 flex items-center gap-2 relative z-10"><Settings size={14} className="text-ink-faint"/> How to ingest your first file</h4>
+                  <ol className="text-xs text-ink-muted space-y-1 list-decimal list-inside relative z-10 font-sans">
                     <li><span className="text-ink-muted">Upload</span> a document or media file.</li>
                     <li>System <span className="text-ink-muted">extracts raw text</span> or creates a transcript.</li>
                     <li>Content is divided into <span className="text-ink-muted">semantic chunks</span>.</li>
@@ -886,7 +885,7 @@ export default function App({ theme, setTheme }: RagExplorerPageProps) {
 
                 <button 
                   onClick={() => fetchResources()}
-                  className="px-6 py-3 bg-brand text-brand-foreground font-medium text-sm hover:bg-brand/90 transition-colors flex items-center justify-center gap-2 w-full sm:w-auto mx-auto shadow-[0_0_20px_var(--color-border)] hover:shadow-[0_0_30px_rgba(255,255,255,0.2)]"
+                  className="px-5 py-2 bg-brand text-brand-foreground font-medium text-sm hover:bg-brand/90 transition-colors flex items-center justify-center gap-2 w-full sm:w-auto mx-auto shadow-[0_0_20px_var(--color-border)] hover:shadow-[0_0_30px_rgba(255,255,255,0.2)]"
                 >
                   <RefreshCw size={16} /> Refresh Library
                 </button>

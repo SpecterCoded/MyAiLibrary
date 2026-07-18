@@ -51,27 +51,47 @@ export function LoginForm({ ctx }: { ctx: AuthContextType }) {
         throw new Error('Please verify your email address before logging in.');
       }
 
-      const token = await userCredential.user.getIdToken();
+      const firebaseToken = await userCredential.user.getIdToken();
       
-      // Store token securely
-      localStorage.setItem('access_token', token);
-      localStorage.removeItem('refresh_token');
-
-      // Fetch user profile from /me
-      const profileResponse = await fetch('/me', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+      // Exchange Firebase token for backend JWT tokens (with longer lifetime)
+      const sessionRes = await fetch('/auth/firebase-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          firebase_token: firebaseToken,
+          remember_me: rememberMe,
+        }),
       });
 
-      if (profileResponse.ok) {
-        const profileData = await profileResponse.json();
-        // Store user details
-        localStorage.setItem('user_id', profileData.user_id);
-        localStorage.setItem('username', profileData.username);
-        localStorage.setItem('email', profileData.email);
-        
-        ctx.setName(profileData.username);
+      if (!sessionRes.ok) {
+        const errData = await sessionRes.json().catch(() => ({}));
+        throw new Error(errData.detail || 'Failed to create session');
+      }
+
+      const sessionData = await sessionRes.json();
+      
+      // Store backend JWT tokens (these last 2 days or 30 days with remember_me)
+      localStorage.setItem('access_token', sessionData.access_token);
+      localStorage.setItem('refresh_token', sessionData.refresh_token);
+
+      // Store user details
+      if (sessionData.user) {
+        localStorage.setItem('user_id', sessionData.user.id);
+        localStorage.setItem('username', sessionData.user.username);
+        localStorage.setItem('email', sessionData.user.email);
+        ctx.setName(sessionData.user.username);
+      } else {
+        // Fallback: fetch user profile
+        const profileResponse = await fetch('/me', {
+          headers: { 'Authorization': `Bearer ${sessionData.access_token}` }
+        });
+        if (profileResponse.ok) {
+          const profileData = await profileResponse.json();
+          localStorage.setItem('user_id', profileData.user_id);
+          localStorage.setItem('username', profileData.username);
+          localStorage.setItem('email', profileData.email);
+          ctx.setName(profileData.username);
+        }
       }
 
       logActivity('auth', 'Logged in', targetEmail);

@@ -98,12 +98,14 @@ def create_token(user_id: str, token_type: str, expires_delta: timedelta) -> str
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 
-def create_access_token(user_id: str) -> str:
-    return create_token(user_id, "access", timedelta(days=2))
+def create_access_token(user_id: str, remember_me: bool = False) -> str:
+    days = 30 if remember_me else 2
+    return create_token(user_id, "access", timedelta(days=days))
 
 
-def create_refresh_token(user_id: str) -> str:
-    return create_token(user_id, "refresh", timedelta(days=7))
+def create_refresh_token(user_id: str, remember_me: bool = False) -> str:
+    days = 60 if remember_me else 7
+    return create_token(user_id, "refresh", timedelta(days=days))
 
 
 def get_db():

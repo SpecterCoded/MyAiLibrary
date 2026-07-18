@@ -29,7 +29,6 @@ import DocumentIntelligencePage from './components/DocumentIntelligencePage';
 import RagExplorerPage from './components/rag-explorer/RagExplorerPage';
 import { init as initActivityLogger, destroy as destroyActivityLogger } from './utils/activityLogger';
 import { auth } from './firebase';
-import { onIdTokenChanged } from 'firebase/auth';
 
 interface PlaylistData {
   id: number;
@@ -344,40 +343,39 @@ export default function App() {
     checkSession(true);
   }, []);
 
-  // Keep access_token in sync with Firebase ID token
-  useEffect(() => {
-    const unsubscribe = onIdTokenChanged(auth, async (firebaseUser) => {
-      if (firebaseUser) {
-        try {
-          const idToken = await firebaseUser.getIdToken();
-          localStorage.setItem('access_token', idToken);
-        } catch (err) {
-          console.error('Failed to get ID token:', err);
-        }
-      }
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // Proactively refresh Firebase token every 50 minutes to prevent expiry
+  // Proactively refresh backend JWT token every 30 minutes
   useEffect(() => {
     const interval = setInterval(async () => {
-      const user = auth.currentUser;
-      if (user) {
-        try {
-          const idToken = await user.getIdToken(true);
-          localStorage.setItem('access_token', idToken);
-        } catch (err) {
-          console.error('Proactive token refresh failed:', err);
+      const refreshToken = localStorage.getItem('refresh_token');
+      const accessToken = localStorage.getItem('access_token');
+      if (!refreshToken || !accessToken) return;
+      
+      try {
+        const res = await fetch('/auth/refresh', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            refresh_token: refreshToken,
+            remember_me: localStorage.getItem('remember_me') === 'true',
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          localStorage.setItem('access_token', data.access_token);
+        } else if (res.status === 401) {
+          // Refresh token expired — force re-login
+          handleAuthExpired();
         }
+      } catch (err) {
+        console.error('Token refresh failed:', err);
       }
-    }, 50 * 60 * 1000); // 50 minutes
+    }, 30 * 60 * 1000); // 30 minutes
     return () => clearInterval(interval);
   }, []);
 
   // When the active workspace (storage path) changes, re-sync the user and reset
   // navigation to the library root so content remounts and re-fetches for the new
-  // workspace — no page reload required.
+  // workspace â€” no page reload required.
   useEffect(() => {
     const handleWorkspaceChanged = () => {
       checkSession(false);
