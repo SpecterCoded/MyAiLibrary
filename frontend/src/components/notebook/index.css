@@ -1,0 +1,39 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+}
+
+body {
+  font-family: var(--font-sans);
+}
+
+/* Hide scrollbars */
+::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+* {
+  scrollbar-width: none;
+}
+
+/* Hide scrollbar for sidebars when not interacting */
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background: transparent;
+}
+.sidebar-scroll:hover::-webkit-scrollbar-thumb {
+  background: rgba(154, 154, 151, 0.3);
+}
+
+/* Drag-and-drop animations */
+@keyframes drag-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(55, 53, 47, 0.12), inset 0 0 0 2px rgba(55, 53, 47, 0.25); }
+  50%       { box-shadow: 0 0 0 4px rgba(55, 53, 47, 0.06), inset 0 0 0 2px rgba(55, 53, 47, 0.45); }
+}
+
+.drag-target-active {
+  animation: drag-pulse 0.9s ease-in-out infinite;
+}

@@ -1,0 +1,75 @@
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+
+# Environment / secrets
+.env
+.env.*
+
+# SQLite databases
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# ChromaDB vector store
+chroma_db/
+
+# User data / cookies
+user_cookies/
+
+# Uploads / media / audio
+uploads/
+extraa_files/
+*.wav
+*.mp3
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+*.ogg
+*.flac
+*.aac
+*.wma
+
+# Temp files
+temp/
+tmp/
+*.tmp
+*.temp
+~$*
+
+# Logs
+logs/
+*.log
+log/
+
+# Testing / Coverage
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+coverage/
+
+# Type checking
+.mypy_cache/
+.pytype/
+
+# Package artifacts
+*.egg-info/
+*.egg
+dist/
+build/
+
+# Pip
+pip-log.txt
+pip-delete-this-directory.txt

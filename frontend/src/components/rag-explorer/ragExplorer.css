@@ -1,0 +1,240 @@
+/* ================================================================
+   RAG Explorer — Isolated Design System
+   All rules scoped to .ragx-scope so nothing leaks to the main app.
+   !important is intentional: overrides the main app's CSS specificity.
+   ================================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Playfair+Display:ital,wght@0,400;0,600;1,400&display=swap');
+
+/* ──────────────────────────────────────────────────────────────
+   CSS Variables — light mode
+────────────────────────────────────────────────────────────── */
+.ragx-scope {
+  --ragx-canvas:         #f5f3f0;
+  --ragx-panel:          #ffffff;
+  --ragx-panel-elev:     #faf8f5;
+  --ragx-ink:            #111111;
+  --ragx-ink-muted:      rgba(17,17,17,0.6);
+  --ragx-ink-faint:      rgba(17,17,17,0.4);
+  --ragx-border:         rgba(17,17,17,0.1);
+  --ragx-border-strong:  rgba(17,17,17,0.2);
+  --ragx-surface:        rgba(17,17,17,0.04);
+  --ragx-surface-hover:  rgba(17,17,17,0.08);
+  --ragx-brand:          #111111;
+  --ragx-brand-fg:       #ffffff;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   CSS Variables — dark mode
+────────────────────────────────────────────────────────────── */
+.dark .ragx-scope,
+.ragx-scope.dark {
+  --ragx-canvas:         #050505;
+  --ragx-panel:          #0a0a0a;
+  --ragx-panel-elev:     #121212;
+  --ragx-ink:            #fafafa;
+  --ragx-ink-muted:      rgba(255,255,255,0.6);
+  --ragx-ink-faint:      rgba(255,255,255,0.4);
+  --ragx-border:         rgba(255,255,255,0.1);
+  --ragx-border-strong:  rgba(255,255,255,0.2);
+  --ragx-surface:        rgba(255,255,255,0.05);
+  --ragx-surface-hover:  rgba(255,255,255,0.1);
+  --ragx-brand:          #ffffff;
+  --ragx-brand-fg:       #000000;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Base reset inside scope
+────────────────────────────────────────────────────────────── */
+.ragx-scope,
+.ragx-scope * {
+  font-family: "Inter", ui-sans-serif, system-ui, sans-serif !important;
+  box-sizing: border-box;
+}
+
+.ragx-scope {
+  background-color: var(--ragx-canvas) !important;
+  color: var(--ragx-ink) !important;
+  -webkit-font-smoothing: antialiased !important;
+  -moz-osx-font-smoothing: grayscale !important;
+}
+
+/* Headings use display font */
+.ragx-scope h1, .ragx-scope h2, .ragx-scope h3,
+.ragx-scope h4, .ragx-scope h5, .ragx-scope h6 {
+  font-family: "Space Grotesk", ui-sans-serif, system-ui, sans-serif !important;
+}
+
+/* Scrollbar */
+.ragx-scope ::-webkit-scrollbar          { width: 6px; height: 6px; }
+.ragx-scope ::-webkit-scrollbar-track    { background: transparent; }
+.ragx-scope ::-webkit-scrollbar-thumb    { background: var(--ragx-border-strong); border-radius: 10px; }
+.ragx-scope ::-webkit-scrollbar-thumb:hover { background: var(--ragx-ink-faint); }
+
+/* ──────────────────────────────────────────────────────────────
+   FONT FAMILY utilities
+────────────────────────────────────────────────────────────── */
+.ragx-scope .font-sans    { font-family: "Inter", ui-sans-serif, system-ui, sans-serif !important; }
+.ragx-scope .font-display { font-family: "Space Grotesk", ui-sans-serif, system-ui, sans-serif !important; }
+.ragx-scope .font-mono    { font-family: "JetBrains Mono", ui-monospace, monospace !important; }
+.ragx-scope .font-serif   { font-family: "Playfair Display", ui-serif, serif !important; }
+
+/* mono elements that carry class directly */
+.ragx-scope pre,
+.ragx-scope code,
+.ragx-scope kbd,
+.ragx-scope samp { font-family: "JetBrains Mono", ui-monospace, monospace !important; }
+
+/* ──────────────────────────────────────────────────────────────
+   BACKGROUND utilities
+────────────────────────────────────────────────────────────── */
+.ragx-scope .bg-canvas           { background-color: var(--ragx-canvas) !important; }
+.ragx-scope .bg-panel            { background-color: var(--ragx-panel) !important; }
+.ragx-scope .bg-panel-elevated   { background-color: var(--ragx-panel-elev) !important; }
+.ragx-scope .bg-surface          { background-color: var(--ragx-surface) !important; }
+.ragx-scope .bg-surface-hover    { background-color: var(--ragx-surface-hover) !important; }
+.ragx-scope .bg-brand            { background-color: var(--ragx-brand) !important; }
+
+/* opacity variants */
+.ragx-scope .bg-canvas\/95 {
+  background-color: color-mix(in srgb, var(--ragx-canvas) 95%, transparent) !important;
+}
+.ragx-scope .bg-brand\/90 {
+  background-color: color-mix(in srgb, var(--ragx-brand) 90%, transparent) !important;
+}
+
+/* hover */
+.ragx-scope .hover\:bg-canvas:hover        { background-color: var(--ragx-canvas) !important; }
+.ragx-scope .hover\:bg-panel:hover         { background-color: var(--ragx-panel) !important; }
+.ragx-scope .hover\:bg-surface:hover       { background-color: var(--ragx-surface) !important; }
+.ragx-scope .hover\:bg-surface-hover:hover { background-color: var(--ragx-surface-hover) !important; }
+.ragx-scope .hover\:bg-brand:hover         { background-color: var(--ragx-brand) !important; }
+.ragx-scope .hover\:bg-brand\/90:hover {
+  background-color: color-mix(in srgb, var(--ragx-brand) 90%, transparent) !important;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   TEXT utilities
+────────────────────────────────────────────────────────────── */
+.ragx-scope .text-ink            { color: var(--ragx-ink) !important; }
+.ragx-scope .text-ink-muted      { color: var(--ragx-ink-muted) !important; }
+.ragx-scope .text-ink-faint      { color: var(--ragx-ink-faint) !important; }
+.ragx-scope .text-brand-foreground { color: var(--ragx-brand-fg) !important; }
+
+/* hover text */
+.ragx-scope .hover\:text-ink:hover              { color: var(--ragx-ink) !important; }
+.ragx-scope .hover\:text-ink-muted:hover        { color: var(--ragx-ink-muted) !important; }
+.ragx-scope .hover\:text-brand-foreground:hover { color: var(--ragx-brand-fg) !important; }
+
+/* group-hover text */
+.ragx-scope .group:hover .group-hover\:text-ink { color: var(--ragx-ink) !important; }
+
+/* placeholder */
+.ragx-scope .placeholder\:text-ink-faint::placeholder { color: var(--ragx-ink-faint) !important; }
+
+/* ──────────────────────────────────────────────────────────────
+   BORDER utilities
+────────────────────────────────────────────────────────────── */
+.ragx-scope .border-border        { border-color: var(--ragx-border) !important; }
+.ragx-scope .border-border-strong { border-color: var(--ragx-border-strong) !important; }
+.ragx-scope .border-brand         { border-color: var(--ragx-brand) !important; }
+
+/* hover */
+.ragx-scope .hover\:border-border-strong:hover { border-color: var(--ragx-border-strong) !important; }
+.ragx-scope .hover\:border-brand:hover         { border-color: var(--ragx-brand) !important; }
+
+/* focus */
+.ragx-scope .focus\:border-border0:focus   { border-color: var(--ragx-border-strong) !important; }
+.ragx-scope .focus\:border-white\/30:focus { border-color: rgba(255,255,255,0.3) !important; }
+.ragx-scope .focus\:outline-none:focus     { outline: none !important; }
+
+/* ──────────────────────────────────────────────────────────────
+   DIVIDE utilities
+────────────────────────────────────────────────────────────── */
+.ragx-scope .divide-white\/5 > :not([hidden]) ~ :not([hidden]) {
+  border-color: rgba(255,255,255,0.05) !important;
+}
+.ragx-scope .divide-y > :not([hidden]) ~ :not([hidden]) {
+  border-top-width: 1px;
+  border-top-color: var(--ragx-border) !important;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   INTERACTIVE utilities
+────────────────────────────────────────────────────────────── */
+/* Checkbox & select accent color */
+.ragx-scope .accent-brand         { accent-color: var(--ragx-brand) !important; }
+
+/* SVG fill */
+.ragx-scope .fill-black           { fill: #000000 !important; }
+.dark .ragx-scope .fill-black     { fill: #000000 !important; }
+
+/* ──────────────────────────────────────────────────────────────
+   SHADOW with design-token variable
+────────────────────────────────────────────────────────────── */
+.ragx-scope .shadow-\[0_0_20px_var\(--color-border\)\] {
+  box-shadow: 0 0 20px var(--ragx-border) !important;
+}
+.ragx-scope .hover\:shadow-\[0_0_30px_rgba\(255\2C255\2C255\2C0\.2\)\]:hover {
+  box-shadow: 0 0 30px rgba(255,255,255,0.2) !important;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   OPACITY utilities
+────────────────────────────────────────────────────────────── */
+.ragx-scope .opacity-0   { opacity: 0 !important; }
+.ragx-scope .opacity-5   { opacity: 0.05 !important; }
+.ragx-scope .opacity-10  { opacity: 0.1 !important; }
+
+/* group-hover opacity */
+.ragx-scope .group:hover .group-hover\:opacity-10  { opacity: 0.1 !important; }
+.ragx-scope .group:hover .group-hover\:opacity-100 { opacity: 1 !important; }
+
+/* regular hover opacity */
+.ragx-scope .hover\:opacity-90:hover { opacity: 0.9 !important; }
+.ragx-scope .hover\:opacity-100:hover { opacity: 1 !important; }
+
+/* ──────────────────────────────────────────────────────────────
+   POINTER-EVENTS / WHITESPACE
+────────────────────────────────────────────────────────────── */
+.ragx-scope .pointer-events-none { pointer-events: none !important; }
+.ragx-scope .whitespace-nowrap   { white-space: nowrap !important; }
+
+/* ──────────────────────────────────────────────────────────────
+   BEFORE pseudo-element (pipeline timeline gradient line)
+────────────────────────────────────────────────────────────── */
+.ragx-scope .before\:bg-gradient-to-b::before {
+  background-image: linear-gradient(to bottom, transparent, rgba(255,255,255,0.1), transparent) !important;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   STROKE (recharts axis labels inherit color from CSS var)
+────────────────────────────────────────────────────────────── */
+.ragx-scope .stroke-border-strong { stroke: var(--ragx-border-strong) !important; }
+
+/* ──────────────────────────────────────────────────────────────
+   INPUT / SELECT reset — prevent main-app styles bleeding in
+────────────────────────────────────────────────────────────── */
+.ragx-scope input,
+.ragx-scope select,
+.ragx-scope textarea,
+.ragx-scope button {
+  background-color: transparent;
+  font-family: "Inter", ui-sans-serif, system-ui, sans-serif !important;
+}
+
+.ragx-scope input:focus,
+.ragx-scope select:focus,
+.ragx-scope textarea:focus {
+  outline: none;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   RECHARTS tooltip override (fallback — JS tooltipStyle also set)
+────────────────────────────────────────────────────────────── */
+.ragx-scope .recharts-tooltip-wrapper .recharts-default-tooltip {
+  background-color: var(--ragx-panel) !important;
+  border-color: var(--ragx-border) !important;
+  color: var(--ragx-ink) !important;
+}
+.ragx-scope .recharts-tooltip-item { color: var(--ragx-ink) !important; }

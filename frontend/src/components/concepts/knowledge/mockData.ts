@@ -1,0 +1,63 @@
+import type { KnowledgeConcept, KnowledgeDataset } from "./types";
+
+const concept = (
+  value: Omit<KnowledgeConcept, "favorite" | "pinned"> & Partial<Pick<KnowledgeConcept, "favorite" | "pinned">>,
+): KnowledgeConcept => ({ favorite: false, pinned: false, ...value });
+
+export const mockKnowledgeDataset: KnowledgeDataset = {
+  resourceId: "lesson-market-structure-01",
+  title: "Knowledge",
+  eyebrow: "AI lesson intelligence",
+  subtitle: "Explore how ideas connect throughout this lesson.",
+  generatedAt: "A few moments ago",
+  processingStatus: "Ready",
+  statistics: [
+    { id: "concepts", label: "Concepts", value: "11", detail: "8 core, 3 supporting", icon: "concepts", tone: "blue" },
+    { id: "relationships", label: "Relationships", value: "14", detail: "Across 6 types", icon: "relationships", tone: "purple" },
+    { id: "stages", label: "Learning stages", value: "5", detail: "Foundation to mastery", icon: "stages", tone: "green" },
+    { id: "confidence", label: "Avg. confidence", value: "93%", detail: "High signal extraction", icon: "confidence", tone: "blue" },
+    { id: "topics", label: "Topics detected", value: "7", detail: "3 primary clusters", icon: "topics", tone: "purple" },
+    { id: "difficulty", label: "Difficulty", value: "Intermediate", detail: "Progressive lesson", icon: "difficulty", tone: "orange" },
+    { id: "chapters", label: "Chapters covered", value: "6 / 6", detail: "Full lesson coverage", icon: "chapters", tone: "green" },
+    { id: "status", label: "Processing", value: "Ready", detail: "Knowledge graph current", icon: "status", tone: "green" },
+  ],
+  concepts: [
+    concept({ id: "market-structure", title: "Market Structure", kind: "chapter", definition: "The sequence of price highs and lows used to interpret directional control.", summary: "The lesson foundation. Every later idea uses structural context to distinguish meaningful behavior from noise.", confidence: 98, difficulty: "Beginner", importance: 100, learningStage: "Foundation", chapter: "01 - Foundations", firstMention: "00:42", lastMention: "38:12", mentions: 24, studyMinutes: 8, aliases: ["Structure", "Price Structure"], prerequisites: [], relatedIds: ["break-of-structure", "liquidity", "institutional-flow"], favorite: true, pinned: true, x: 560, y: 315 }),
+    concept({ id: "break-of-structure", title: "Break of Structure", kind: "concept", definition: "A decisive move beyond a protected swing point that confirms continuation or structural change.", summary: "BOS validates that price displaced beyond an important high or low. Context and candle close matter more than a brief wick.", confidence: 97, difficulty: "Intermediate", importance: 96, learningStage: "Recognition", chapter: "02 - Structural Signals", firstMention: "06:18", lastMention: "34:09", mentions: 18, studyMinutes: 7, aliases: ["BOS", "Structure Break"], prerequisites: ["Market Structure"], relatedIds: ["market-structure", "liquidity", "displacement"], favorite: true, pinned: true, x: 795, y: 180 }),
+    concept({ id: "liquidity", title: "Liquidity", kind: "concept", definition: "Concentrated orders resting around obvious highs, lows, and repeated price levels.", summary: "Liquidity provides the motive for many price expansions and explains why price trades beyond obvious levels before reversing.", confidence: 96, difficulty: "Intermediate", importance: 95, learningStage: "Recognition", chapter: "03 - Liquidity", firstMention: "10:05", lastMention: "41:16", mentions: 22, studyMinutes: 9, aliases: ["Liquidity Pool", "Resting Orders"], prerequisites: ["Market Structure"], relatedIds: ["break-of-structure", "fair-value-gap", "order-block"], favorite: true, x: 830, y: 390 }),
+    concept({ id: "displacement", title: "Displacement", kind: "definition", definition: "A forceful directional move with large bodies and limited overlap.", summary: "Displacement is the quality check behind a valid structural break and commonly leaves an imbalance in its path.", confidence: 94, difficulty: "Intermediate", importance: 86, learningStage: "Interpretation", chapter: "02 - Structural Signals", firstMention: "08:51", lastMention: "29:44", mentions: 11, studyMinutes: 5, aliases: ["Impulse", "Expansion"], prerequisites: ["Break of Structure"], relatedIds: ["break-of-structure", "fair-value-gap"], x: 1010, y: 110 }),
+    concept({ id: "fair-value-gap", title: "Fair Value Gap", kind: "definition", definition: "A three-candle imbalance where price traded too efficiently to create two-sided delivery.", summary: "FVGs reveal inefficient delivery and become useful areas of interest when structure and liquidity agree.", confidence: 95, difficulty: "Intermediate", importance: 91, learningStage: "Interpretation", chapter: "04 - Imbalances", firstMention: "15:27", lastMention: "43:03", mentions: 16, studyMinutes: 8, aliases: ["FVG", "Imbalance"], prerequisites: ["Displacement", "Liquidity"], relatedIds: ["displacement", "order-block", "mitigation"], favorite: true, x: 1025, y: 330 }),
+    concept({ id: "order-block", title: "Order Block", kind: "concept", definition: "The final opposing candle before displacement that breaks meaningful structure.", summary: "An order block is a refined decision area, not a standalone entry signal. Validity depends on the displacement it produced.", confidence: 92, difficulty: "Advanced", importance: 90, learningStage: "Application", chapter: "05 - Execution Models", firstMention: "21:12", lastMention: "46:28", mentions: 14, studyMinutes: 10, aliases: ["OB", "Institutional Candle"], prerequisites: ["Displacement", "Fair Value Gap"], relatedIds: ["fair-value-gap", "breaker", "mitigation"], pinned: true, x: 810, y: 555 }),
+    concept({ id: "breaker", title: "Breaker", kind: "advanced", definition: "A failed order block that changes role after price violates and retests it.", summary: "Breakers teach role reversal and require structure, liquidity, and failed institutional positioning to align.", confidence: 89, difficulty: "Advanced", importance: 82, learningStage: "Application", chapter: "05 - Execution Models", firstMention: "28:34", lastMention: "47:51", mentions: 8, studyMinutes: 12, aliases: ["Breaker Block"], prerequisites: ["Order Block", "Liquidity"], relatedIds: ["order-block", "mitigation", "entry-model"], x: 560, y: 600 }),
+    concept({ id: "mitigation", title: "Mitigation", kind: "example", definition: "Price returning to a prior decision area to rebalance exposure before continuing.", summary: "The worked example connects an FVG and order block to a later revisit, showing how confluence narrows an execution zone.", confidence: 91, difficulty: "Advanced", importance: 80, learningStage: "Application", chapter: "05 - Execution Models", firstMention: "31:08", lastMention: "45:12", mentions: 7, studyMinutes: 7, aliases: ["Mitigation Move", "Rebalance"], prerequisites: ["Fair Value Gap", "Order Block"], relatedIds: ["fair-value-gap", "order-block", "breaker"], x: 330, y: 535 }),
+    concept({ id: "institutional-flow", title: "Institutional Flow", kind: "advanced", definition: "A contextual model for reading how displacement, liquidity, and retracement reveal intent.", summary: "This is the synthesis layer: individual patterns become useful only when they align with a coherent directional narrative.", confidence: 87, difficulty: "Advanced", importance: 84, learningStage: "Synthesis", chapter: "06 - Synthesis", firstMention: "35:22", lastMention: "49:02", mentions: 6, studyMinutes: 13, aliases: ["Order Flow", "Smart Money Flow"], prerequisites: ["Market Structure", "Liquidity", "Displacement"], relatedIds: ["market-structure", "entry-model", "risk-management"], x: 250, y: 300 }),
+    concept({ id: "entry-model", title: "Entry Model", kind: "example", definition: "A repeatable sequence combining narrative, location, confirmation, and risk.", summary: "The practical model waits for liquidity, confirms displacement, and refines the entry with imbalance or an order block.", confidence: 90, difficulty: "Advanced", importance: 92, learningStage: "Synthesis", chapter: "06 - Synthesis", firstMention: "39:18", lastMention: "50:11", mentions: 9, studyMinutes: 15, aliases: ["Execution Model", "Setup"], prerequisites: ["Liquidity", "Break of Structure", "Order Block"], relatedIds: ["institutional-flow", "risk-management", "breaker"], favorite: true, pinned: true, x: 320, y: 110 }),
+    concept({ id: "risk-management", title: "Risk Management", kind: "warning", definition: "The rules that cap exposure when an otherwise valid narrative fails.", summary: "No knowledge model removes uncertainty. The lesson closes with invalidation, position sizing, and repeatable risk.", confidence: 99, difficulty: "Beginner", importance: 100, learningStage: "Mastery", chapter: "06 - Synthesis", firstMention: "42:40", lastMention: "51:36", mentions: 12, studyMinutes: 6, aliases: ["Risk", "Capital Protection"], prerequisites: ["Entry Model"], relatedIds: ["entry-model", "institutional-flow"], favorite: true, pinned: true, x: 115, y: 110 }),
+  ],
+  relationships: [
+    { id: "r1", source: "market-structure", target: "break-of-structure", type: "Introduces", confidence: 98 },
+    { id: "r2", source: "market-structure", target: "liquidity", type: "Explains", confidence: 96 },
+    { id: "r3", source: "break-of-structure", target: "displacement", type: "Requires", confidence: 94 },
+    { id: "r4", source: "liquidity", target: "fair-value-gap", type: "Causes", confidence: 89 },
+    { id: "r5", source: "displacement", target: "fair-value-gap", type: "Causes", confidence: 97 },
+    { id: "r6", source: "fair-value-gap", target: "order-block", type: "Related To", confidence: 93 },
+    { id: "r7", source: "order-block", target: "breaker", type: "Contrasts With", confidence: 91 },
+    { id: "r8", source: "order-block", target: "mitigation", type: "Supports", confidence: 92 },
+    { id: "r9", source: "fair-value-gap", target: "mitigation", type: "Explains", confidence: 90 },
+    { id: "r10", source: "market-structure", target: "institutional-flow", type: "Builds On", confidence: 88 },
+    { id: "r11", source: "institutional-flow", target: "entry-model", type: "Builds On", confidence: 92 },
+    { id: "r12", source: "breaker", target: "entry-model", type: "Uses", confidence: 86 },
+    { id: "r13", source: "entry-model", target: "risk-management", type: "Requires", confidence: 99 },
+    { id: "r14", source: "liquidity", target: "order-block", type: "Related To", confidence: 90 },
+  ],
+  timeline: [
+    { id: "t1", conceptId: "market-structure", timestamp: "00:42", chapter: "Foundations", confidence: 98, difficulty: "Beginner", stage: "Foundation" },
+    { id: "t2", conceptId: "break-of-structure", timestamp: "06:18", chapter: "Structural Signals", confidence: 97, difficulty: "Intermediate", stage: "Recognition" },
+    { id: "t3", conceptId: "liquidity", timestamp: "10:05", chapter: "Liquidity", confidence: 96, difficulty: "Intermediate", stage: "Recognition" },
+    { id: "t4", conceptId: "fair-value-gap", timestamp: "15:27", chapter: "Imbalances", confidence: 95, difficulty: "Intermediate", stage: "Interpretation" },
+    { id: "t5", conceptId: "order-block", timestamp: "21:12", chapter: "Execution Models", confidence: 92, difficulty: "Advanced", stage: "Application" },
+    { id: "t6", conceptId: "breaker", timestamp: "28:34", chapter: "Execution Models", confidence: 89, difficulty: "Advanced", stage: "Application" },
+    { id: "t7", conceptId: "entry-model", timestamp: "39:18", chapter: "Synthesis", confidence: 90, difficulty: "Advanced", stage: "Synthesis" },
+    { id: "t8", conceptId: "risk-management", timestamp: "42:40", chapter: "Synthesis", confidence: 99, difficulty: "Beginner", stage: "Mastery" },
+  ],
+};

@@ -1,0 +1,149 @@
+# =========================
+# ROOT .gitignore
+# =========================
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.Python
+venv/
+.venv/
+env/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+backend/.env
+frontend/.env
+backend/.env.*
+frontend/.env.*
+
+# SQLite databases
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite3
+
+# ChromaDB vector store
+chroma_db/
+**/chroma_db/
+
+# User data / cookies
+user_cookies/
+
+# Uploads / media / audio
+uploads/
+extraa_files/
+*.wav
+*.mp3
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+*.ogg
+*.flac
+*.aac
+*.wma
+
+# Temp files
+temp/
+tmp/
+temp_audio/
+*.tmp
+*.temp
+~$*
+
+# Logs
+logs/
+*.log
+log/
+
+# Node.js
+node_modules/
+dist/
+dist-ssr/
+build/
+.cache/
+.parcel-cache/
+
+# Lock files (regenerated on install)
+frontend/package-lock.json
+frontend/pnpm-lock.yaml
+frontend/pnpm-workspace.yaml
+yarn.lock
+pnpm-lock.yaml
+package-lock.json
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# OS
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+._*
+
+# Testing / Coverage
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+.nox/
+coverage/
+*.cover
+
+# Type checking
+.mypy_cache/
+.pytype/
+.pyre/
+
+# Misc
+*.egg-info/
+*.egg
+dist/
+build/
+eggs/
+sdist/
+wheels/
+*.manifest
+*.spec
+
+# MiMoCode
+.mimocode/
+
+# Agent folders (dot-prefixed agent dirs)
+.codex/
+.antigravity/
+.agents/
+.claude/
+.opencode/
+.cursor/
+.aider/
+.codeium/
+.copilot/
+.chatgpt/
+.cline/
+.continue/
+.void/
+.pearai/
+.supermaven/
+
+# Auto-generated READMEs
+frontend/README.md
+

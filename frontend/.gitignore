@@ -1,0 +1,75 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-ssr/
+build/
+.cache/
+.parcel-cache/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.local
+
+# Logs
+logs/
+*.log
+log/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Temp files
+temp/
+tmp/
+*.tmp
+*.temp
+~$*
+
+# Lock files (regenerated on install)
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# IDE / Editor
+.vscode/
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.user
+
+# OS
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+._*
+
+# Testing / Coverage
+coverage/
+.nyc_output/
+
+# TypeScript
+*.tsbuildinfo
+
+# Audio / Media
+*.wav
+*.mp3
+*.mp4
+*.ogg
+*.flac
+
+# Misc
+*.pem
+*.key
