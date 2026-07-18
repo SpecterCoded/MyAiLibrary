@@ -25,7 +25,8 @@ function convertSrtToVtt(srtText: string): string {
 
 function resolvePendingReindexState(value: unknown): boolean | string {
   if (typeof value !== "string") return false;
-  if (value === "outdated" || value.startsWith("outdated:")) return value;
+  // "false" = never embedded, "outdated*" = needs re-index — both mean Ask AI should be disabled
+  if (value === "false" || value === "outdated" || value.startsWith("outdated:")) return value;
   return false;
 }
 
