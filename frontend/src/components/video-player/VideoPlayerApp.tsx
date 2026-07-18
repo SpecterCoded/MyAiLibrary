@@ -393,6 +393,8 @@ export default function VideoPlayerApp() {
                         summary={summary}
                         resourceId={resourceId}
                         token={token}
+                        chapters={chapters}
+                        subchapters={subchapters}
                         onSummaryUpdated={(nextSummary) => setSummary(nextSummary)}
                         onPendingReindexChange={setPendingReindex}
                         pendingReindex={pendingReindex}

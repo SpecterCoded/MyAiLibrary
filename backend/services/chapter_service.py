@@ -1,5 +1,5 @@
 def build_chapter_transcript(segments, start_time, end_time):
-    """Extract transcript for a chapter, ensuring no trailing segment is lost"""
+    """Extract transcript for a chapter with timestamps, ensuring no trailing segment is lost"""
     texts = []
     # Find the overall end time of the file
     max_segment_time = max([s["end"] for s in segments]) if segments else end_time
@@ -11,7 +11,10 @@ def build_chapter_transcript(segments, start_time, end_time):
 
     for segment in segments:
         if start_time <= segment["start"] < effective_end:
-            texts.append(segment["text"])
+            ts = int(segment["start"])
+            mm = ts // 60
+            ss = ts % 60
+            texts.append(f"[{mm:02d}:{ss:02d}] {segment['text']}")
     return " ".join(texts)
 
 

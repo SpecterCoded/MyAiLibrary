@@ -730,8 +730,20 @@ CONTENT:
     return output
 
 
-def generate_summary(content, user_id: str | None = None, resource_id: str | None = None, feature: str = "summary_generation"):
+def generate_summary(content, user_id: str | None = None, resource_id: str | None = None, feature: str = "summary_generation", chapters=None):
     """Create a detailed study summary from the provided content."""
+
+    chapter_section = ""
+    if chapters:
+        chapter_lines = []
+        for ch in chapters:
+            start = ch.get("start_time", 0)
+            end = ch.get("end_time", 0)
+            title = ch.get("title", "Untitled")
+            start_mm = f"{int(start)//60}:{int(start)%60:02d}"
+            end_mm = f"{int(end)//60}:{int(end)%60:02d}"
+            chapter_lines.append(f"- {title} [{start_mm} - {end_mm}]")
+        chapter_section = "\n\nCHAPTER STRUCTURE (use these timestamps for section headings):\n" + "\n".join(chapter_lines) + "\n"
 
     prompt = f"""
 Create a detailed study summary from the following content.
@@ -740,8 +752,10 @@ CRITICAL RULE: The content below is a transcript that contains timestamps. You M
 - [00:00], [01:30], [10:45] etc.
 - Or timestamps at the start of lines like "00:00 - 01:30:" 
 - Or SRT format timestamps like "00:00:01,000 --> 00:00:05,000"
+{chapter_section}
+IMPORTANT: Use the chapter structure above to organize your summary. Each major section should correspond to a chapter, using the chapter's timestamp range as the section heading timestamp.
 
-Include these timestamps next to the relevant sections so users can jump to that part of the video/audio.
+Include timestamps next to the relevant sections so users can jump to that part of the video/audio.
 
 FORMATTING RULES (MUST FOLLOW):
 1. TIMESTAMPS: Include timestamps in format [MM:SS] or [HH:MM:SS] next to EVERY section heading

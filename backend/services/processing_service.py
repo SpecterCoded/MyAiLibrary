@@ -605,29 +605,7 @@ def process_resource(resource_id: str, job_id: str = None, job_type: str = "full
                     "DOCUMENT PIPELINE: text extraction only for %s. Summary generation is skipped; embedding happens only on manual embed/resume.",
                     resource.type,
                 )
-            if (
-                job_type != "transcript_only"
-                and resource.transcript
-                and not has_summary
-                and not document_embed_only
-            ):
-                try:
-                    resource.processing_status = "summarizing"
-                    db.commit()
-                    logger.info("GENERATING SUMMARY")
-                    log_user_activity(db, resource.user_id, 'ai_features', 'Generating summary', resource.title)
-                    resource.summary = generate_summary(
-                        resource.transcript,
-                        user_id=resource.user_id,
-                        resource_id=resource.id,
-                        feature="upload_summary_generation",
-                    )
-                    db.commit()
-                    logger.info("SUMMARY GENERATION COMPLETE")
-                except Exception as e:
-                    logger.error(f"Error generating initial summary: {str(e)}")
-                    _mark_failed(resource, db, "summarizing")
-                    raise e
+            # Summary generation moved to after chaptering (see below)
 
         except Exception as e:
             if "Job cancelled by user" in str(e):
@@ -873,6 +851,36 @@ def process_resource(resource_id: str, job_id: str = None, job_type: str = "full
 
         abort_reason = check_abort()
         if abort_reason: return abort_reason
+
+        # =====================================
+        # SUMMARY GENERATION (after chapters are available)
+        # =====================================
+
+        if (
+            job_type != "transcript_only"
+            and resource.transcript
+            and not has_summary
+            and not document_embed_only
+        ):
+            try:
+                resource.processing_status = "summarizing"
+                db.commit()
+                logger.info("GENERATING SUMMARY (with chapter structure)")
+                log_user_activity(db, resource.user_id, 'ai_features', 'Generating summary', resource.title)
+                chapters_for_summary = [{"title": c.title, "start_time": c.start_time, "end_time": c.end_time} for c in db.query(Chapter).filter(Chapter.resource_id == resource.id).order_by(Chapter.start_time).all()]
+                resource.summary = generate_summary(
+                    resource.transcript,
+                    user_id=resource.user_id,
+                    resource_id=resource.id,
+                    feature="upload_summary_generation",
+                    chapters=chapters_for_summary if chapters_for_summary else None,
+                )
+                db.commit()
+                logger.info("SUMMARY GENERATION COMPLETE")
+            except Exception as e:
+                logger.error(f"Error generating initial summary: {str(e)}")
+                _mark_failed(resource, db, "summarizing")
+                raise e
 
         # =====================================
         # EMBEDDING + SEARCH INDEXING

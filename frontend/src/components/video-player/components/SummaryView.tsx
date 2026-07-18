@@ -11,13 +11,15 @@ interface SummaryViewProps {
   summary: string | null;
   resourceId: string | null;
   token: string | null;
+  chapters?: any[];
+  subchapters?: any[];
   onSummaryUpdated?: (summary: string) => void;
   onPendingReindexChange?: (pending: boolean | string) => void;
   pendingReindex?: boolean | string;
   onSeek?: (time: number) => void;
 }
 
-export function SummaryView({ transcript: _transcript, summary: initialSummary, resourceId, token, onSummaryUpdated, onPendingReindexChange, pendingReindex, onSeek }: SummaryViewProps) {
+export function SummaryView({ transcript: _transcript, summary: initialSummary, resourceId, token, chapters, subchapters, onSummaryUpdated, onPendingReindexChange, pendingReindex, onSeek }: SummaryViewProps) {
   const [loading, setLoading] = useState<boolean>(true);
   // Initialize based on prop: if parent already has summary, skip network check entirely
   const [loadingMode, setLoadingMode] = useState<"saved" | "generate" | null>(
@@ -79,8 +81,10 @@ export function SummaryView({ transcript: _transcript, summary: initialSummary, 
         const postResponse = await fetch(`/resources/${resourceId}/generate-summary`, {
           method: "POST",
           headers: {
-            'Authorization': `Bearer ${token}`
-          }
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ chapters: chapters || [] })
         });
 
         if (!postResponse.ok) {
@@ -97,8 +101,10 @@ export function SummaryView({ transcript: _transcript, summary: initialSummary, 
         const postResponse = await fetch(`/resources/${resourceId}/regenerate-summary`, {
           method: "POST",
           headers: {
-            'Authorization': `Bearer ${token}`
-          }
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ chapters: chapters || [] })
         });
 
         if (!postResponse.ok) {

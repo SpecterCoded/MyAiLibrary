@@ -12,13 +12,15 @@ interface SummaryTabProps {
   resourceId: string | null;
   token: string | null;
   initialSummary: string | null;
+  chapters?: any[];
+  subchapters?: any[];
   onSummaryUpdated?: (summary: string) => void;
   onPendingReindexChange?: (pending: boolean | string) => void;
   pendingReindex?: boolean | string;
   onSeek?: (time: number) => void;
 }
 
-export default function SummaryTab({ transcript, resourceId, token, initialSummary, onSummaryUpdated, onPendingReindexChange, pendingReindex, onSeek }: SummaryTabProps) {
+export default function SummaryTab({ transcript, resourceId, token, initialSummary, chapters, subchapters, onSummaryUpdated, onPendingReindexChange, pendingReindex, onSeek }: SummaryTabProps) {
   const [loading, setLoading] = useState<boolean>(true);
   // Initialize based on prop: if parent already has summary, skip network check entirely
   const [loadingMode, setLoadingMode] = useState<"saved" | "generate" | null>(
@@ -80,8 +82,10 @@ export default function SummaryTab({ transcript, resourceId, token, initialSumma
         const postResponse = await fetch(`/resources/${resourceId}/generate-summary`, {
           method: "POST",
           headers: {
-            'Authorization': `Bearer ${token}`
-          }
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ chapters: chapters || [] })
         });
 
         if (!postResponse.ok) {
@@ -98,8 +102,10 @@ export default function SummaryTab({ transcript, resourceId, token, initialSumma
         const postResponse = await fetch(`/resources/${resourceId}/regenerate-summary`, {
           method: "POST",
           headers: {
-            'Authorization': `Bearer ${token}`
-          }
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ chapters: chapters || [] })
         });
 
         if (!postResponse.ok) {

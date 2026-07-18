@@ -7075,7 +7075,8 @@ def generate_resource_summary(
         )
 
     log_user_activity(db, current_user.id, 'ai_features', 'Generating summary', resource.title)
-    summary = generate_summary(resource.transcript, user_id=current_user.id, resource_id=resource.id, feature="summary_generation")
+    chapters_data = [{"title": c.title, "start_time": c.start_time, "end_time": c.end_time} for c in db.query(Chapter).filter(Chapter.resource_id == resource_id).order_by(Chapter.start_time).all()]
+    summary = generate_summary(resource.transcript, user_id=current_user.id, resource_id=resource.id, feature="summary_generation", chapters=chapters_data if chapters_data else None)
 
     resource.summary = summary
 
@@ -7119,8 +7120,9 @@ def regenerate_resource_summary(
     db.query(Summary).filter(Summary.resource_id == resource_id).delete()
 
     log_user_activity(db, current_user.id, 'ai_features', 'Regenerating summary', resource.title)
-    # Generate new summary
-    summary = generate_summary(resource.transcript, user_id=current_user.id, resource_id=resource.id, feature="summary_regeneration")
+    # Generate new summary with chapter structure
+    chapters_data = [{"title": c.title, "start_time": c.start_time, "end_time": c.end_time} for c in db.query(Chapter).filter(Chapter.resource_id == resource_id).order_by(Chapter.start_time).all()]
+    summary = generate_summary(resource.transcript, user_id=current_user.id, resource_id=resource.id, feature="summary_regeneration", chapters=chapters_data if chapters_data else None)
     resource.summary = summary
     resource.is_embedded = _add_outdated_flag(resource.is_embedded, "summary")
     db.commit()

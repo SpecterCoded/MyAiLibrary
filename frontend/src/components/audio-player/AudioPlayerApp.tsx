@@ -673,6 +673,8 @@ export default function AudioPlayerApp() {
                 resourceId={resourceId}
                 token={token}
                 initialSummary={summary}
+                chapters={chapters}
+                subchapters={subchapters}
                 onSummaryUpdated={(nextSummary) => setSummary(nextSummary)}
                 onPendingReindexChange={setPendingReindex}
                 pendingReindex={pendingReindex}
