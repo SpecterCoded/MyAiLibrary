@@ -7490,6 +7490,7 @@ class TranslateRequest(BaseModel):
 @app.post("/api/translate")
 def translate_text(
     req: TranslateRequest,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Directly translate text to a target language without chat sessions."""
