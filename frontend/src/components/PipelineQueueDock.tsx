@@ -539,7 +539,7 @@ export const PipelineQueueDock: React.FC = () => {
                               <motion.div
                                 className={`h-full rounded-full bg-gradient-to-r ${status.gradient}`}
                                 initial={{ width: 0 }}
-                                animate={{ width: (job.progress ?? status.percent) + "%" }}
+                                animate={{ width: ((job.progress || status.percent) + "%") }}
                                 transition={{ duration: 0.6, ease: "easeOut" }}
                               />
                             </div>

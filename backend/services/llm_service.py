@@ -925,6 +925,8 @@ SRT:
     )
     content = response.choices[0].message.content
     _record_completion(response, user_id=user_id, resource_id=resource_id, feature=feature, operation="content_generation", prompt_text=prompt, model=_model, completion_text=content)
+    if not content or not content.strip():
+        raise RuntimeError("LLM returned empty content for chapter generation")
     return parse_json_robustly(content)
 
 
@@ -1150,6 +1152,8 @@ Transcript:
 
     content = response.choices[0].message.content
     _record_completion(response, user_id=user_id, resource_id=resource_id, feature=feature, operation="content_generation", prompt_text=prompt, model=_model, completion_text=content)
+    if not content or not content.strip():
+        raise RuntimeError("LLM returned empty content for chapter generation")
     return parse_json_robustly(content)
 
 
@@ -1199,6 +1203,8 @@ Return format:
 
     content = response.choices[0].message.content
     _record_completion(response, user_id=user_id, resource_id=resource_id, feature=feature, operation="content_generation", prompt_text=prompt, model=_model, completion_text=content)
+    if not content or not content.strip():
+        raise RuntimeError("LLM returned empty content for chapter generation")
     return parse_json_robustly(content)
 
 
@@ -1265,6 +1271,8 @@ Content:
 
     content = response.choices[0].message.content
     _record_completion(response, user_id=user_id, resource_id=resource_id, feature=feature, operation="content_generation", prompt_text=prompt, model=_model, completion_text=content)
+    if not content or not content.strip():
+        raise RuntimeError("LLM returned empty content for chapter generation")
     return parse_json_robustly(content)
 
 
