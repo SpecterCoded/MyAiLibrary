@@ -570,14 +570,19 @@ export default function AudioPlayerApp() {
 
             {/* Ask AI tab */}
             <button
-              onClick={() => setActiveTab("ask")}
-              className={`px-6 py-2.5 rounded-full text-xs md:text-sm font-bold tracking-wide transition-all duration-200 select-none cursor-pointer flex items-center space-x-1.5 ${activeTab === "ask"
-                  ? "bg-[#1D1D1F] dark:bg-white text-white dark:text-[#1D1D1F] shadow-xs"
-                  : "text-[#585859] dark:text-slate-400 hover:bg-[#E2DFE1] dark:hover:bg-white/10 hover:text-[#1D1D1F] dark:hover:text-white"
+              onClick={() => !pendingReindex && setActiveTab("ask")}
+              title={pendingReindex ? 'Embed this resource first to use Ask AI' : undefined}
+              className={`px-6 py-2.5 rounded-full text-xs md:text-sm font-bold tracking-wide transition-all duration-200 select-none flex items-center space-x-1.5 ${pendingReindex
+                  ? "cursor-not-allowed opacity-40 text-slate-400 dark:text-slate-600"
+                  : `cursor-pointer ${activeTab === "ask"
+                      ? "bg-[#1D1D1F] dark:bg-white text-white dark:text-[#1D1D1F] shadow-xs"
+                      : "text-[#585859] dark:text-slate-400 hover:bg-[#E2DFE1] dark:hover:bg-white/10 hover:text-[#1D1D1F] dark:hover:text-white"
+                    }`
                 }`}
             >
               <MessageCircle className="w-4 h-4" />
               <span>Ask AI</span>
+              {pendingReindex && <span className="ml-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-amber-700">Embed</span>}
             </button>
 
             {/* Notes tab */}
@@ -721,22 +726,36 @@ export default function AudioPlayerApp() {
           )}
 
           <div className={activeTab === "ask" ? "flex-1 flex flex-col min-h-0" : "hidden"}>
-            <AskAiTab
-              isActive={activeTab === "ask"}
-              initialQuestion={pendingAiQuery}
-              onClearInitialQuestion={() => setPendingAiQuery('')}
-              transcript={transcript}
-              resourceId={resourceId}
-              token={token}
-              onSeek={(time: number) => {
-                const audio = audioRef.current;
-                if (audio) {
-                  audio.currentTime = time;
-                  audio.play().catch((e: any) => console.error("Seek play request rejected:", e));
-                  setIsRecording(true);
-                }
-              }}
-            />
+            {pendingReindex ? (
+              <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
+                <div className="w-16 h-16 rounded-2xl bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 flex items-center justify-center mb-5">
+                  <svg className="w-8 h-8 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+                  </svg>
+                </div>
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2">Resource Not Embedded</h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400 max-w-xs leading-relaxed">
+                  This resource needs to be embedded before you can chat with AI. Click the <strong>Re-index</strong> button to embed it.
+                </p>
+              </div>
+            ) : (
+              <AskAiTab
+                isActive={activeTab === "ask"}
+                initialQuestion={pendingAiQuery}
+                onClearInitialQuestion={() => setPendingAiQuery('')}
+                transcript={transcript}
+                resourceId={resourceId}
+                token={token}
+                onSeek={(time: number) => {
+                  const audio = audioRef.current;
+                  if (audio) {
+                    audio.currentTime = time;
+                    audio.play().catch((e: any) => console.error("Seek play request rejected:", e));
+                    setIsRecording(true);
+                  }
+                }}
+              />
+            )}
           </div>
 
           {activeTab === "notes" && (

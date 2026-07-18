@@ -69,6 +69,9 @@ export default function TranscriptTab({
   const [studyNotesText, setStudyNotesText] = React.useState<string>("");
   const [addingToNotesId, setAddingToNotesId] = React.useState<string | null>(null);
   const [translations, setTranslations] = React.useState<Record<string, { text: string; loading: boolean }>>({});
+  const [translateModalOpen, setTranslateModalOpen] = React.useState(false);
+  const [translateTarget, setTranslateTarget] = React.useState('');
+  const [translateMsg, setTranslateMsg] = React.useState<any>(null);
   const [isReindexing, setIsReindexing] = useState(false);
   const [toasts, setToasts] = React.useState<ToastMessage[]>([]);
   const [regenerationStatus, setRegenerationStatus] = React.useState<string>("");
@@ -485,9 +488,17 @@ export default function TranscriptTab({
     }
   };
 
-  const handleTranslate = async (msg: any) => {
-    const targetLanguage = window.prompt("Which language would you like to translate this line to?", "Spanish");
-    if (!targetLanguage || !targetLanguage.trim()) return;
+  const handleTranslate = (msg: any) => {
+    setTranslateMsg(msg);
+    setTranslateTarget('');
+    setTranslateModalOpen(true);
+  };
+
+  const executeTranslate = async () => {
+    if (!translateMsg || !translateTarget.trim()) return;
+    const lang = translateTarget.trim();
+    const msg = translateMsg;
+    setTranslateModalOpen(false);
 
     setTranslations(prev => ({
       ...prev,
@@ -501,10 +512,7 @@ export default function TranscriptTab({
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`
         },
-        body: JSON.stringify({
-          text: msg.text,
-          target_language: targetLanguage
-        })
+        body: JSON.stringify({ text: msg.text, target_language: lang })
       });
 
       if (res.ok) {
@@ -515,20 +523,12 @@ export default function TranscriptTab({
         }));
       } else {
         addToast("Failed to translate text.", "error");
-        setTranslations(prev => {
-          const next = { ...prev };
-          delete next[msg.id];
-          return next;
-        });
+        setTranslations(prev => { const next = { ...prev }; delete next[msg.id]; return next; });
       }
     } catch (err) {
       console.error("Translation error:", err);
       addToast("Failed to translate text.", "error");
-      setTranslations(prev => {
-        const next = { ...prev };
-        delete next[msg.id];
-        return next;
-      });
+      setTranslations(prev => { const next = { ...prev }; delete next[msg.id]; return next; });
     }
   };
 
@@ -761,7 +761,7 @@ export default function TranscriptTab({
         <ToastContainer toasts={toasts} onDismiss={removeToast} />
         <FailedStateContainer message={`Transcript generation ${processingStatus}.`} onRetry={triggerRegenerate} title="Transcription Failed" />
 
-        <ConfirmModal
+      <ConfirmModal
           isOpen={isConfirmOpen}
           onClose={() => setIsConfirmOpen(false)}
           onConfirm={handleRegenerate}
@@ -936,6 +936,51 @@ export default function TranscriptTab({
           <span>Stop</span>
         </button>
       </div>
+
+
+      {/* Translate Language Modal */}
+      {translateModalOpen && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setTranslateModalOpen(false)}>
+          <div
+            className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-white/10 w-full max-w-sm mx-4 p-6 animate-in fade-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 mb-5">
+              <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-500/10 flex items-center justify-center">
+                <Globe className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">Translate</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Choose target language</p>
+              </div>
+            </div>
+            <input
+              autoFocus
+              type="text"
+              value={translateTarget}
+              onChange={(e) => setTranslateTarget(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') executeTranslate(); if (e.key === 'Escape') setTranslateModalOpen(false); }}
+              placeholder="e.g. Spanish, French, Arabic..."
+              className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-slate-900/50 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 transition-all"
+            />
+            <div className="flex gap-2 mt-4">
+              <button
+                onClick={() => setTranslateModalOpen(false)}
+                className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={executeTranslate}
+                disabled={!translateTarget.trim()}
+                className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Translate
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <ConfirmModal
         isOpen={isConfirmOpen}

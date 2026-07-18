@@ -363,18 +363,27 @@ export default function VideoPlayerApp() {
 
             {/* Tabs Setup */}
             <div className="px-8 flex items-center flex-wrap gap-2 mb-5">
-              {tabs.map((tab) => (
+              {tabs.map((tab) => {
+                const isAskAI = tab === 'Ask AI';
+                const isDisabled = isAskAI && !!pendingReindex;
+                return (
                 <button
                   key={tab}
-                  onClick={() => setActiveTab(tab)}
-                  className={`px-4.5 py-2.5 rounded-full text-[14px] font-semibold transition-all cursor-pointer ${activeTab === tab
-                    ? 'bg-[#1a1a1a] dark:bg-white text-white dark:text-slate-900 shadow-sm scale-110 font-bold'
-                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
+                  onClick={() => !isDisabled && setActiveTab(tab)}
+                  title={isDisabled ? 'Embed this resource first to use Ask AI' : undefined}
+                  className={`px-4.5 py-2.5 rounded-full text-[14px] font-semibold transition-all ${isDisabled
+                    ? 'cursor-not-allowed opacity-40 text-slate-400 dark:text-slate-600'
+                    : `cursor-pointer ${activeTab === tab
+                      ? 'bg-[#1a1a1a] dark:bg-white text-white dark:text-slate-900 shadow-sm scale-110 font-bold'
+                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800'
+                      }`
                     }`}
                 >
                   {tab}
+                  {isDisabled && <span className="ml-1.5 text-[10px] font-bold text-amber-500">Embed</span>}
                 </button>
-              ))}
+                );
+              })}
             </div>
 
             {/* Content Switcher */}
@@ -434,15 +443,29 @@ export default function VideoPlayerApp() {
                   {activeTab === 'Mind Map' && <MindMapView transcript={processedTranscript} resourceId={resourceId} token={token} initialMindmap={initialMindmap} onMindmapGenerated={(data) => setInitialMindmap(data)} />}
                   {activeTab === 'Notes' && <NotesView resourceId={resourceId} token={token} onSeek={setSeekTime} initialNotes={initialNotes} onNotesGenerated={(notes) => setInitialNotes(notes)} />}
                   <div className={activeTab === 'Ask AI' ? 'flex-1 flex flex-col overflow-hidden' : 'hidden'}>
-                    <AskAiView
-                      isActive={activeTab === 'Ask AI'}
-                      initialQuestion={pendingAiQuery}
-                      onClearInitialQuestion={() => setPendingAiQuery('')}
-                      transcript={processedTranscript}
-                      resourceId={resourceId}
-                      token={token}
-                      onSeek={setSeekTime}
-                    />
+                    {pendingReindex ? (
+                      <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
+                        <div className="w-16 h-16 rounded-2xl bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 flex items-center justify-center mb-5">
+                          <svg className="w-8 h-8 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+                          </svg>
+                        </div>
+                        <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2">Resource Not Embedded</h3>
+                        <p className="text-sm text-slate-500 dark:text-slate-400 max-w-xs leading-relaxed">
+                          This resource needs to be embedded before you can chat with AI. Click the <strong>Re-index</strong> button in the header to embed it.
+                        </p>
+                      </div>
+                    ) : (
+                      <AskAiView
+                        isActive={activeTab === 'Ask AI'}
+                        initialQuestion={pendingAiQuery}
+                        onClearInitialQuestion={() => setPendingAiQuery('')}
+                        transcript={processedTranscript}
+                        resourceId={resourceId}
+                        token={token}
+                        onSeek={setSeekTime}
+                      />
+                    )}
                   </div>
                 </>
               )}
