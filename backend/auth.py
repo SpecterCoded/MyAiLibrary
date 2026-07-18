@@ -117,30 +117,30 @@ def get_db():
 
 
 def validate_token(token: str, expected_type: str = "access") -> str:
+    # Try local JWT first (primary auth method)
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id = payload.get("sub")
+        token_type = payload.get("token_type")
+
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        if token_type and token_type != expected_type:
+            raise HTTPException(status_code=401, detail=f"Invalid token type")
+        
+        return user_id
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except JWTError:
+        pass  # Not a local JWT, try Firebase below
+
+    # Fallback to Firebase verification
     project_id = os.environ.get("VITE_FIREBASE_PROJECT_ID", "bannana-487713")
     try:
-        # Try Firebase verification natively first
         decoded_token = verify_firebase_token(token, project_id)
         return decoded_token.get("sub")
-    except Exception as e:
-        print(f"[FIREBASE AUTH ERROR] Exception occurred during verification: {e}")
-        # Fallback to local JWT to not break existing sessions immediately
-        try:
-            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-            user_id = payload.get("sub")
-            token_type = payload.get("token_type")
-
-            if not user_id:
-                raise HTTPException(status_code=401, detail="Invalid token")
-            if token_type and token_type != expected_type:
-                raise HTTPException(status_code=401, detail=f"Invalid token type")
-            
-            return user_id
-
-        except jwt.ExpiredSignatureError:
-            raise HTTPException(status_code=401, detail="Token expired")
-        except JWTError:
-            raise HTTPException(status_code=401, detail="Invalid token")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
 
 
 def get_current_user_id(
@@ -156,61 +156,6 @@ def get_current_user(
     
     user = db.query(User).filter(User.id == user_id).first()
     
-    if user:
-        try:
-            project_id = os.environ.get("VITE_FIREBASE_PROJECT_ID", "bannana-487713")
-            decoded_token = verify_firebase_token(token, project_id)
-            display_name = decoded_token.get("name")
-            if display_name and display_name.strip() and user.username != display_name.strip():
-                existing = db.query(User).filter(User.username == display_name.strip()).first()
-                if not existing:
-                    user.username = display_name.strip()
-                    db.commit()
-                    db.refresh(user)
-        except Exception as e:
-            print(f"[FIREBASE SELF-HEAL ERROR] {e}")
-
-    if not user:
-        try:
-            project_id = os.environ.get("VITE_FIREBASE_PROJECT_ID", "bannana-487713")
-            decoded_token = verify_firebase_token(token, project_id)
-            email = decoded_token.get("email")
-            display_name = decoded_token.get("name")
-            
-            # Check if user exists by email (if they registered previously with local auth)
-            if email:
-                existing_user = db.query(User).filter(User.email == email).first()
-                if existing_user:
-                    # Update their ID to the Firebase ID for future lookups
-                    existing_user.id = user_id
-                    db.commit()
-                    db.refresh(existing_user)
-                    return existing_user
-            
-            # Otherwise, create a new user dynamically
-            username = display_name or (email.split('@')[0] if email else f"user_{user_id[:8]}")
-            username = username.strip()
-            # Ensure unique username
-            base_username = username
-            counter = 1
-            while db.query(User).filter(User.username == username).first():
-                username = f"{base_username}{counter}"
-                counter += 1
-                
-            new_user = User(
-                id=user_id,
-                username=username,
-                email=email or f"{user_id}@firebase.local",
-                password_hash="firebase_managed"
-            )
-            db.add(new_user)
-            db.commit()
-            db.refresh(new_user)
-            user = new_user
-        except Exception as e:
-            print(f"[FIREBASE GET USER ERROR] Failed to fetch/create user: {e}")
-            raise HTTPException(status_code=401, detail="Not authenticated")
-            
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     return user
