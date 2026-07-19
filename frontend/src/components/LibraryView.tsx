@@ -29,6 +29,7 @@ export default function LibraryView({
 }: LibraryViewProps) {
   const [playlists, setPlaylists] = useState<BackendPlaylist[]>([]);
   const [loading, setLoading] = useState(true);
+  const [minimumLoading, setMinimumLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'my-library' | 'saved'>('my-library');
   const [filterQuery, setFilterQuery] = useState('');
   const [sortOption, setSortOption] = useState('newest');
@@ -63,12 +64,16 @@ export default function LibraryView({
   };
 
   useEffect(() => {
+    const minimumLoadingTimer = window.setTimeout(() => setMinimumLoading(false), 2200);
     fetchPlaylists();
     window.addEventListener('refresh-playlists', fetchPlaylists);
     return () => {
+      window.clearTimeout(minimumLoadingTimer);
       window.removeEventListener('refresh-playlists', fetchPlaylists);
     };
   }, []);
+
+  const showLoading = loading || minimumLoading;
 
   const getPlaylistCardProps = (name: string, description: string | undefined | null, iconType: string | undefined | null, itemCount: number | undefined, idx: number) => {
     const categories = ["Design System", "Product Dev", "Marketing", "Feedback Sync", "UX Research"];
@@ -235,12 +240,13 @@ export default function LibraryView({
       {/* Dynamic Playlist Grid Display Content */}
       <section className="flex-1">
         <AnimatePresence mode="wait">
-          {loading ? (
+          {showLoading ? (
             <motion.div
               key="loading"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.35, ease: 'easeOut' }}
               className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
             >
               <PlaylistCardSkeleton />
@@ -248,7 +254,8 @@ export default function LibraryView({
               <PlaylistCardSkeleton />
             </motion.div>
           ) : filteredPlaylists.length === 0 ? (
-            <EmptyState 
+            <EmptyState
+              key="empty"
               searchQuery={filterQuery} 
               onClearSearch={filterQuery ? () => setFilterQuery('') : undefined} 
               onNewDocument={activeTab === 'saved' ? () => setActiveTab('my-library') : onCreatePlaylistClick} 
@@ -270,11 +277,11 @@ export default function LibraryView({
             />
           ) : (
             <motion.div
-              key={activeTab}
-              initial={{ opacity: 0, y: 12 }}
+              key={`playlists-${activeTab}`}
+              initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -12 }}
-              transition={{ duration: 0.22, ease: "easeOut" }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
               className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
             >
               {filteredPlaylists.map((playlist, index) => {

@@ -5,6 +5,7 @@ import { type BackendUser } from './DashboardHeader';
 import { UploadCloud, CheckCircle2, Monitor, Moon, Sun, Plus, Trash2, FolderOpen, Loader2, Info } from 'lucide-react';
 import { EmailAuthProvider, reauthenticateWithCredential, updatePassword, signOut } from 'firebase/auth';
 import { auth } from '../firebase';
+import { selectFile, selectFolder } from '../utils/desktop';
 
 interface SettingsViewProps {
   user: BackendUser | null;
@@ -397,20 +398,15 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
     }
   };
 
-  // Folder browser triggers local selection dialog via tkinter in backend
+  // Electron supplies a native dialog; browser development falls back to FastAPI/Tkinter.
   const handleBrowseFolder = async () => {
     const token = localStorage.getItem('access_token');
     if (!token) return;
 
     try {
-      const response = await fetch('/auth/select-folder', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (response.ok) {
-        const data = await response.json();
-        if (data.path) {
-          setNewLibPath(data.path);
-        }
+      const data = await selectFolder();
+      if (data.path) {
+        setNewLibPath(data.path);
       }
     } catch (err) {
       console.error('Failed to launch folder picker:', err);
@@ -948,17 +944,7 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
 
   const handleSelectFile = async (setter: React.Dispatch<React.SetStateAction<string>>) => {
     try {
-      const response = await fetch('/auth/select-file');
-      if (!response.ok) {
-        throw new Error(`Server returned ${response.status}`);
-      }
-      
-      const contentType = response.headers.get('content-type');
-      if (!contentType || !contentType.includes('application/json')) {
-        throw new Error('Server is offline or returned an invalid response.');
-      }
-
-      const data = await response.json();
+      const data = await selectFile();
       if (data.path) {
         setter(data.path);
       } else if (data.error) {
@@ -973,14 +959,7 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
 
   const handleSelectFolderForSetting = async (setter: React.Dispatch<React.SetStateAction<string>>) => {
     try {
-      const token = localStorage.getItem('access_token');
-      const response = await fetch('/auth/select-folder', {
-        headers: token ? { 'Authorization': `Bearer ${token}` } : undefined,
-      });
-      if (!response.ok) {
-        throw new Error(`Server returned ${response.status}`);
-      }
-      const data = await response.json();
+      const data = await selectFolder();
       if (data.path) {
         setter(data.path);
       }
@@ -992,12 +971,10 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
 
   const handleDownloadModel = async (modelFileName: string, displayName?: string) => {
     try {
-      const folderRes = await fetch('/auth/select-folder');
-      if (!folderRes.ok) throw new Error('Failed to open folder dialog');
-      const folderData = await folderRes.json();
-      if (!folderData.path) return;
+      const folderData = window.desktop ? { path: '' } : await selectFolder();
+      if (!window.desktop && !folderData.path) return;
 
-      const destPath = folderData.path;
+      const destPath = folderData.path || '';
       const trackName = displayName || modelFileName;
       setDownloadingModel(trackName);
       setDownloadProgress(0);
@@ -1059,16 +1036,14 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
 
   const handleDownloadWtpModel = async (modelName = 'sat-3l') => {
     try {
-      const folderRes = await fetch('/auth/select-folder');
-      if (!folderRes.ok) throw new Error('Failed to open folder dialog');
-      const folderData = await folderRes.json();
-      if (!folderData.path) return;
+      const folderData = window.desktop ? { path: '' } : await selectFolder();
+      if (!window.desktop && !folderData.path) return;
 
       const trackName = `wtp-${modelName}`;
       setDownloadingModel(trackName);
       setDownloadProgress(0);
 
-      const url = `/api/settings/download-wtp-model?model=${encodeURIComponent(modelName)}&dest_path=${encodeURIComponent(folderData.path)}`;
+      const url = `/api/settings/download-wtp-model?model=${encodeURIComponent(modelName)}&dest_path=${encodeURIComponent(folderData.path || '')}`;
       let retryCount = 0;
       const maxRetries = 5;
       let lastProgress = 0;

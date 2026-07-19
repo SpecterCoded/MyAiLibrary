@@ -138,7 +138,7 @@ export default function DashboardHeader({ onSearchClick, onNotificationClick, on
   };
 
   return (
-    <header className="flex items-center justify-between mb-8 select-none">
+    <header className="dashboard-header flex items-center justify-between mb-8 select-none shrink-0">
       {/* Time and Date Widget */}
       <div className="flex items-center gap-3 bg-white/40 dark:bg-slate-900/40 border border-white/60 dark:border-white/10 px-4 py-2 rounded-2xl text-[13px] font-semibold text-slate-700 dark:text-slate-200 shadow-sm transition-all duration-300 backdrop-blur-md">
         <svg className="w-4 h-4 text-indigo-500 animate-[pulse_2s_infinite]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">

@@ -12,6 +12,10 @@ interface CarouselPreviewProps {
   items: ExplorerItem[];
   initialItemId: string;
   folderPath?: string[];
+  playlistId?: string | null;
+  playlistName?: string;
+  folderId?: string | null;
+  folderName?: string;
 }
 
 export const CarouselPreview: React.FC<CarouselPreviewProps> = ({
@@ -20,6 +24,10 @@ export const CarouselPreview: React.FC<CarouselPreviewProps> = ({
   items,
   initialItemId,
   folderPath,
+  playlistId,
+  playlistName,
+  folderId,
+  folderName,
 }) => {
   const previewableItems = items.filter(
     (item) => item.type !== "folder"
@@ -383,11 +391,20 @@ export const CarouselPreview: React.FC<CarouselPreviewProps> = ({
             (currentItem.type === "audio" || currentItem.type === "video") ? (
               <button
                 onClick={() => {
-                  const token = localStorage.getItem('access_token');
                   const fileUrl = `${window.location.origin}/resources/${currentItem.id}/file`;
                   const paramKey = currentItem.type === "audio" ? "audioUrl" : "videoUrl";
-                  const playerUrl = `${window.location.origin}/?${paramKey}=${encodeURIComponent(fileUrl)}&resourceId=${currentItem.id}`;
-                  window.open(playerUrl, '_blank');
+                  const params = new URLSearchParams();
+                  params.set("view", "folder");
+                  params.set(paramKey, fileUrl);
+                  params.set("resourceId", currentItem.id);
+                  if (playlistId) params.set("playlistId", playlistId);
+                  if (playlistName) params.set("playlistName", playlistName);
+                  if (folderId) params.set("folderId", folderId);
+                  if (folderName) params.set("folderName", folderName);
+
+                  // Electron rejects unexpected local popup windows. Load the
+                  // dedicated player route in this trusted application window.
+                  window.location.assign(`${window.location.origin}/?${params.toString()}`);
                 }}
                 className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold py-1.5 px-3.5 rounded-lg border border-indigo-500/20 transition-all cursor-pointer pointer-events-auto"
               >

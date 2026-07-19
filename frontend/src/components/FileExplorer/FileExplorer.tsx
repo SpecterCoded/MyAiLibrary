@@ -1770,6 +1770,10 @@ export const FileExplorerContainer: React.FC<FileExplorerProps> = ({
         items={visibleItems}
         initialItemId={previewItemId || ""}
         folderPath={folderHistory.map(h => h.name)}
+        playlistId={playlistId}
+        playlistName={playlistName}
+        folderId={currentFolderId}
+        folderName={folderHistory[folderHistory.length - 1]?.name}
       />
       {dragBox && (
         <div

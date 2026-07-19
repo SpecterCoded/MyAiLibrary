@@ -186,7 +186,7 @@ export default function App() {
     if (!isAuthenticated) return;
     if (!token) { handleAuthExpired(); return; }
     try {
-      const response = await fetch('http://127.0.0.1:8000/notifications?tab=Inbox', {
+      const response = await fetch('/notifications?tab=Inbox', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (response.status === 401) { handleAuthExpired(); return; }
@@ -219,7 +219,7 @@ export default function App() {
     }
     if (!token) { handleAuthExpired(); return; }
     try {
-      const response = await fetch('http://127.0.0.1:8000/tasks', {
+      const response = await fetch('/tasks', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (response.status === 401) { handleAuthExpired(); return; }
@@ -615,7 +615,9 @@ export default function App() {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.95 }}
                   transition={{ duration: 0.3, ease: "easeOut" }}
-                  className={`flex-1 flex flex-col relative z-0 p-0 overflow-y-auto overflow-x-hidden no-scrollbar min-w-0 ${
+                  className={`app-main-panel flex-1 flex flex-col relative z-0 p-0 overflow-x-hidden no-scrollbar min-w-0 min-h-0 ${
+                    currentView === 'home' || currentView === 'rag-explorer' ? 'overflow-hidden' : 'overflow-y-auto'
+                  } ${
                     currentView === 'concepts'
                       ? 'h-[calc(100%-48px)] my-6 mx-6 rounded-[32px] bg-[#FCFBF9] dark:bg-[#25272b] border border-slate-200/60 dark:border-white/10 shadow-none backdrop-blur-none'
                       : 'h-[calc(100%-48px)] my-6 mx-6 rounded-[32px] bg-white/40 dark:bg-slate-900/30 backdrop-blur-2xl border border-white/60 dark:border-slate-800/40 shadow-sm dark:shadow-[0_24px_50px_-12px_rgba(0,0,0,0.4)]'
@@ -629,7 +631,7 @@ export default function App() {
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: -12 }}
                         transition={{ duration: 0.22, ease: "easeOut" }}
-                        className="flex flex-col flex-1 p-8 overflow-y-auto no-scrollbar h-full w-full relative"
+                        className="home-view flex flex-col flex-1 p-8 overflow-y-auto no-scrollbar h-full w-full relative min-h-0"
                       >
                         <GridBackground />
                         <DashboardHeader
@@ -641,21 +643,23 @@ export default function App() {
                           setTheme={setTheme}
                           unreadCount={unreadNotificationsCount}
                         />
-                        {/* Dynamic Context Greeting & Search Pills */}
-                        <SearchAndActions
-                          onCreatePlaylistClick={toggleCreatePlaylistModal}
-                          onImportClick={toggleImportModal}
-                          user={currentUser}
-                        />
+                        <div className="home-layout flex-1 min-h-0">
+                          {/* Dynamic Context Greeting & Search Pills */}
+                          <SearchAndActions
+                            onCreatePlaylistClick={toggleCreatePlaylistModal}
+                            onImportClick={toggleImportModal}
+                            user={currentUser}
+                          />
 
-                        {/* Content Dynamic Matrix Grid Layout */}
-                        <PlaylistGrid
-                          isLoading={isLoading}
-                          onNavigateToFolder={handleNavigateToFolder}
-                          onCreatePlaylistClick={toggleCreatePlaylistModal}
-                          onSeeAllClick={() => setCurrentView('library')}
-                          limit={3}
-                        />
+                          {/* Content Dynamic Matrix Grid Layout */}
+                          <PlaylistGrid
+                            isLoading={isLoading}
+                            onNavigateToFolder={handleNavigateToFolder}
+                            onCreatePlaylistClick={toggleCreatePlaylistModal}
+                            onSeeAllClick={() => setCurrentView('library')}
+                            limit={3}
+                          />
+                        </div>
                       </motion.div>
                     ) : currentView === 'downloads' ? (
                       <motion.div
@@ -794,7 +798,12 @@ export default function App() {
                   playlistName={selectedPlaylistName}
                   onBack={async () => {
                     // If they came from library or home, go back appropriately
-                    setCurrentView(selectedPlaylistId ? 'library' : 'home');
+                    const destination = selectedPlaylistId ? 'library' : 'home';
+                    const cleanUrl = new URL(window.location.href);
+                    cleanUrl.search = '';
+                    cleanUrl.searchParams.set('view', destination);
+                    window.history.replaceState({}, '', `${cleanUrl.pathname}${cleanUrl.search}`);
+                    setCurrentView(destination);
                   }}
                   onNavigatePlaylist={(id, name) => {
                     setSelectedPlaylistId(id);

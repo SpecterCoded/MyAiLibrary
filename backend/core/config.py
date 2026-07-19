@@ -1,6 +1,7 @@
 import os
+from core.paths import UPLOADS_DIR
 
-UPLOADS_ROOT = os.getenv("UPLOADS_ROOT", "uploads")
+UPLOADS_ROOT = os.getenv("UPLOADS_ROOT", str(UPLOADS_DIR))
 ENABLE_PARENT_CHILD_RETRIEVAL = os.getenv(
     "ENABLE_PARENT_CHILD_RETRIEVAL",
     os.getenv("enable_parent_child_retrieval", "0"),

@@ -161,7 +161,7 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({ isOpen, onClo
 
   return (
     <>
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="create-playlist-modal-shell fixed inset-0 z-50 flex items-center justify-center p-4">
       {/* Backdrop */}
       <motion.div
         className="absolute inset-0"
@@ -174,7 +174,7 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({ isOpen, onClo
 
       {/* Modal Container */}
       <motion.div
-        className="relative w-full max-w-2xl bg-white/80 backdrop-blur-2xl border border-white/60 shadow-[0_24px_50px_-12px_rgba(142,160,185,0.4)] rounded-[32px] p-8"
+        className="create-playlist-modal relative w-full max-w-2xl border border-slate-200/80 dark:border-white/10 shadow-[0_24px_50px_-12px_rgba(142,160,185,0.4)] dark:shadow-[0_24px_60px_-12px_rgba(0,0,0,0.6)] rounded-[32px] p-8"
         initial={{ opacity: 0, scale: 0.94, y: 26, filter: 'blur(8px)' }}
         animate={animate ? { opacity: 1, scale: 1, y: 0, filter: 'blur(0px)' } : { opacity: 0, scale: 0.96, y: 18, filter: 'blur(6px)' }}
         exit={{ opacity: 0, scale: 0.96, y: 18, filter: 'blur(6px)' }}
@@ -187,7 +187,7 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({ isOpen, onClo
       >
         
         {/* Header */}
-        <div className="flex justify-between items-start mb-6">
+        <div className="create-playlist-modal__header flex justify-between items-start mb-6 shrink-0">
           <div>
             <h2 className="text-2xl font-bold text-slate-800">Create New Playlist</h2>
             <p className="text-slate-500 text-sm mt-1">Organize your content into a playlist to keep everything in one place.</p>
@@ -197,8 +197,9 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({ isOpen, onClo
           </button>
         </div>
 
+        <div className="create-playlist-modal__body min-h-0">
         {/* Form Fields */}
-        <div className="space-y-5">
+        <div className="create-playlist-form space-y-5">
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-1.5">Playlist Name <span className="text-rose-500">*</span></label>
             <input 
@@ -237,7 +238,7 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({ isOpen, onClo
             </div>
             <p className="text-[11px] text-slate-400 mb-3">Resources and Notes folders will be created by default.</p>
             
-            <div className="bg-white/40 border border-slate-200/60 rounded-xl p-3 max-h-[160px] overflow-y-auto">
+            <div className="create-playlist-folders bg-white/40 border border-slate-200/60 rounded-xl p-3 max-h-[160px] overflow-y-auto">
               <div className="flex items-center justify-between">
                 <div 
                   className="flex items-center gap-2 text-slate-700 font-bold truncate cursor-pointer hover:text-indigo-600 transition-colors"
@@ -307,9 +308,9 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({ isOpen, onClo
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-1">Allowed File Types</label>
             <p className="text-[11px] text-slate-400 mb-3">Select the file formats you want to allow in this playlist.</p>
-            <div className="grid grid-cols-4 gap-3">
+            <div className="create-playlist-file-types grid grid-cols-4 gap-3">
               {fileTypes.map((type) => (
-                <div key={type.name} className="bg-white/50 border border-slate-200/60 rounded-xl p-4 text-center hover:border-indigo-300 hover:bg-white/80 hover:scale-105 transition-all cursor-pointer group">
+                <div key={type.name} className="create-playlist-file-type bg-white/50 border border-slate-200/60 rounded-xl p-4 text-center hover:border-indigo-300 hover:bg-white/80 hover:shadow-sm transition-[border-color,background-color,box-shadow] duration-200 cursor-pointer group">
                   <div className="text-indigo-500 group-hover:text-indigo-600 mb-2 flex justify-center transition-colors">{type.icon}</div>
                   <div className="text-[11px] font-bold text-slate-600 group-hover:text-slate-800 transition-colors">{type.name}</div>
                 </div>
@@ -323,9 +324,10 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({ isOpen, onClo
             {error}
           </div>
         )}
+        </div>
 
         {/* Footer Actions */}
-        <div className="flex gap-3 mt-8">
+        <div className="create-playlist-modal__footer flex gap-3 mt-8 shrink-0">
           <button 
             type="button"
             disabled={loading}

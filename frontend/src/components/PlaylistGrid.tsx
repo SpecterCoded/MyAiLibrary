@@ -3,6 +3,7 @@ import PlaylistCard, { type PlaylistIconType } from './PlaylistCard';
 import { PlaylistCardSkeleton } from './loadingskeleton';
 import EmptyState from './EmptyState';
 import { ArrowRight } from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
 
 interface PlaylistGridProps {
   isLoading?: boolean;
@@ -34,6 +35,7 @@ const PlaylistGrid: React.FC<PlaylistGridProps> = ({
 }) => {
   const [playlists, setPlaylists] = useState<BackendPlaylist[]>([]);
   const [loading, setLoading] = useState(true);
+  const [minimumLoading, setMinimumLoading] = useState(true);
 
   const fetchPlaylists = async () => {
     try {
@@ -57,41 +59,17 @@ const PlaylistGrid: React.FC<PlaylistGridProps> = ({
   };
 
   useEffect(() => {
+    const minimumLoadingTimer = window.setTimeout(() => setMinimumLoading(false), 2200);
     fetchPlaylists();
     
     window.addEventListener('refresh-playlists', fetchPlaylists);
     return () => {
+      window.clearTimeout(minimumLoadingTimer);
       window.removeEventListener('refresh-playlists', fetchPlaylists);
     };
   }, []);
 
-  const showLoading = initialLoading || loading;
-
-  if (showLoading) {
-    return (
-      <section className="flex flex-col gap-5">
-        <div className="flex items-center justify-between select-none px-1">
-          <h2 className="text-xl font-bold text-slate-800 tracking-tight">Latest Playlists</h2>
-        </div>
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <PlaylistCardSkeleton />
-          <PlaylistCardSkeleton />
-          <PlaylistCardSkeleton />
-        </div>
-      </section>
-    );
-  }
-
-  if (playlists.length === 0) {
-    return (
-      <section className="flex flex-col gap-5">
-        <div className="flex items-center justify-between select-none px-1">
-          <h2 className="text-xl font-bold text-slate-800 tracking-tight">Latest Playlists</h2>
-        </div>
-        <EmptyState onNewDocument={onCreatePlaylistClick} />
-      </section>
-    );
-  }
+  const showLoading = initialLoading || loading || minimumLoading;
 
   const getPlaylistCardProps = (name: string, description: string | undefined | null, iconType: string | undefined | null, itemCount: number | undefined, idx: number) => {
     const categories = ["Design System", "Product Dev", "Marketing", "Feedback Sync", "UX Research"];
@@ -118,12 +96,13 @@ const PlaylistGrid: React.FC<PlaylistGridProps> = ({
   };
 
   const displayedPlaylists = limit ? playlists.slice(0, limit) : playlists;
+  const isEmpty = !showLoading && playlists.length === 0;
 
   return (
-    <section className="flex flex-col gap-5">
+    <section className={`home-playlist-section flex flex-col gap-5 ${isEmpty ? 'home-playlist-section--empty' : ''}`}>
       <div className="flex items-center justify-between select-none px-1">
         <h2 className="text-xl font-bold text-slate-800 tracking-tight">Latest Playlists</h2>
-        {limit && playlists.length > limit && (
+        {!showLoading && limit && playlists.length > limit && (
           <button
             onClick={onSeeAllClick}
             className="flex items-center gap-1.5 text-[13px] font-bold text-slate-400 hover:text-indigo-600 transition-colors group cursor-pointer"
@@ -134,23 +113,49 @@ const PlaylistGrid: React.FC<PlaylistGridProps> = ({
         )}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {displayedPlaylists.map((playlist, index) => {
-          const cardProps = getPlaylistCardProps(playlist.name, playlist.description, playlist.icon_type, playlist.item_count, index);
-          return (
-            <PlaylistCard
-              key={playlist.id}
-              id={playlist.id}
-              {...cardProps}
-              isFavorite={playlist.is_favorite === 1}
-              onNavigate={() => onNavigateToFolder(playlist.id, playlist.name)}
-              onShare={onShare}
-              createdAt={playlist.created_at}
-              updatedAt={playlist.updated_at}
-            />
-          );
-        })}
-      </div>
+      <AnimatePresence mode="wait">
+        {showLoading ? (
+          <motion.div
+            key="loading"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.35, ease: 'easeOut' }}
+            className="home-playlist-grid grid grid-cols-1 lg:grid-cols-3 gap-6"
+          >
+            <PlaylistCardSkeleton />
+            <PlaylistCardSkeleton />
+            <PlaylistCardSkeleton />
+          </motion.div>
+        ) : isEmpty ? (
+          <EmptyState key="empty" onNewDocument={onCreatePlaylistClick} />
+        ) : (
+          <motion.div
+            key="playlists"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+            className="home-playlist-grid grid grid-cols-1 lg:grid-cols-3 gap-6"
+          >
+            {displayedPlaylists.map((playlist, index) => {
+              const cardProps = getPlaylistCardProps(playlist.name, playlist.description, playlist.icon_type, playlist.item_count, index);
+              return (
+                <PlaylistCard
+                  key={playlist.id}
+                  id={playlist.id}
+                  {...cardProps}
+                  isFavorite={playlist.is_favorite === 1}
+                  onNavigate={() => onNavigateToFolder(playlist.id, playlist.name)}
+                  onShare={onShare}
+                  createdAt={playlist.created_at}
+                  updatedAt={playlist.updated_at}
+                />
+              );
+            })}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </section>
   );
 };

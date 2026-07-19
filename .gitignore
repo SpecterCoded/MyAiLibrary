@@ -68,6 +68,7 @@ log/
 
 # Node.js
 node_modules/
+.pnpm-store/
 dist/
 dist-ssr/
 build/
@@ -124,6 +125,21 @@ wheels/
 *.manifest
 *.spec
 
+# Reproducible desktop packaging inputs (outputs remain ignored)
+!frontend/package-lock.json
+!desktop/package-lock.json
+!backend/desktop_backend.spec
+!desktop/build/
+!desktop/build/**
+desktop/release/
+desktop/vendor/electron-dist/
+desktop/vendor/electron-v*-win32-x64.zip
+desktop/vendor/ffmpeg/ffmpeg.exe
+desktop/vendor/ffmpeg/ffprobe.exe
+desktop/vendor/ffmpeg/*.zip
+desktop/vendor/ffmpeg/expanded/
+desktop/.pyinstaller/
+
 # MiMoCode
 .mimocode/
 
@@ -146,4 +162,3 @@ wheels/
 
 # Auto-generated READMEs
 frontend/README.md
-

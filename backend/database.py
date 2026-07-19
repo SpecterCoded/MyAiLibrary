@@ -1,11 +1,10 @@
-from pathlib import Path
-
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker
+from core.paths import DATABASE_DIR, ensure_runtime_directories
 
-BASE_DIR = Path(__file__).resolve().parent
-DATABASE_PATH = BASE_DIR / "library.db"
+ensure_runtime_directories()
+DATABASE_PATH = DATABASE_DIR / "library.db"
 DATABASE_URL = f"sqlite:///{DATABASE_PATH.as_posix()}"
 
 engine = create_engine(

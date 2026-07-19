@@ -18,6 +18,7 @@ from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from database import SessionLocal
+from core.paths import EXTRA_FILES_DIR
 from models import (
     AliasCandidate,
     Chapter,
@@ -206,7 +207,7 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
 def _load_timed_segments(resource_id: str) -> list[dict[str, Any]]:
     from services.srt_parser import parse_srt
 
-    paths = sorted(glob(os.path.join(BACKEND_DIR, "extraa_files", resource_id, "*.srt")))
+    paths = sorted(glob(os.path.join(str(EXTRA_FILES_DIR), resource_id, "*.srt")))
     segments: list[dict[str, Any]] = []
     seen: set[tuple[float, float, str]] = set()
     for srt_path in paths:

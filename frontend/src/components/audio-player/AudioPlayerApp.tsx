@@ -450,9 +450,15 @@ export default function AudioPlayerApp() {
   };
 
   const handleCloseCall = () => {
-      if (confirm("Are you sure you want to exit the study companion?")) {
+    if (confirm("Are you sure you want to exit the study companion?")) {
       audioRef.current?.pause();
-      window.close();
+      const params = new URLSearchParams(window.location.search);
+      params.delete("audioUrl");
+      params.delete("videoUrl");
+      params.delete("resourceId");
+      params.delete("t");
+      params.set("view", params.get("playlistId") ? "folder" : "library");
+      window.location.assign(`/?${params.toString()}`);
     }
   };
 

@@ -30,11 +30,12 @@ import sqlalchemy
 
 # Initialize logger
 from core.config import get_upload_path, UPLOADS_ROOT
+from core.paths import EXTRA_FILES_DIR
 from core.logger import setup_logger, get_logger
 logger = setup_logger()
 sys_logger = get_logger("SYSTEM")
 BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
-EXTRAA_FILES_ROOT = os.path.join(BACKEND_DIR, "extraa_files")
+EXTRAA_FILES_ROOT = str(EXTRA_FILES_DIR)
 
 sys_logger.info("Initializing My AI Library...")
 
@@ -547,13 +548,14 @@ def _notify_explorer_changed():
 
 from fastapi.middleware.cors import CORSMiddleware
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+if os.getenv("MYAI_DESKTOP_MODE", "0").lower() not in ("1", "true", "yes"):
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 def get_db():
     db = SessionLocal()
@@ -873,6 +875,12 @@ def create_notification(
 
 @app.get("/")
 def root():
+    if os.getenv("MYAI_DESKTOP_MODE") == "1":
+        ui_dir = os.getenv("MYAI_UI_DIR", "").strip()
+        index_file = os.path.join(ui_dir, "index.html") if ui_dir else ""
+        if not index_file or not os.path.isfile(index_file):
+            raise HTTPException(status_code=503, detail="Desktop interface is unavailable")
+        return FileResponse(index_file)
     return {"message": "MyAILibrary Running"}
 
 
@@ -1296,8 +1304,10 @@ def open_task_folder(
         raise HTTPException(status_code=404, detail="Physical folder does not exist on disk")
 
     try:
+        if os.getenv("MYAI_DESKTOP_MODE", "0").lower() in ("1", "true", "yes"):
+            return {"path": path, "opened": False}
         os.startfile(path)
-        return {"opened": path}
+        return {"path": path, "opened": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to open folder: {str(e)}")
 
@@ -10219,7 +10229,7 @@ def cleanup_activity_logs(
 
 
 @app.get("/api/settings/download-whisper")
-def download_whisper_model(model: str, dest_path: str):
+def download_whisper_model(model: str, dest_path: str = ""):
     import requests
     import os
     import json
@@ -10230,6 +10240,13 @@ def download_whisper_model(model: str, dest_path: str):
     MAX_RETRIES = 5
 
     def generate():
+        if not dest_path and os.getenv("MYAI_DESKTOP_MODE", "0").lower() in ("1", "true", "yes"):
+            from core.paths import MODELS_DIR
+            dest_path = str(MODELS_DIR / "whisper")
+            os.makedirs(dest_path, exist_ok=True)
+        if not dest_path:
+            yield f"data: {json.dumps({'error': 'Destination folder is required.'})}\n\n"
+            return
         if os.path.isdir(dest_path):
             final_path = os.path.join(dest_path, model)
         else:
@@ -10331,8 +10348,11 @@ def download_wtp_model(model: str = "sat-3l", dest_path: str = ""):
         if not repo_id:
             yield f"data: {json.dumps({"error": "Unknown WTP Canine model."})}\n\n"
             return
+        if not dest_path and os.getenv("MYAI_DESKTOP_MODE", "0").lower() in ("1", "true", "yes"):
+            from core.paths import MODELS_DIR
+            dest_path = str(MODELS_DIR / "wtp")
         if not dest_path:
-            yield f"data: {json.dumps({"error": "Destination folder is required."})}\n\n"
+            yield f"data: {json.dumps({'error': 'Destination folder is required.'})}\n\n"
             return
 
         try:

@@ -8,6 +8,7 @@ import re
 from dataclasses import dataclass
 
 from core.logger import get_logger
+from core.paths import EXTRA_FILES_DIR, TEMP_DIR
 from models import Chapter, SubChapter
 
 from .chunking_models import ChunkPayload
@@ -17,7 +18,7 @@ from .token_budget_service import DEFAULT_CHUNK_TOKEN_BUDGET, estimate_tokens
 logger = get_logger("MEDIA_CHUNKING")
 SERVICE_DIR = os.path.dirname(os.path.abspath(__file__))
 BACKEND_ROOT = os.path.dirname(SERVICE_DIR)
-EXTRAA_FILES_ROOT = os.path.join(BACKEND_ROOT, "extraa_files")
+EXTRAA_FILES_ROOT = str(EXTRA_FILES_DIR)
 
 MEDIA_MAX_CHUNK_CHARS = int(os.getenv("MEDIA_MAX_CHUNK_CHARS", "1200"))
 MEDIA_MAX_CHUNK_SECONDS = int(os.getenv("MEDIA_MAX_CHUNK_SECONDS", "75"))
@@ -150,7 +151,7 @@ def chunk_media_segments(
 def _load_segments(resource_id: str) -> list[dict]:
     srt_files = glob.glob(os.path.join(EXTRAA_FILES_ROOT, resource_id, "*.srt"))
     if not srt_files:
-        srt_files = glob.glob(os.path.join(BACKEND_ROOT, "temp_audio", "*.srt"))
+        srt_files = glob.glob(os.path.join(str(TEMP_DIR), "*.srt"))
     if not srt_files:
         return []
     try:

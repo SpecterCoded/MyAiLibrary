@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self'; style-src 'unsafe-inline'" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Starting My AI Library</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; height: 100vh; display: grid; place-items: center; color: #f8fafc; background: radial-gradient(circle at 50% 15%, #1e293b 0, #090b10 62%); font-family: "Segoe UI", sans-serif; user-select: none; }
+      main { text-align: center; }
+      img { width: 92px; height: 92px; filter: drop-shadow(0 18px 30px rgba(56, 189, 248, .2)); }
+      h1 { margin: 18px 0 7px; font-size: 24px; letter-spacing: -.4px; }
+      p { margin: 0; color: #94a3b8; font-size: 13px; }
+      .loader { width: 180px; height: 3px; margin: 28px auto 0; overflow: hidden; border-radius: 9px; background: #1e293b; }
+      .loader::after { content: ""; display: block; width: 45%; height: 100%; background: linear-gradient(90deg, #38bdf8, #818cf8); animation: loading 1.2s ease-in-out infinite; }
+      @keyframes loading { from { transform: translateX(-110%); } to { transform: translateX(330%); } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img src="logo.svg" alt="My AI Library" />
+      <h1>My AI Library</h1>
+      <p>Starting your local knowledge workspace…</p>
+      <div class="loader"></div>
+    </main>
+  </body>
+</html>

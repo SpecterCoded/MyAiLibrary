@@ -33,6 +33,7 @@ tmp/
 
 # Lock files (regenerated on install)
 package-lock.json
+!package-lock.json
 pnpm-lock.yaml
 yarn.lock
 

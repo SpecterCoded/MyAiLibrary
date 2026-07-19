@@ -16,11 +16,12 @@ from services.resource_service import create_resource
 from services.resource_service import compute_external_content_hash, compute_file_content_hash
 from repositories.resource_repository import save_resource
 from services.queue_service import create_processing_job
+from core.paths import COOKIES_DIR, EXTRA_FILES_DIR
 
 SERVICE_DIR = os.path.dirname(os.path.abspath(__file__))
 BACKEND_ROOT = os.path.dirname(SERVICE_DIR)
-EXTRAA_FILES_ROOT = os.path.join(BACKEND_ROOT, "extraa_files")
-USER_COOKIES_ROOT = os.path.join(BACKEND_ROOT, "user_cookies")
+EXTRAA_FILES_ROOT = str(EXTRA_FILES_DIR)
+USER_COOKIES_ROOT = str(COOKIES_DIR)
 YOUTUBE_COOKIES_ROOT = os.path.join(USER_COOKIES_ROOT, "youtube")
 
 # ... (rest of the existing functions)

@@ -60,6 +60,16 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
       },
+      '/notifications': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        secure: false,
+      },
+      '/tasks': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        secure: false,
+      },
       '/storage-paths': {
         target: 'http://localhost:8000',
         changeOrigin: true,

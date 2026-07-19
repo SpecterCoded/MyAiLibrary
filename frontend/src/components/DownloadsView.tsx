@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { revealPath } from '../utils/desktop';
 import {
   Download,
   Upload,
@@ -279,7 +280,7 @@ export default function DownloadsView({ onAddMore }: DownloadsViewProps) {
   const fetchTasks = useCallback(async () => {
     try {
       const token = localStorage.getItem('access_token');
-      const response = await fetch('http://127.0.0.1:8000/tasks', {
+      const response = await fetch('/tasks', {
         headers: { 'Authorization': `Bearer ${token}` },
       });
       if (response.ok) {
@@ -304,7 +305,7 @@ export default function DownloadsView({ onAddMore }: DownloadsViewProps) {
     setTasks(prev => prev.filter(t => t.id !== id));
     try {
       const token = localStorage.getItem('access_token');
-      await fetch(`http://127.0.0.1:8000/tasks/${id}`, {
+      await fetch(`/tasks/${id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` },
       });
@@ -317,10 +318,14 @@ export default function DownloadsView({ onAddMore }: DownloadsViewProps) {
   const openTaskFolder = async (id: string) => {
     try {
       const token = localStorage.getItem('access_token');
-      await fetch(`http://127.0.0.1:8000/tasks/${id}/open-folder`, {
+      const response = await fetch(`/tasks/${id}/open-folder`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
       });
+      if (response.ok && window.desktop) {
+        const data = await response.json();
+        if (data.path) await revealPath(data.path);
+      }
     } catch (err) {
       console.error('Failed to open task folder', err);
     }

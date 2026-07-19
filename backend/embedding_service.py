@@ -9,6 +9,7 @@ from services.parent_child_service import chunk_parent_metadata
 from services.llm_service import answer_question as llm_answer_question
 from services.hallucination_service import detect_hallucinations
 from core.activity_log import log_user_activity
+from core.paths import CHROMA_DIR, EXTRA_FILES_DIR, TEMP_DIR
 
 from core.logger import get_logger
 logger = get_logger("EMBEDDING")
@@ -24,8 +25,7 @@ from services.ai_cost_service import record_ai_usage
 
 logging.set_verbosity_error()
 BASE_DIR = Path(__file__).resolve().parent
-
-CHROMA_PATH = BASE_DIR / "chroma_db"
+CHROMA_PATH = CHROMA_DIR
 # Increase the threshold slightly to allow valid related queries
 # while still filtering out unrelated garbage.
 MAX_DISTANCE = 1.8
@@ -965,9 +965,9 @@ def find_chunk_timestamp(resource_id: str, chunk_content: str) -> float:
     import os
     import re
 
-    srt_files = glob.glob(os.path.join(str(BASE_DIR), "extraa_files", resource_id, "*.srt"))
+    srt_files = glob.glob(os.path.join(str(EXTRA_FILES_DIR), resource_id, "*.srt"))
     if not srt_files:
-        srt_files = glob.glob(os.path.join(str(BASE_DIR), "temp_audio", "*.srt"))
+        srt_files = glob.glob(os.path.join(str(TEMP_DIR), "*.srt"))
         
     if not srt_files:
         return 0.0

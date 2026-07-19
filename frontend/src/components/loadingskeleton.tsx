@@ -2,7 +2,7 @@ import React from 'react';
 
 export const PlaylistCardSkeleton = () => {
   return (
-    <div className="bg-white/80 rounded-[28px] p-5 flex flex-col justify-between card-shadow relative animate-pulse">
+    <div className="playlist-card-skeleton bg-white/80 rounded-[28px] p-5 flex flex-col justify-between card-shadow relative overflow-hidden">
       <div>
         <div className="flex items-center justify-between mb-5">
           <div className="h-4 bg-slate-200 rounded-full w-1/3"></div>

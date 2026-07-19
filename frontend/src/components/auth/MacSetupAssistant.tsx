@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { HardDrive, FolderOpen, ChevronRight, Check, Sparkles } from 'lucide-react';
 import { type BackendUser } from '../DashboardHeader';
+import { selectFolder } from '../../utils/desktop';
 
 interface MacSetupAssistantProps {
   user: BackendUser;
@@ -68,10 +69,8 @@ export function MacSetupAssistant({ user, onSetupComplete, isTempOnboarding = fa
   const handleBrowseFolder = async () => {
     try {
       setError(null);
-      const response = await fetch('/auth/select-folder');
-      if (response.ok) {
-        const data = await response.json();
-        if (data.path) {
+      const data = await selectFolder();
+      if (data.path) {
           const selectedBase = data.path;
           const currentParts = storagePath.trim().split(/[/\\]/);
           const currentFavoriteName = currentParts[currentParts.length - 1]?.trim() || 'MyLibrary';
@@ -84,7 +83,6 @@ export function MacSetupAssistant({ user, onSetupComplete, isTempOnboarding = fa
           setStoragePath(joinedPath);
         } else if (data.error) {
           setError(`Folder explorer error: ${data.error}`);
-        }
       }
     } catch (err: any) {
       setError(`Failed to open folder explorer: ${err.message}`);

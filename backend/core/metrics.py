@@ -8,8 +8,8 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+from core.paths import LOG_DIR
 
-LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
 LOG_FILE = LOG_DIR / "metrics.jsonl"
 
 

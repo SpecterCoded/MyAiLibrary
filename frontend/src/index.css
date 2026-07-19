@@ -1,4 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
 @import "tailwindcss";
 @custom-variant dark (&:where(.dark, .dark *));
 
@@ -1132,6 +1131,311 @@ a.hover\:bg-white\/50:hover {
 .grid-item-row,
 .preview-media {
   will-change: transform, opacity;
+}
+
+/* Structural wrappers stay layout-neutral at normal desktop heights. */
+.home-layout,
+.home-hero {
+  display: contents;
+}
+
+.playlist-card-skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    105deg,
+    transparent 20%,
+    rgba(255, 255, 255, 0.42) 42%,
+    rgba(255, 255, 255, 0.7) 50%,
+    rgba(255, 255, 255, 0.42) 58%,
+    transparent 80%
+  );
+  transform: translateX(-120%);
+  animation: playlist-skeleton-shimmer 1.65s ease-in-out infinite;
+}
+
+.dark .playlist-card-skeleton::after {
+  background: linear-gradient(
+    105deg,
+    transparent 20%,
+    rgba(255, 255, 255, 0.025) 42%,
+    rgba(255, 255, 255, 0.09) 50%,
+    rgba(255, 255, 255, 0.025) 58%,
+    transparent 80%
+  );
+}
+
+@keyframes playlist-skeleton-shimmer {
+  to {
+    transform: translateX(120%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .playlist-card-skeleton::after {
+    animation: none;
+  }
+}
+
+/* Match the chat page's solid light/dark surfaces instead of glass. */
+.create-playlist-modal {
+  background: #ffffff;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.dark .create-playlist-modal {
+  background: var(--dk-surface-1);
+}
+
+/* Compact desktop layout for restored/minimum-height Electron windows. */
+@media (max-height: 900px) {
+  .create-playlist-modal-shell {
+    padding: 16px !important;
+  }
+
+  .create-playlist-modal {
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100vh - 32px);
+    overflow: hidden;
+    padding: 22px 28px !important;
+    border-radius: 24px !important;
+  }
+
+  .create-playlist-modal__header {
+    margin-bottom: 14px !important;
+  }
+
+  .create-playlist-modal__body {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-right: 6px;
+  }
+
+  .create-playlist-form > :not(:last-child) {
+    margin-bottom: 12px !important;
+  }
+
+  .create-playlist-form textarea {
+    min-height: 70px;
+    height: 70px;
+  }
+
+  .create-playlist-folders {
+    max-height: 120px !important;
+    padding: 10px !important;
+  }
+
+  .create-playlist-file-types {
+    gap: 10px !important;
+  }
+
+  .create-playlist-file-type {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 64px;
+    padding: 8px 10px !important;
+  }
+
+  .create-playlist-file-type > div:first-child {
+    margin-bottom: 4px !important;
+  }
+
+  .create-playlist-modal__footer {
+    margin-top: 14px !important;
+  }
+
+  .app-main-panel {
+    height: calc(100% - 32px) !important;
+    margin-top: 16px !important;
+    margin-bottom: 16px !important;
+  }
+
+  .home-view {
+    padding: 20px !important;
+  }
+
+  .dashboard-header {
+    margin-bottom: 0 !important;
+  }
+
+  .home-layout {
+    display: grid;
+    grid-template-rows: auto auto auto;
+    align-content: space-evenly;
+    min-height: 0;
+  }
+
+  .home-hero {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .home-welcome {
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+  }
+
+  .home-title {
+    font-size: 2.25rem !important;
+    line-height: 1.1 !important;
+  }
+
+  .home-actions {
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+  }
+
+  .home-playlist-section {
+    display: contents;
+  }
+
+  .home-playlist-section--empty {
+    padding-bottom: 0;
+  }
+
+  .home-playlist-grid {
+    gap: 16px !important;
+  }
+
+  .home-empty-state {
+    margin: 0 auto !important;
+    height: 450px;
+    min-height: 450px;
+    justify-content: center;
+    padding: 32px !important;
+  }
+
+  .home-empty-state .empty-state-icon {
+    margin-bottom: 12px !important;
+  }
+
+  .home-empty-state .empty-state-description {
+    margin-bottom: 16px !important;
+  }
+
+  .home-playlist-card {
+    height: 450px !important;
+    min-height: 450px !important;
+    padding: 20px !important;
+  }
+
+  .home-playlist-card .playlist-card-cover {
+    height: 10rem !important;
+    margin-bottom: 20px !important;
+  }
+
+  .home-playlist-card .playlist-card-metadata {
+    margin-bottom: 16px !important;
+  }
+
+  .home-playlist-card .playlist-card-footer {
+    margin-top: 24px !important;
+  }
+
+  .ragx-header {
+    padding: 16px 24px !important;
+    gap: 16px !important;
+  }
+
+  .ragx-header h1 {
+    font-size: 1.875rem !important;
+    line-height: 1.15 !important;
+    margin-bottom: 4px !important;
+  }
+
+  .ragx-stats-grid > div {
+    min-height: 96px;
+    padding: 16px !important;
+  }
+
+  .ragx-stats-grid > div > div:last-child {
+    font-size: 1.875rem !important;
+  }
+
+  .ragx-health {
+    padding: 16px !important;
+  }
+
+  .ragx-health .w-24.h-24 {
+    width: 72px !important;
+    height: 72px !important;
+  }
+
+  .ragx-toolbar {
+    padding: 10px 24px !important;
+  }
+
+  .ragx-empty-wrap {
+    padding: 12px !important;
+  }
+
+  .ragx-empty-card {
+    max-width: 460px !important;
+    padding: 16px !important;
+  }
+
+  .ragx-empty-card > div:first-child {
+    margin-bottom: 8px !important;
+  }
+
+  .ragx-empty-guide {
+    margin-bottom: 12px !important;
+    padding: 10px !important;
+  }
+}
+
+@media (max-height: 720px) {
+  .home-view {
+    padding: 16px !important;
+  }
+
+  .dashboard-header {
+    margin-bottom: 0 !important;
+  }
+
+  .home-welcome > :first-child {
+    display: none !important;
+  }
+
+  .home-title {
+    font-size: 1.75rem !important;
+  }
+
+  .home-actions {
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+  }
+
+  .home-empty-state {
+    padding: 28px !important;
+  }
+
+  .home-playlist-card .playlist-card-cover {
+    height: 10rem !important;
+  }
+
+  .ragx-header p,
+  .ragx-empty-guide {
+    display: none !important;
+  }
+
+  .ragx-stats-grid > div {
+    min-height: 80px;
+    padding: 10px 12px !important;
+  }
+
+  .ragx-health,
+  .ragx-toolbar,
+  .ragx-empty-card {
+    padding: 10px 12px !important;
+  }
 }
 
 /* Quiz option animations */

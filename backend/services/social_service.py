@@ -11,10 +11,11 @@ from models import Folder, Resource, DownloadTask, User
 from services.resource_service import create_resource
 from services.resource_service import compute_file_content_hash
 from repositories.resource_repository import DuplicateResourceError, find_duplicate_resource_by_hash, save_resource
+from core.paths import COOKIES_DIR
 
 SERVICE_DIR = os.path.dirname(os.path.abspath(__file__))
 BACKEND_ROOT = os.path.dirname(SERVICE_DIR)
-USER_COOKIES_ROOT = os.path.join(BACKEND_ROOT, "user_cookies")
+USER_COOKIES_ROOT = str(COOKIES_DIR)
 SOCIAL_COOKIE_PLATFORMS = {"twitter", "instagram"}
 
 

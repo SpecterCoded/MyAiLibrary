@@ -194,7 +194,7 @@ export default function ImportContentModal({ isOpen, onClose, onNavigateToDownlo
     setIsCheckingYoutubeCookies(true);
     try {
       const token = localStorage.getItem('access_token');
-      const response = await fetch('http://127.0.0.1:8000/youtube/cookies/status', {
+      const response = await fetch('/youtube/cookies/status', {
         headers: { 'Authorization': `Bearer ${token}` },
       });
       if (response.ok) {
@@ -211,7 +211,7 @@ export default function ImportContentModal({ isOpen, onClose, onNavigateToDownlo
   const fetchSocialCookieStatus = async (platform: 'twitter' | 'instagram') => {
     try {
       const token = localStorage.getItem('access_token');
-      const response = await fetch(`http://127.0.0.1:8000/social/cookies/status?platform=${platform}`, {
+      const response = await fetch(`/social/cookies/status?platform=${platform}`, {
         headers: { 'Authorization': `Bearer ${token}` },
       });
       if (response.ok) {
@@ -242,7 +242,7 @@ export default function ImportContentModal({ isOpen, onClose, onNavigateToDownlo
     if (!playlistId) { setFolders([]); return; }
     try {
       const token = localStorage.getItem('access_token');
-      const response = await fetch(`http://127.0.0.1:8000/playlists/${playlistId}/all-folders`, {
+      const response = await fetch(`/playlists/${playlistId}/all-folders`, {
         headers: { 'Authorization': `Bearer ${token}` },
       });
       if (response.ok) {
@@ -447,8 +447,8 @@ export default function ImportContentModal({ isOpen, onClose, onNavigateToDownlo
 
       const token = localStorage.getItem('access_token');
       const endpoint = platform === 'youtube'
-        ? 'http://127.0.0.1:8000/youtube/cookies'
-        : 'http://127.0.0.1:8000/social/cookies';
+        ? '/youtube/cookies'
+        : '/social/cookies';
       const body = platform === 'youtube'
         ? { cookies_content: cookiesContent }
         : { platform, cookies_content: cookiesContent };
@@ -533,7 +533,7 @@ export default function ImportContentModal({ isOpen, onClose, onNavigateToDownlo
           requestBody.cookies_content = cookiesContent;
         }
 
-        const response = await fetch('http://127.0.0.1:8000/tasks/youtube/create', {
+        const response = await fetch('/tasks/youtube/create', {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
           body: JSON.stringify(requestBody),
@@ -576,7 +576,7 @@ export default function ImportContentModal({ isOpen, onClose, onNavigateToDownlo
         setIsAdding(true);
         try {
           const token = localStorage.getItem('access_token');
-          const checkResp = await fetch(`http://127.0.0.1:8000/folders/check-social-exist?playlist_id=${selectedPlaylist}&username=${username}`, {
+          const checkResp = await fetch(`/folders/check-social-exist?playlist_id=${selectedPlaylist}&username=${username}`, {
             headers: { 'Authorization': `Bearer ${token}` }
           });
           if (checkResp.ok) {
@@ -611,7 +611,7 @@ export default function ImportContentModal({ isOpen, onClose, onNavigateToDownlo
 
       try {
         const token = localStorage.getItem('access_token');
-        const response = await fetch('http://127.0.0.1:8000/tasks/social/create', {
+        const response = await fetch('/tasks/social/create', {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({

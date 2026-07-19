@@ -61,7 +61,19 @@ const apiFetch = async (url: string, options: RequestInit = {}) => {
   };
   const response = await fetch(url, { ...options, headers });
   if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`);
+    const contentType = response.headers.get('content-type') || '';
+    let detail = '';
+    try {
+      if (contentType.includes('application/json')) {
+        const body = await response.json();
+        detail = typeof body?.detail === 'string' ? body.detail : JSON.stringify(body);
+      } else {
+        detail = (await response.text()).slice(0, 300);
+      }
+    } catch {
+      // Preserve the HTTP status when an error response has no readable body.
+    }
+    throw new Error(detail || `Request failed with status ${response.status}`);
   }
   return response;
 };
@@ -331,6 +343,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       // Find suitable playlist folder only if we are currently viewing folders
       let activePlaylistId: string | null = null;
+      let activeFolderId: string | null = null;
       
       if (currentView === 'folder' && selectedFolderId) {
         const folder = folders.find(f => f.id === selectedFolderId);
@@ -339,6 +352,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             activePlaylistId = folder.id;
           } else {
             activePlaylistId = folder.playlistId || null;
+            activeFolderId = folder.id;
           }
         }
       }
@@ -350,6 +364,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       const res = await apiFetch(`/playlists/${activePlaylistId}/notes`, {
         method: 'POST',
+        body: JSON.stringify({
+          title: 'Untitled',
+          content: JSON.stringify([{ type: 'paragraph', content: [] }]),
+          folder_id: activeFolderId,
+        }),
       });
       const data = await res.json();
       logActivity('notebook', 'Created note');
@@ -358,7 +377,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         id: data.id,
         title: data.title || '',
         content: [],
-        folderId: data.folder_id || null,
+        folderId: data.folder_id || data.playlist_id || activePlaylistId,
         playlistId: data.playlist_id || activePlaylistId,
         status: data.status || (activePlaylistId ? 'active' : 'draft'),
         isFavorite: data.is_favorite || false,
@@ -373,6 +392,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setCurrentView('note');
     } catch (err) {
       console.error("Failed to create new note on backend:", err);
+      showToast(err instanceof Error ? err.message : "Failed to create the note.", "error");
     }
   };
 

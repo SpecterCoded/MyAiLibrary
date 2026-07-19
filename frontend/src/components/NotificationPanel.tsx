@@ -84,7 +84,7 @@ const NotificationPanel: React.FC<NotificationPanelProps> = ({ isOpen, onClose, 
     if (!token) return;
     try {
       // 1. Fetch active notifications (inbox contains both general and mentions)
-      const response = await fetch(`http://127.0.0.1:8000/notifications?tab=Inbox`, {
+      const response = await fetch(`/notifications?tab=Inbox`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (response.ok) {
@@ -93,7 +93,7 @@ const NotificationPanel: React.FC<NotificationPanelProps> = ({ isOpen, onClose, 
       }
 
       // 2. Fetch archived notifications
-      const archiveRes = await fetch(`http://127.0.0.1:8000/notifications?tab=Archive`, {
+      const archiveRes = await fetch(`/notifications?tab=Archive`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (archiveRes.ok) {
@@ -136,7 +136,7 @@ const NotificationPanel: React.FC<NotificationPanelProps> = ({ isOpen, onClose, 
     const token = localStorage.getItem('access_token');
     if (!token) return;
     try {
-      const response = await fetch(`http://127.0.0.1:8000/notifications/${id}/read`, {
+      const response = await fetch(`/notifications/${id}/read`, {
         method: 'PUT',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -153,7 +153,7 @@ const NotificationPanel: React.FC<NotificationPanelProps> = ({ isOpen, onClose, 
     const token = localStorage.getItem('access_token');
     if (!token) return;
     try {
-      const response = await fetch('http://127.0.0.1:8000/notifications/read-all', {
+      const response = await fetch('/notifications/read-all', {
         method: 'PUT',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -171,7 +171,7 @@ const NotificationPanel: React.FC<NotificationPanelProps> = ({ isOpen, onClose, 
     const token = localStorage.getItem('access_token');
     if (!token) return;
     try {
-      const response = await fetch(`http://127.0.0.1:8000/notifications/${id}/archive`, {
+      const response = await fetch(`/notifications/${id}/archive`, {
         method: 'PUT',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -193,7 +193,7 @@ const NotificationPanel: React.FC<NotificationPanelProps> = ({ isOpen, onClose, 
     const token = localStorage.getItem('access_token');
     if (!token) return;
     try {
-      const response = await fetch(`http://127.0.0.1:8000/notifications/${id}`, {
+      const response = await fetch(`/notifications/${id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -210,7 +210,7 @@ const NotificationPanel: React.FC<NotificationPanelProps> = ({ isOpen, onClose, 
     const token = localStorage.getItem('access_token');
     if (!token) return;
     try {
-      const response = await fetch('http://127.0.0.1:8000/notifications/archive', {
+      const response = await fetch('/notifications/archive', {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });

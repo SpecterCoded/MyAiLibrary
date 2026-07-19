@@ -11,8 +11,7 @@ import os
 import time
 from datetime import datetime
 from pathlib import Path
-
-LOG_DIR = Path(__file__).parent.parent / "logs"
+from core.paths import LOG_DIR
 
 
 class PipelineLogger:

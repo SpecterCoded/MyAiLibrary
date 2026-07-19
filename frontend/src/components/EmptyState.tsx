@@ -30,15 +30,16 @@ export default function EmptyState({
     <motion.div 
       initial={{ opacity: 0, y: 15 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-      className="w-full max-w-xl mx-auto bg-white/60 hover:bg-white/80 border border-white/80 backdrop-blur-2xl rounded-3xl p-8 sm:p-12 shadow-xl shadow-slate-200/50 flex flex-col items-center text-center relative overflow-hidden transition-all duration-300 my-8 select-none"
+      exit={{ opacity: 0, y: -8 }}
+      transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+      className="home-empty-state w-full max-w-xl mx-auto bg-white/60 hover:bg-white/80 border border-white/80 backdrop-blur-2xl rounded-3xl p-8 sm:p-12 shadow-xl shadow-slate-200/50 flex flex-col items-center text-center relative overflow-hidden transition-all duration-300 my-8 select-none"
     >
       {/* Decorative blurred background circles for aesthetics */}
       <div className="absolute -top-10 -right-10 w-28 h-28 bg-indigo-400/10 rounded-full blur-2xl pointer-events-none" />
       <div className="absolute -bottom-10 -left-10 w-28 h-28 bg-blue-400/10 rounded-full blur-2xl pointer-events-none" />
 
       {/* Floating Animated Media Container */}
-      <div className="relative mb-6">
+      <div className="empty-state-icon relative mb-6">
         <div className="absolute inset-0 bg-indigo-500/15 rounded-2xl blur-md scale-95 animate-pulse"></div>
         <div className="relative w-16 h-16 rounded-2xl bg-gradient-to-tr from-indigo-500 via-blue-500 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-indigo-500/25">
           {isSearching ? (
@@ -58,7 +59,7 @@ export default function EmptyState({
       </h3>
 
       {/* Description */}
-      <p className="text-slate-500 text-sm leading-relaxed max-w-sm mb-8 font-medium">
+      <p className="empty-state-description text-slate-500 text-sm leading-relaxed max-w-sm mb-8 font-medium">
         {displayDescription}
       </p>
 

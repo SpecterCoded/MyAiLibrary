@@ -1,0 +1,59 @@
+appId: com.myailibrary.desktop
+productName: My AI Library
+copyright: Copyright © 2026 My AI Library
+asar: true
+electronDist: vendor/electron-dist
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist/**/*
+  - assets/**/*
+  - package.json
+
+extraResources:
+  - from: ../frontend/dist
+    to: ui
+    filter:
+      - "**/*"
+  - from: ../backend/dist/myailibrary-backend
+    to: backend
+    filter:
+      - "**/*"
+  - from: vendor/ffmpeg
+    to: ffmpeg
+    filter:
+      - "**/*"
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: build/icon.ico
+  executableName: MyAILibrary
+  verifyUpdateCodeSignature: true
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: My AI Library
+  artifactName: MyAI-Library-Setup-${version}-x64.${ext}
+  installerIcon: build/installerIcon.ico
+  uninstallerIcon: build/uninstallerIcon.ico
+  installerSidebar: build/installerSidebar.bmp
+  uninstallerSidebar: build/installerSidebar.bmp
+  installerHeader: build/installerHeader.bmp
+  include: build/installer.nsh
+  deleteAppDataOnUninstall: false
+  runAfterFinish: true
+
+# Signing and publishing are intentionally disabled for the test release.
+# electron-builder will automatically use WIN_CSC_LINK/WIN_CSC_KEY_PASSWORD later.
+publish: null

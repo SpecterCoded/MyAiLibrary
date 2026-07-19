@@ -79,24 +79,24 @@ export default function SearchAndActions({ onCreatePlaylistClick, onImportClick,
   }, [activeQuery]);
 
   return (
-    <>
+    <div className="home-hero">
       {/* Welcome Greeting Banner */}
-      <section className="text-center my-6 select-none px-4">
+      <section className="home-welcome text-center my-6 select-none px-4 shrink-0">
         <TypewriterText
           text={greetingText}
           className="text-[14px] font-semibold text-slate-400 tracking-wide uppercase flex items-center justify-center gap-1.5 mb-1"
           loop={true}
           showCursor={true}
         />
-        <GradientText className="text-4xl lg:text-5xl font-black tracking-tight">
+        <GradientText className="home-title text-4xl lg:text-5xl font-black tracking-tight">
           Welcome to MyAILibrary!
         </GradientText>
       </section>
 
       {/* Smart Action Bar + AI Result Dropdown */}
-      <section ref={containerRef} className="relative w-full max-w-5xl mx-auto mb-12 mt-4">
+      <section ref={containerRef} className="home-actions relative w-full max-w-5xl mx-auto mb-12 mt-4 shrink-0">
         {/* Search row */}
-        <div className="flex flex-col md:flex-row items-center gap-4 w-full">
+        <div className="flex flex-col xl:flex-row items-center gap-4 w-full">
           {/* Input pill */}
           <div
             className={`relative flex-1 w-full bg-white rounded-full p-1.5 shadow-md shadow-slate-200/60 border flex items-center justify-between transition-all duration-200 focus-within:ring-2 focus-within:ring-indigo-500/20 ${
@@ -139,7 +139,7 @@ export default function SearchAndActions({ onCreatePlaylistClick, onImportClick,
           </div>
 
           {/* Action Controls */}
-          <div className="flex items-center gap-3 shrink-0 w-full md:w-auto justify-center select-none">
+          <div className="flex items-center gap-3 shrink-0 w-full xl:w-auto justify-center select-none">
             <button
               type="button"
               onClick={onCreatePlaylistClick}
@@ -183,6 +183,6 @@ export default function SearchAndActions({ onCreatePlaylistClick, onImportClick,
           )}
         </AnimatePresence>
       </section>
-    </>
+    </div>
   );
 }

@@ -1,12 +1,13 @@
 import os
 import subprocess
+from core.paths import EXTRA_FILES_DIR
 
 
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def _resource_extra_dir(resource_id: str) -> str:
-    return os.path.join(BACKEND_DIR, "extraa_files", resource_id)
+    return os.path.join(str(EXTRA_FILES_DIR), resource_id)
 
 
 def generate_video_thumbnail(video_path: str, resource_id: str):

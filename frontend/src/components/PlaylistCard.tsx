@@ -311,7 +311,7 @@ export default function PlaylistCard({
 
   return (
     <>
-      <div className={`bg-white/80 dark:bg-slate-900/40 rounded-[28px] p-5 flex flex-col justify-between relative group hover:-translate-y-0.5 transition-all duration-300 shadow-[0_12px_30px_-4px_rgba(153,171,198,0.15),0_4px_12px_-2px_rgba(153,171,198,0.08)] dark:shadow-[0_12px_30px_-4px_rgba(0,0,0,0.5)] border border-white/70 dark:border-white/10 backdrop-blur-[24px] ${isLibrary ? '' : 'min-h-[450px]'}`}>
+      <div className={`bg-white/80 dark:bg-slate-900/40 rounded-[28px] p-5 flex flex-col justify-between relative group hover:-translate-y-0.5 transition-all duration-300 shadow-[0_12px_30px_-4px_rgba(153,171,198,0.15),0_4px_12px_-2px_rgba(153,171,198,0.08)] dark:shadow-[0_12px_30px_-4px_rgba(0,0,0,0.5)] border border-white/70 dark:border-white/10 backdrop-blur-[24px] ${isLibrary ? '' : 'home-playlist-card min-h-[450px]'}`}>
         <div>
           {/* Meta Context Header */}
           <div className="flex items-center justify-between text-slate-450 dark:text-slate-400 text-[11px] font-bold mb-4 uppercase tracking-wider select-none">
@@ -441,7 +441,7 @@ export default function PlaylistCard({
               e.stopPropagation(); // Stop parent folder click navigation
               setIsPickerOpen(true);
             }}
-            className={`w-full h-36 rounded-[22px] bg-gradient-to-br ${getShapeGradient(currentIcon)} border border-white flex items-center justify-center mb-4 shadow-inner relative overflow-hidden cursor-pointer hover:scale-[1.01] transition-transform`}
+            className={`playlist-card-cover w-full h-36 rounded-[22px] bg-gradient-to-br ${getShapeGradient(currentIcon)} border border-white flex items-center justify-center mb-4 shadow-inner relative overflow-hidden cursor-pointer hover:scale-[1.01] transition-transform`}
             title="Click to edit playlist icon"
           >
             <div className="absolute inset-0 bg-white/10 opacity-40 mix-blend-overlay pattern-grid"></div>
@@ -481,7 +481,7 @@ export default function PlaylistCard({
 
           {/* Metrics/Time Badge Info */}
           {!isLibrary && (
-            <div className="flex flex-wrap items-center gap-y-1 gap-x-3 text-[11px] font-bold text-slate-400/90 dark:text-slate-400 mb-4 select-none">
+            <div className="playlist-card-metadata flex flex-wrap items-center gap-y-1 gap-x-3 text-[11px] font-bold text-slate-400/90 dark:text-slate-400 mb-4 select-none">
               <span className="flex items-center gap-1.5 text-blue-600/80 dark:text-blue-400/90">
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
@@ -523,7 +523,7 @@ export default function PlaylistCard({
             </button>
           </div>
         ) : (
-          <div className="flex items-center justify-between mt-6 pt-3 border-t border-slate-100/60 dark:border-white/5 select-none">
+          <div className="playlist-card-footer flex items-center justify-between mt-6 pt-3 border-t border-slate-100/60 dark:border-white/5 select-none">
             <button onClick={onNavigate} className="bg-slate-50 dark:bg-white/5 border border-slate-200/60 dark:border-white/10 hover:bg-slate-100/80 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200 text-[12px] font-bold py-2 px-4 rounded-full flex items-center gap-1.5 shadow-sm transition-all cursor-pointer">
               <svg className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 fill-blue-600 dark:fill-blue-400" viewBox="0 0 24 24">
                 <path d="M8 5v14l11-7z" />

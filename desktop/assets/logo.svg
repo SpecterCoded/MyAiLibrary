@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="My AI Library">
+  <defs>
+    <linearGradient id="g" x1="18" y1="16" x2="108" y2="116" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#38bdf8"/><stop offset="1" stop-color="#818cf8"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="112" height="112" rx="30" fill="#101827"/>
+  <path d="M34 37c14-7 26-5 30 1 4-6 16-8 30-1v56c-13-5-24-3-30 4-6-7-17-9-30-4V37Z" fill="none" stroke="url(#g)" stroke-width="8" stroke-linejoin="round"/>
+  <path d="M64 39v57" stroke="url(#g)" stroke-width="6" stroke-linecap="round"/>
+</svg>

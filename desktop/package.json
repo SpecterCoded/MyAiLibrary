@@ -1,0 +1,34 @@
+{
+  "name": "my-ai-library-desktop",
+  "version": "0.1.2",
+  "private": true,
+  "description": "Desktop shell and Windows installer for My AI Library",
+  "main": "dist/main.js",
+  "author": "My AI Library",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "clean": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/clean.ps1",
+    "compile": "tsc -p tsconfig.json",
+    "dev:renderer": "npm --prefix ../frontend run dev -- --host 127.0.0.1",
+    "dev:electron": "npm run compile && wait-on tcp:127.0.0.1:5173 && cross-env ELECTRON_RENDERER_URL=http://127.0.0.1:5173 electron .",
+    "dev": "concurrently --kill-others-on-fail --names renderer,electron \"npm:dev:renderer\" \"npm:dev:electron\"",
+    "build:ui": "npm --prefix ../frontend run build",
+    "build:backend": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-backend.ps1",
+    "verify:resources": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-resources.ps1",
+    "build": "npm run compile && npm run build:ui && npm run build:backend",
+    "pack": "npm run build && npm run verify:resources && electron-builder --dir --x64",
+    "dist": "npm run build && npm run verify:resources && electron-builder --win nsis --x64"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.3",
+    "concurrently": "9.2.1",
+    "cross-env": "10.1.0",
+    "electron": "43.1.1",
+    "electron-builder": "26.15.3",
+    "typescript": "6.0.2",
+    "wait-on": "9.0.1"
+  }
+}

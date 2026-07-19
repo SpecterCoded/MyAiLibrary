@@ -531,7 +531,7 @@ export default function App({ theme, setTheme }: RagExplorerPageProps) {
   };
 
   return (
-    <div className={`ragx-scope${isDarkMode ? ' dark' : ''} h-full min-h-0 bg-canvas text-ink flex overflow-hidden`}>
+    <div className={`ragx-page ragx-scope${isDarkMode ? ' dark' : ''} h-full min-h-0 bg-canvas text-ink flex overflow-hidden`}>
       
       {/* Sidebar Navigation */}
       <aside className="w-16 md:w-20 border-r border-border flex flex-col items-center justify-between py-8 bg-panel shrink-0">
@@ -579,7 +579,7 @@ export default function App({ theme, setTheme }: RagExplorerPageProps) {
       {/* Main Content */}
       <main className="flex-1 flex flex-col min-h-0 overflow-hidden">
         {/* Header */}
-        <header className="px-8 py-10 border-b border-border flex flex-col md:flex-row md:items-end justify-between gap-6 flex-shrink-0">
+        <header className="ragx-header px-8 py-10 border-b border-border flex flex-col md:flex-row md:items-end justify-between gap-6 flex-shrink-0">
           <div>
             <h1 className="text-4xl font-display font-medium tracking-tight mb-2">
               {currentView === 'dashboard' && 'System Dashboard'}
@@ -672,8 +672,8 @@ export default function App({ theme, setTheme }: RagExplorerPageProps) {
         ) : (
           <>
             {/* Dashboard Strip */}
-            <div className="flex flex-col xl:flex-row border-b border-border flex-shrink-0">
-          <div className="grid grid-cols-2 md:grid-cols-5 flex-1">
+            <div className="ragx-stats-strip flex flex-col xl:flex-row border-b border-border flex-shrink-0">
+          <div className="ragx-stats-grid grid grid-cols-2 md:grid-cols-5 flex-1">
             <div className="p-6 md:p-8 border-r border-b xl:border-b-0 border-border relative overflow-hidden group">
               <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity"><Database size={64}/></div>
               <div className="text-sm text-ink-muted font-mono mb-2 uppercase tracking-wider">Total Resources</div>
@@ -701,7 +701,7 @@ export default function App({ theme, setTheme }: RagExplorerPageProps) {
             </div>
           </div>
           
-          <div className="p-6 md:p-8 border-l border-border w-full xl:w-96 flex flex-col justify-center bg-panel">
+          <div className="ragx-health p-6 md:p-8 border-l border-border w-full xl:w-96 flex flex-col justify-center bg-panel">
             <div className="text-sm text-ink-muted font-mono mb-4 uppercase tracking-wider">Health Distribution</div>
             <div className="flex-1 flex items-center gap-6">
               <div className="w-24 h-24 flex-shrink-0">
@@ -746,7 +746,7 @@ export default function App({ theme, setTheme }: RagExplorerPageProps) {
         {/* List Area */}
         <div className="flex-1 flex flex-col min-h-0 bg-panel">
           {/* Toolbar */}
-          <div className="px-8 py-4 border-b border-border flex items-center justify-between gap-4">
+          <div className="ragx-toolbar px-8 py-4 border-b border-border flex items-center justify-between gap-4 shrink-0">
             <div className="relative w-full max-w-md">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-faint" size={16} />
               <input 
@@ -856,11 +856,11 @@ export default function App({ theme, setTheme }: RagExplorerPageProps) {
               </motion.div>
             </div>
           ) : filteredResources.length === 0 ? (
-            <div className="flex-1 flex flex-col items-center justify-center p-6 bg-panel">
+            <div className="ragx-empty-wrap flex-1 min-h-0 flex flex-col items-center justify-center p-6 bg-panel overflow-y-auto">
               <motion.div 
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="max-w-lg w-full border border-border p-5 text-center bg-canvas shadow-2xl"
+                className="ragx-empty-card max-w-lg w-full border border-border p-5 text-center bg-canvas shadow-2xl"
               >
                 <div className="w-10 h-10 bg-surface border border-border flex items-center justify-center mx-auto mb-3 text-ink-faint">
                   <Database size={20} />
@@ -872,7 +872,7 @@ export default function App({ theme, setTheme }: RagExplorerPageProps) {
                     : 'No resources match the current search or filters. Adjust the type or status filters to inspect the rest of your library.'}
                 </p>
                 
-                <div className="text-left bg-panel border border-border p-3 mb-4 relative overflow-hidden group">
+                <div className="ragx-empty-guide text-left bg-panel border border-border p-3 mb-4 relative overflow-hidden group">
                   <h4 className="text-xs font-medium text-ink mb-2 flex items-center gap-2 relative z-10"><Settings size={14} className="text-ink-faint"/> How to ingest your first file</h4>
                   <ol className="text-xs text-ink-muted space-y-1 list-decimal list-inside relative z-10 font-sans">
                     <li><span className="text-ink-muted">Upload</span> a document or media file.</li>

@@ -8,6 +8,7 @@ import hashlib
 import shutil
 from dotenv import load_dotenv
 from services.dependency_failure_service import DependencyFailure, local_path_failure, missing_configuration
+from core.paths import EXTRA_FILES_DIR
 
 # Load environment variables
 load_dotenv()
@@ -20,7 +21,7 @@ LOCAL_ALIGNMENT_MODEL = os.getenv("LOCAL_WHISPER_ALIGNMENT_MODEL", "base")
 LOCAL_ALIGNMENT_THREADS = max(1, int(os.getenv("LOCAL_WHISPER_ALIGNMENT_THREADS", "2") or "2"))
 SERVICE_DIR = os.path.dirname(os.path.abspath(__file__))
 BACKEND_ROOT = os.path.dirname(SERVICE_DIR)
-EXTRAA_FILES_ROOT = os.path.join(BACKEND_ROOT, "extraa_files")
+EXTRAA_FILES_ROOT = str(EXTRA_FILES_DIR)
 
 
 def _lookup_resource_context_from_filepath(file_path: str):
