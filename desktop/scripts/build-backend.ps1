@@ -9,11 +9,13 @@ $work = Join-Path $repoRoot "desktop\.pyinstaller"
 if (Test-Path -LiteralPath $venvPython) {
     $python = $venvPython
 } else {
-    $pythonCommand = Get-Command python -CommandType Application -ErrorAction SilentlyContinue
+    $pythonCommand = Get-Command python -All -CommandType Application -ErrorAction SilentlyContinue |
+        Where-Object { $_.Source -and (Test-Path -LiteralPath $_.Source) } |
+        Select-Object -First 1
     if (-not $pythonCommand) {
         throw "No Python executable was found. Create backend\venv or provide Python on PATH."
     }
-    $python = $pythonCommand.Source
+    $python = [string]$pythonCommand.Source
 }
 
 & $python -c "import PyInstaller" 2>$null
