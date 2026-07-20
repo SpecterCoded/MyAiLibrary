@@ -70,12 +70,12 @@ jobs:
         shell: pwsh
         run: npm --prefix desktop run build
 
-      - name: Package and publish signed NSIS update
+      - name: Package signed NSIS update
         shell: pwsh
         run: |
           Push-Location desktop
           try {
-            & .\node_modules\.bin\electron-builder.cmd --win nsis --x64 --publish always --config.releaseInfo.releaseNotesFile="$env:RELEASE_NOTES_FILE"
+            & .\node_modules\.bin\electron-builder.cmd --win nsis --x64 --publish never --config.releaseInfo.releaseNotesFile="$env:RELEASE_NOTES_FILE"
             if ($LASTEXITCODE -ne 0) { throw "Electron Builder failed with exit code $LASTEXITCODE." }
           } finally {
             Pop-Location
@@ -84,12 +84,30 @@ jobs:
       - name: Verify Authenticode and generate checksum
         shell: pwsh
         run: |
-          $installer = Get-ChildItem desktop/release/MyAI-Library-Setup-*-x64.exe | Select-Object -Single
+          $installers = @(Get-ChildItem desktop/release/MyAI-Library-Setup-*-x64.exe)
+          if ($installers.Count -ne 1) { throw "Expected exactly one NSIS installer, found $($installers.Count)." }
+          $installer = $installers[0]
+          $blockMap = "$($installer.FullName).blockmap"
+          if (-not (Test-Path -LiteralPath $blockMap)) { throw "Installer block map is missing: $blockMap" }
+          if (-not (Test-Path -LiteralPath desktop/release/stable.yml)) { throw "Stable update metadata is missing." }
           $signature = Get-AuthenticodeSignature -LiteralPath $installer.FullName
           if ($signature.Status -ne 'Valid') { throw "Installer signature is not valid: $($signature.Status)" }
           $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $installer.FullName
           "$($hash.Hash.ToLower())  $($installer.Name)" | Set-Content desktop/release/SHA256SUMS.txt -Encoding ascii
-          gh release upload "${{ github.ref_name }}" desktop/release/SHA256SUMS.txt --clobber
+
+      - name: Publish verified stable release
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release edit $tag --title "My AI Library $($tag.TrimStart('v'))" --notes-file "$env:RELEASE_NOTES_FILE" --latest
+          } else {
+            gh release create $tag --title "My AI Library $($tag.TrimStart('v'))" --notes-file "$env:RELEASE_NOTES_FILE" --latest --verify-tag
+          }
+          if ($LASTEXITCODE -ne 0) { throw "Failed to create or update GitHub release $tag." }
+          gh release upload $tag desktop/release/MyAI-Library-Setup-*-x64.exe desktop/release/MyAI-Library-Setup-*-x64.exe.blockmap desktop/release/stable.yml desktop/release/SHA256SUMS.txt --clobber
+          if ($LASTEXITCODE -ne 0) { throw "Failed to upload one or more release assets for $tag." }
 
       - name: Retain release artifacts
         uses: actions/upload-artifact@v4
@@ -98,6 +116,6 @@ jobs:
           path: |
             desktop/release/MyAI-Library-Setup-*-x64.exe
             desktop/release/*.blockmap
-            desktop/release/*.yml
+            desktop/release/stable.yml
             desktop/release/SHA256SUMS.txt
           if-no-files-found: error

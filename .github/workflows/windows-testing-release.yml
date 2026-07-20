@@ -72,24 +72,42 @@ jobs:
         shell: pwsh
         run: npm --prefix desktop run build
 
-      - name: Package and publish unsigned beta NSIS update
+      - name: Package unsigned beta NSIS update
         shell: pwsh
         run: |
           Push-Location desktop
           try {
-            & .\node_modules\.bin\electron-builder.cmd --win nsis --x64 --publish always --config.win.verifyUpdateCodeSignature=false --config.publish.channel=beta --config.publish.releaseType=prerelease --config.releaseInfo.releaseNotesFile="$env:RELEASE_NOTES_FILE"
+            & .\node_modules\.bin\electron-builder.cmd --win nsis --x64 --publish never --config.win.verifyUpdateCodeSignature=false --config.publish.channel=beta --config.publish.releaseType=prerelease --config.releaseInfo.releaseNotesFile="$env:RELEASE_NOTES_FILE"
             if ($LASTEXITCODE -ne 0) { throw "Electron Builder failed with exit code $LASTEXITCODE." }
           } finally {
             Pop-Location
           }
 
-      - name: Generate checksum
+      - name: Verify package and generate checksum
         shell: pwsh
         run: |
-          $installer = Get-ChildItem desktop/release/MyAI-Library-Setup-*-x64.exe | Select-Object -Single
+          $installers = @(Get-ChildItem desktop/release/MyAI-Library-Setup-*-x64.exe)
+          if ($installers.Count -ne 1) { throw "Expected exactly one NSIS installer, found $($installers.Count)." }
+          $installer = $installers[0]
+          $blockMap = "$($installer.FullName).blockmap"
+          if (-not (Test-Path -LiteralPath $blockMap)) { throw "Installer block map is missing: $blockMap" }
+          if (-not (Test-Path -LiteralPath desktop/release/beta.yml)) { throw "Beta update metadata is missing." }
           $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $installer.FullName
           "$($hash.Hash.ToLower())  $($installer.Name)" | Set-Content desktop/release/SHA256SUMS.txt -Encoding ascii
-          gh release upload "v$env:RELEASE_VERSION" desktop/release/SHA256SUMS.txt --clobber
+
+      - name: Publish verified beta prerelease
+        shell: pwsh
+        run: |
+          $tag = "v$env:RELEASE_VERSION"
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release edit $tag --title "My AI Library $env:RELEASE_VERSION" --notes-file "$env:RELEASE_NOTES_FILE" --prerelease
+          } else {
+            gh release create $tag --title "My AI Library $env:RELEASE_VERSION" --notes-file "$env:RELEASE_NOTES_FILE" --prerelease --verify-tag
+          }
+          if ($LASTEXITCODE -ne 0) { throw "Failed to create or update GitHub prerelease $tag." }
+          gh release upload $tag desktop/release/MyAI-Library-Setup-*-x64.exe desktop/release/MyAI-Library-Setup-*-x64.exe.blockmap desktop/release/beta.yml desktop/release/SHA256SUMS.txt --clobber
+          if ($LASTEXITCODE -ne 0) { throw "Failed to upload one or more release assets for $tag." }
 
       - name: Retain beta artifacts
         uses: actions/upload-artifact@v4
@@ -98,6 +116,6 @@ jobs:
           path: |
             desktop/release/MyAI-Library-Setup-*-x64.exe
             desktop/release/*.blockmap
-            desktop/release/*.yml
+            desktop/release/beta.yml
             desktop/release/SHA256SUMS.txt
           if-no-files-found: error
