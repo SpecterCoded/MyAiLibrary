@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Slider from '@mui/material/Slider';
 import { type BackendUser } from './DashboardHeader';
-import { UploadCloud, CheckCircle2, Monitor, Moon, Sun, Plus, Trash2, FolderOpen, Loader2, Info } from 'lucide-react';
+import { UploadCloud, CheckCircle2, Monitor, Moon, Sun, Plus, FolderOpen, Loader2, Info, RefreshCw, Download, ShieldCheck, Clock3, FileText, RotateCw } from 'lucide-react';
 import { EmailAuthProvider, reauthenticateWithCredential, updatePassword, signOut } from 'firebase/auth';
 import { auth } from '../firebase';
 import { selectFile, selectFolder } from '../utils/desktop';
@@ -14,7 +14,7 @@ interface SettingsViewProps {
   setTheme: (theme: 'light' | 'dark' | 'system') => void;
 }
 
-type TabType = 'account' | 'team' | 'integrations' | 'ai' | 'storage' | 'appearance';
+type TabType = 'account' | 'team' | 'integrations' | 'ai' | 'storage' | 'appearance' | 'updates';
 
 const PRESET_AVATARS = [
   'https://api.dicebear.com/7.x/notionists/svg?seed=Felix',
@@ -62,10 +62,26 @@ const WTP_MODELS = [
   },
 ];
 
+const formatUpdateBytes = (bytes?: number) => {
+  if (!bytes || bytes < 1) return '—';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  const unit = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  return `${(bytes / 1024 ** unit).toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+};
+
+const formatUpdateDate = (value?: string) => {
+  if (!value) return 'Never';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 'Unknown' : date.toLocaleString();
+};
+
 export default function SettingsView({ user, onUserUpdate, theme: propTheme, setTheme: propSetTheme }: SettingsViewProps) {
-  const [activeTab, setActiveTab] = useState<TabType>(() =>
-    new URLSearchParams(window.location.search).get('tab') === 'ai' ? 'ai' : 'account'
-  );
+  const [activeTab, setActiveTab] = useState<TabType>(() => {
+    const requested = new URLSearchParams(window.location.search).get('tab');
+    return ['account', 'team', 'integrations', 'ai', 'storage', 'appearance', 'updates'].includes(requested || '')
+      ? requested as TabType
+      : 'account';
+  });
 
   // Form states
   const [displayName, setDisplayName] = useState(user?.username || '');
@@ -175,6 +191,14 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
   const [fetchLoading, setFetchLoading] = useState(true);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [updateState, setUpdateState] = useState<DesktopUpdateState | null>(null);
+  const [updatePreferences, setUpdatePreferences] = useState<DesktopUpdatePreferences>({
+    automaticallyCheck: true,
+    automaticallyDownload: false,
+  });
+  const [updateActionPending, setUpdateActionPending] = useState(false);
+  const [updatePreferenceError, setUpdatePreferenceError] = useState<string | null>(null);
+  const [installedUpdateInfo, setInstalledUpdateInfo] = useState<DesktopInstalledUpdateInfo | null>(null);
 
   // New storage path state
   const [newLibName, setNewLibName] = useState('');
@@ -188,8 +212,80 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
     { id: 'integrations', label: 'Integrations' },
     { id: 'ai', label: 'AI Models & API Keys' },
     { id: 'storage', label: 'Workspace Storage' },
-    { id: 'appearance', label: 'Interface' }
+    { id: 'appearance', label: 'Interface' },
+    { id: 'updates', label: 'Updates' }
   ];
+
+  useEffect(() => {
+    if (!window.desktop) return;
+    let active = true;
+    void Promise.all([
+      window.desktop.getUpdateState(),
+      window.desktop.getUpdatePreferences(),
+      window.desktop.getInstalledUpdate(),
+    ]).then(([state, preferences, installed]) => {
+      if (!active) return;
+      if (state) setUpdateState(state);
+      if (preferences) setUpdatePreferences(preferences);
+      if (installed) setInstalledUpdateInfo(installed);
+    }).catch(() => {
+      if (active) setUpdatePreferenceError('Desktop update information could not be loaded.');
+    });
+    const unsubscribe = window.desktop.onUpdateState((state) => {
+      if (active) setUpdateState(state);
+    });
+    const unsubscribeInstalled = window.desktop.onUpdateInstalled((info) => {
+      if (active) setInstalledUpdateInfo(info);
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+      unsubscribeInstalled();
+    };
+  }, []);
+
+  useEffect(() => {
+    const openRequestedTab = (event: Event) => {
+      if (event instanceof CustomEvent && event.detail === 'updates') setActiveTab('updates');
+    };
+    window.addEventListener('myai:open-settings-tab', openRequestedTab);
+    return () => window.removeEventListener('myai:open-settings-tab', openRequestedTab);
+  }, []);
+
+  const runUpdateAction = async (action: 'check' | 'download' | 'install' | 'logs') => {
+    if (!window.desktop || updateActionPending) return;
+    setUpdateActionPending(true);
+    try {
+      if (action === 'logs') {
+        await window.desktop.openUpdateLogs();
+        return;
+      }
+      const state = action === 'check'
+        ? await window.desktop.checkForUpdates()
+        : action === 'download'
+          ? await window.desktop.downloadUpdate()
+          : await window.desktop.installUpdate();
+      if (state) setUpdateState(state);
+    } finally {
+      setUpdateActionPending(false);
+    }
+  };
+
+  const changeUpdatePreference = async (key: keyof DesktopUpdatePreferences) => {
+    if (!window.desktop) return;
+    const previous = updatePreferences;
+    const next = { ...previous, [key]: !previous[key] };
+    setUpdatePreferences(next);
+    setUpdatePreferenceError(null);
+    try {
+      const saved = await window.desktop.setUpdatePreferences(next);
+      if (!saved) throw new Error('Preference was rejected.');
+      setUpdatePreferences(saved);
+    } catch {
+      setUpdatePreferences(previous);
+      setUpdatePreferenceError('The update preference could not be saved.');
+    }
+  };
 
   const recommendedWtpModel = (() => {
     const ramGb = systemInfo?.ramGb ?? 8;
@@ -1123,6 +1219,28 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
     );
   }
 
+  const effectiveUpdateState: DesktopUpdateState = updateState ?? {
+    status: window.desktop ? 'idle' : 'disabled',
+    currentVersion: window.desktop ? 'Loading…' : 'Browser development',
+    installationEnabled: false,
+    errorMessage: window.desktop
+      ? undefined
+      : 'Updates are available only in the installed desktop application.',
+  };
+  const updateStatusLabel: Record<DesktopUpdateStatus, string> = {
+    disabled: 'Updates unavailable',
+    idle: 'Ready to check',
+    checking: 'Checking for updates…',
+    available: `Version ${effectiveUpdateState.availableVersion ?? ''} is available`,
+    'up-to-date': 'You’re up to date',
+    downloading: `Downloading update — ${Math.round(effectiveUpdateState.percent ?? 0)}%`,
+    downloaded: 'Update downloaded',
+    preparing: 'Protecting your data…',
+    'ready-to-install': `Version ${effectiveUpdateState.availableVersion ?? ''} is ready`,
+    installing: 'Restarting to install…',
+    error: 'Update could not be completed',
+  };
+
   return (
     <div className="flex-1 flex flex-col h-full w-full bg-white/65 dark:bg-slate-900/40 backdrop-blur-[24px] border border-white/50 dark:border-white/10 rounded-[32px] overflow-hidden relative shadow-sm dark:shadow-[0_12px_30px_-4px_rgba(0,0,0,0.5)]">
       
@@ -1206,7 +1324,7 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
           </div>
 
           {/* Tabs */}
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-6 overflow-x-auto no-scrollbar">
             {tabs.map((tab) => (
               <button
                 key={tab.id}
@@ -2637,11 +2755,197 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
 
                 </div>
               )}
+
+              {/* === Desktop Updates Tab === */}
+              {activeTab === 'updates' && (
+                <div className="space-y-8">
+                  <div className="grid grid-cols-1 md:grid-cols-[280px_1fr] gap-8 py-6 border-b border-gray-200/60 dark:border-white/10">
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Application version</h3>
+                      <p className="text-sm text-gray-500 dark:text-slate-500 mt-1">Keep the desktop interface and local AI service updated together.</p>
+                    </div>
+                    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-white/5">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div className="flex items-center gap-4 min-w-0">
+                          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-300">
+                            <ShieldCheck className="h-5 w-5" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-slate-500">Current version</p>
+                            <p className="mt-1 text-lg font-semibold text-gray-900 dark:text-white">{effectiveUpdateState.currentVersion}</p>
+                          </div>
+                        </div>
+                        <span className="inline-flex w-fit items-center rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 ring-1 ring-indigo-100 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-500/30">
+                          Stable channel
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-[280px_1fr] gap-8 py-6 border-b border-gray-200/60 dark:border-white/10">
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Update status</h3>
+                      <p className="text-sm text-gray-500 dark:text-slate-500 mt-1">Updates install only after you approve the download and restart.</p>
+                    </div>
+                    <div className="space-y-4 min-w-0">
+                      {installedUpdateInfo && (
+                        <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-5 shadow-sm dark:border-emerald-500/30 dark:bg-emerald-500/10">
+                          <div className="flex items-start gap-3">
+                            <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                            <div className="min-w-0">
+                              <h4 className="text-sm font-semibold text-gray-900 dark:text-white">Updated successfully to version {installedUpdateInfo.currentVersion}</h4>
+                              <p className="mt-1 text-sm text-gray-600 dark:text-slate-300">Previously installed version: {installedUpdateInfo.previousVersion}</p>
+                              {installedUpdateInfo.releaseNotes && (
+                                <p className="mt-3 max-h-40 overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed text-gray-600 dark:text-slate-300">
+                                  {installedUpdateInfo.releaseNotes}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      <div className={`rounded-2xl border p-5 shadow-sm ${
+                        effectiveUpdateState.status === 'error'
+                          ? 'border-red-200 bg-red-50/70 dark:border-red-500/30 dark:bg-red-500/10'
+                          : effectiveUpdateState.status === 'up-to-date' || effectiveUpdateState.status === 'ready-to-install'
+                            ? 'border-emerald-200 bg-emerald-50/70 dark:border-emerald-500/30 dark:bg-emerald-500/10'
+                            : 'border-gray-200 bg-white dark:border-white/10 dark:bg-white/5'
+                      }`}>
+                        <div className="flex items-start gap-3">
+                          {(effectiveUpdateState.status === 'checking' || effectiveUpdateState.status === 'downloading' || effectiveUpdateState.status === 'preparing' || effectiveUpdateState.status === 'installing')
+                            ? <Loader2 className="mt-0.5 h-5 w-5 shrink-0 animate-spin text-indigo-600 dark:text-indigo-400" />
+                            : effectiveUpdateState.status === 'up-to-date' || effectiveUpdateState.status === 'ready-to-install'
+                              ? <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                              : <Info className={`mt-0.5 h-5 w-5 shrink-0 ${effectiveUpdateState.status === 'error' ? 'text-red-600 dark:text-red-400' : 'text-indigo-600 dark:text-indigo-400'}`} />}
+                          <div className="min-w-0 flex-1">
+                            <h4 className="text-sm font-semibold text-gray-900 dark:text-white">{updateStatusLabel[effectiveUpdateState.status]}</h4>
+                            {effectiveUpdateState.errorMessage && (
+                              <p className={`mt-1 text-sm leading-relaxed ${effectiveUpdateState.status === 'error' ? 'text-red-700 dark:text-red-300' : 'text-gray-500 dark:text-slate-400'}`}>
+                                {effectiveUpdateState.errorMessage}
+                              </p>
+                            )}
+                            {(effectiveUpdateState.status === 'downloading' || effectiveUpdateState.status === 'ready-to-install') && (
+                              <div className="mt-4">
+                                <div className="h-2 overflow-hidden rounded-full bg-gray-200 dark:bg-slate-700">
+                                  <motion.div
+                                    className="h-full rounded-full bg-indigo-600"
+                                    initial={false}
+                                    animate={{ width: `${Math.min(100, Math.max(0, effectiveUpdateState.percent ?? 0))}%` }}
+                                    transition={{ duration: 0.3 }}
+                                  />
+                                </div>
+                                <div className="mt-2 flex justify-between gap-3 text-xs text-gray-500 dark:text-slate-400">
+                                  <span>{Math.round(effectiveUpdateState.percent ?? 0)}%</span>
+                                  <span>{formatUpdateBytes(effectiveUpdateState.transferredBytes)} / {formatUpdateBytes(effectiveUpdateState.totalBytes)}</span>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {effectiveUpdateState.availableVersion && (
+                        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-white/5">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <h4 className="text-sm font-semibold text-gray-900 dark:text-white">Version {effectiveUpdateState.availableVersion}</h4>
+                            <span className="text-xs text-gray-500 dark:text-slate-400">{formatUpdateDate(effectiveUpdateState.releaseDate)}</span>
+                          </div>
+                          {effectiveUpdateState.releaseNotes && (
+                            <p className="mt-3 max-h-40 overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed text-gray-600 dark:text-slate-300">
+                              {effectiveUpdateState.releaseNotes}
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="flex flex-wrap gap-3">
+                        {(effectiveUpdateState.status === 'idle' || effectiveUpdateState.status === 'up-to-date' || effectiveUpdateState.status === 'error' || effectiveUpdateState.status === 'disabled') && (
+                          <button
+                            type="button"
+                            onClick={() => void runUpdateAction('check')}
+                            disabled={!effectiveUpdateState.installationEnabled || updateActionPending}
+                            className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm shadow-indigo-600/20 transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <RefreshCw className={`h-4 w-4 ${updateActionPending ? 'animate-spin' : ''}`} />
+                            {effectiveUpdateState.status === 'error' ? 'Retry' : 'Check for updates'}
+                          </button>
+                        )}
+                        {effectiveUpdateState.status === 'available' && (
+                          <button
+                            type="button"
+                            onClick={() => void runUpdateAction('download')}
+                            disabled={!effectiveUpdateState.installationEnabled || updateActionPending}
+                            className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm shadow-indigo-600/20 transition-colors hover:bg-indigo-700 disabled:opacity-50"
+                          >
+                            <Download className="h-4 w-4" /> Download update
+                          </button>
+                        )}
+                        {effectiveUpdateState.status === 'ready-to-install' && (
+                          <button
+                            type="button"
+                            onClick={() => void runUpdateAction('install')}
+                            disabled={!effectiveUpdateState.installationEnabled || updateActionPending}
+                            className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm shadow-indigo-600/20 transition-colors hover:bg-indigo-700 disabled:opacity-50"
+                          >
+                            <RotateCw className="h-4 w-4" /> Restart and update
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => void runUpdateAction('logs')}
+                          disabled={!window.desktop || updateActionPending}
+                          className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/20 dark:bg-white/5 dark:text-slate-300 dark:hover:bg-white/10"
+                        >
+                          <FileText className="h-4 w-4" /> Open update logs
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-slate-500">
+                        <Clock3 className="h-3.5 w-3.5" /> Last checked: {formatUpdateDate(effectiveUpdateState.lastCheckedAt)}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-[280px_1fr] gap-8 py-6">
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Update preferences</h3>
+                      <p className="text-sm text-gray-500 dark:text-slate-500 mt-1">These preferences save immediately and are separate from other Settings changes.</p>
+                    </div>
+                    <div className="space-y-4">
+                      {([
+                        ['automaticallyCheck', 'Automatically check for updates', 'Check once per day after the local service is ready.'],
+                        ['automaticallyDownload', 'Automatically download updates', 'Download only after you enable this option; restarting still requires approval.'],
+                      ] as const).map(([key, title, description]) => (
+                        <div key={key} className="flex items-start justify-between gap-4 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-white/5">
+                          <div>
+                            <h4 className="text-sm font-semibold text-gray-900 dark:text-white">{title}</h4>
+                            <p className="mt-1 text-xs leading-relaxed text-gray-500 dark:text-slate-400">{description}</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => void changeUpdatePreference(key)}
+                            disabled={!window.desktop}
+                            aria-pressed={updatePreferences[key]}
+                            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${updatePreferences[key] ? 'bg-indigo-600' : 'bg-gray-200 dark:bg-slate-700'}`}
+                          >
+                            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${updatePreferences[key] ? 'translate-x-6' : 'translate-x-1'}`} />
+                          </button>
+                        </div>
+                      ))}
+                      {updatePreferenceError && (
+                        <p className="text-sm text-red-600 dark:text-red-400">{updatePreferenceError}</p>
+                      )}
+                      <div className="rounded-xl border border-indigo-100 bg-indigo-50/60 p-4 text-sm leading-relaxed text-indigo-800 dark:border-indigo-500/20 dark:bg-indigo-500/10 dark:text-indigo-200">
+                        Before installation, My AI Library stops its local service and verifies a protected database backup. If that safety check fails, the update is cancelled and your current data is left unchanged.
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </motion.div>
           </AnimatePresence>
 
           {/* Action Buttons */}
-          <div className="mt-8 pt-6 border-t border-gray-200/60 dark:border-white/10 flex justify-end gap-3 pb-8">
+          {activeTab !== 'updates' && <div className="mt-8 pt-6 border-t border-gray-200/60 dark:border-white/10 flex justify-end gap-3 pb-8">
             <button 
               type="button" 
               onClick={handleCancel}
@@ -2733,7 +3037,7 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
                 )}
               </AnimatePresence>
             </button>
-          </div>
+          </div>}
         </div>
       </div>
 

@@ -16,7 +16,7 @@ import { GridBackground } from './components/grid';
 import { FileExplorerContainer as FileExplorer } from './components/FileExplorer/FileExplorer';
 import { PipelineQueueDock } from './components/PipelineQueueDock';
 import { motion, AnimatePresence } from "framer-motion";
-import { Loader2 } from 'lucide-react';
+import { CheckCircle2, Download, Loader2 } from 'lucide-react';
 import AudioPlayerApp from './components/audio-player/AudioPlayerApp';
 import VideoPlayerApp from './components/video-player/VideoPlayerApp';
 import NotebookApp from './components/notebook/App';
@@ -282,6 +282,48 @@ export default function App() {
   });
   const [selectedDocumentIntelligenceResourceId, setSelectedDocumentIntelligenceResourceId] = useState<string | null>(null);
   const [returnViewFromDocumentIntelligence, setReturnViewFromDocumentIntelligence] = useState<'home' | 'library' | 'folder' | 'downloads' | 'notebooks' | 'concepts' | 'chat' | 'metrics' | 'settings' | 'rag-explorer'>('library');
+  const [desktopUpdateState, setDesktopUpdateState] = useState<DesktopUpdateState | null>(null);
+  const [installedUpdateInfo, setInstalledUpdateInfo] = useState<DesktopInstalledUpdateInfo | null>(null);
+  const [dismissedAvailableVersion, setDismissedAvailableVersion] = useState<string | null>(null);
+  const [dismissedInstalledVersion, setDismissedInstalledVersion] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!window.desktop) return;
+    let active = true;
+    void Promise.all([
+      window.desktop.getUpdateState(),
+      window.desktop.getInstalledUpdate(),
+    ]).then(([state, installed]) => {
+      if (!active) return;
+      if (state) setDesktopUpdateState(state);
+      if (installed) setInstalledUpdateInfo(installed);
+    });
+    const stopState = window.desktop.onUpdateState((state) => {
+      if (active) setDesktopUpdateState(state);
+    });
+    const stopInstalled = window.desktop.onUpdateInstalled((info) => {
+      if (active) setInstalledUpdateInfo(info);
+    });
+    return () => {
+      active = false;
+      stopState();
+      stopInstalled();
+    };
+  }, []);
+
+  const openUpdatesTab = () => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('view', 'settings');
+    url.searchParams.set('tab', 'updates');
+    window.history.replaceState({}, '', `${url.pathname}${url.search}`);
+    setCurrentView('settings');
+    window.setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('myai:open-settings-tab', { detail: 'updates' }));
+    }, 0);
+  };
+
+  const updateBadgeVisible = !!desktopUpdateState && ['available', 'downloading', 'ready-to-install'].includes(desktopUpdateState.status);
+  const availableUpdateVersion = updateBadgeVisible ? desktopUpdateState?.availableVersion : undefined;
 
   const handleNavigateToFolder = (id: string, name: string) => {
     setSelectedPlaylistId(id);
@@ -589,6 +631,7 @@ export default function App() {
                   user={currentUser}
                   activeTab={currentView}
                   hasActiveDownloads={hasActiveDownloads}
+                  hasUpdateAvailable={updateBadgeVisible}
                   onTabChange={(tab) => {
                     if (
                       tab === 'home' ||
@@ -829,6 +872,91 @@ export default function App() {
           <ActivityLogPanel isOpen={isActivityLogOpen} onClose={toggleActivityLogPanel} />
         </DashboardLayout>
       )}
+
+      <AnimatePresence>
+        {isAuthenticated && availableUpdateVersion && dismissedAvailableVersion !== availableUpdateVersion && (
+          <motion.div
+            key={`available-update-${availableUpdateVersion}`}
+            initial={{ opacity: 0, y: 24, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 16, scale: 0.98 }}
+            transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+            className="fixed bottom-6 right-6 z-[9990] w-[calc(100%-3rem)] max-w-sm rounded-2xl border border-gray-200 bg-white/95 p-5 shadow-2xl backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/95"
+          >
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-300">
+                <Download className="h-5 w-5" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">My AI Library {availableUpdateVersion} is available</h3>
+                <p className="mt-1 text-sm leading-relaxed text-gray-500 dark:text-slate-400">
+                  {desktopUpdateState?.status === 'downloading'
+                    ? `Downloading securely — ${Math.round(desktopUpdateState.percent ?? 0)}%`
+                    : desktopUpdateState?.status === 'ready-to-install'
+                      ? 'The update is downloaded and ready to install.'
+                      : 'Review what’s new and download when you’re ready.'}
+                </p>
+                <div className="mt-4 flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={openUpdatesTab}
+                    className="rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-indigo-700"
+                  >
+                    View update
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDismissedAvailableVersion(availableUpdateVersion)}
+                    className="rounded-lg px-3.5 py-2 text-xs font-semibold text-gray-600 transition-colors hover:bg-gray-100 dark:text-slate-300 dark:hover:bg-white/10"
+                  >
+                    Later
+                  </button>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {isAuthenticated && installedUpdateInfo && dismissedInstalledVersion !== installedUpdateInfo.currentVersion && (
+          <motion.div
+            key={`installed-update-${installedUpdateInfo.currentVersion}`}
+            initial={{ opacity: 0, y: 24, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 16, scale: 0.98 }}
+            transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+            className="fixed bottom-6 right-6 z-[9991] w-[calc(100%-3rem)] max-w-sm rounded-2xl border border-emerald-200 bg-white/95 p-5 shadow-2xl backdrop-blur-xl dark:border-emerald-500/30 dark:bg-slate-900/95"
+          >
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-300">
+                <CheckCircle2 className="h-5 w-5" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">My AI Library was updated to {installedUpdateInfo.currentVersion}</h3>
+                <p className="mt-1 text-sm leading-relaxed text-gray-500 dark:text-slate-400">The new version and local AI service started successfully.</p>
+                <div className="mt-4 flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDismissedInstalledVersion(installedUpdateInfo.currentVersion);
+                      openUpdatesTab();
+                    }}
+                    className="rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-indigo-700"
+                  >
+                    View what’s new
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDismissedInstalledVersion(installedUpdateInfo.currentVersion)}
+                    className="rounded-lg px-3.5 py-2 text-xs font-semibold text-gray-600 transition-colors hover:bg-gray-100 dark:text-slate-300 dark:hover:bg-white/10"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Auth Expired Modal */}
       <AnimatePresence>

@@ -178,9 +178,18 @@ from services.resource_service import compute_bytes_content_hash, compute_file_c
 from services.note_service import NoteService, _sanitize_filename
 from sqlalchemy import or_, and_, text, func
 from sqlalchemy.orm import Session
-from database import SessionLocal, engine
+from database import DATABASE_PATH, SessionLocal, engine
+from core.schema_migrations import (
+    LEGACY_SCHEMA_VERSION,
+    complete_schema_migration,
+    prepare_schema_migration,
+    schema_migration_connection,
+)
 
-# Create tables automatically
+# Determine and back up pending schema work before create_all or any ALTER statement.
+migration_required = prepare_schema_migration(engine, DATABASE_PATH, LEGACY_SCHEMA_VERSION)
+
+# Create tables automatically as the first step of the recorded baseline migration.
 Base.metadata.create_all(bind=engine)
 
 from services.knowledge_stale_listener import register_knowledge_stale_listeners
@@ -191,7 +200,7 @@ ALLOWED_PROCESSING_TYPES = ["video", "audio", "pdf", "image", "docx"]
 
 # Ensure certain tables have new nullable columns (backfill migration)
 inspector = sqlalchemy.inspect(engine)
-with engine.connect() as conn:
+with schema_migration_connection(engine, migration_required) as conn:
     if "attachments" in inspector.get_table_names():
         existing = [c["name"] for c in inspector.get_columns("attachments")]
         if "chapter_id" not in existing:
@@ -525,6 +534,9 @@ with engine.connect() as conn:
                     conn.execute(text(f"ALTER TABLE user_settings ADD COLUMN {col} INTEGER DEFAULT {default}"))
 
     conn.commit()
+
+if migration_required:
+    complete_schema_migration(engine, DATABASE_PATH, LEGACY_SCHEMA_VERSION)
 
 app = FastAPI()
 

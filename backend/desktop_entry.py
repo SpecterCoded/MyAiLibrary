@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import secrets
 import threading
@@ -11,12 +12,18 @@ from pathlib import Path
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="My AI Library desktop backend")
-    parser.add_argument("--port", type=int, required=True)
-    parser.add_argument("--token", required=True)
+    parser.add_argument("--port", type=int)
+    parser.add_argument("--token")
     parser.add_argument("--data-dir", required=True)
     parser.add_argument("--ui-dir", default="")
     parser.add_argument("--ffmpeg-dir", default="")
-    return parser.parse_args()
+    parser.add_argument("--maintenance-backup", action="store_true")
+    parser.add_argument("--current-version", default="unknown")
+    parser.add_argument("--target-version", default="unknown")
+    args = parser.parse_args()
+    if not args.maintenance_backup and (args.port is None or not args.token):
+        parser.error("--port and --token are required when starting the desktop backend")
+    return args
 
 
 def ensure_jwt_secret(data_dir: Path) -> str:
@@ -44,6 +51,13 @@ def main() -> None:
     data_dir = Path(args.data_dir).expanduser().resolve()
     data_dir.mkdir(parents=True, exist_ok=True)
 
+    if args.maintenance_backup:
+        from desktop_maintenance import create_pre_update_backup
+
+        manifest_path = create_pre_update_backup(data_dir, args.current_version, args.target_version)
+        print(json.dumps({"manifestPath": str(manifest_path)}), flush=True)
+        return
+
     os.environ["MYAI_DESKTOP_MODE"] = "1"
     os.environ["MYAI_DESKTOP_PORT"] = str(args.port)
     os.environ["MYAI_DESKTOP_TOKEN"] = args.token
@@ -60,9 +74,19 @@ def main() -> None:
     # Legacy relative paths are deliberately rooted in the mutable desktop data directory.
     os.chdir(data_dir)
 
+    # Recover an interrupted/failed schema migration before importing any module
+    # that opens the active SQLite database.
+    from core.schema_migrations import recover_interrupted_schema_migration
+
+    recover_interrupted_schema_migration(data_dir)
+
     import uvicorn
     from desktop_runtime import configure_desktop_app
     from main import app
+
+    recovery_report = data_dir / "logs" / "migration-recovery.json"
+    if recovery_report.is_file():
+        recovery_report.unlink()
 
     shutdown_event = configure_desktop_app(app)
     server = uvicorn.Server(

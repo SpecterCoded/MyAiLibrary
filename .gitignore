@@ -132,6 +132,7 @@ wheels/
 !desktop/build/
 !desktop/build/**
 desktop/release/
+desktop/release-local/
 desktop/vendor/electron-dist/
 desktop/vendor/electron-v*-win32-x64.zip
 desktop/vendor/ffmpeg/ffmpeg.exe

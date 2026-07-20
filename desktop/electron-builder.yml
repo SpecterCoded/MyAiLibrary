@@ -54,6 +54,11 @@ nsis:
   deleteAppDataOnUninstall: false
   runAfterFinish: true
 
-# Signing and publishing are intentionally disabled for the test release.
-# electron-builder will automatically use WIN_CSC_LINK/WIN_CSC_KEY_PASSWORD later.
-publish: null
+# Release metadata is generated now, while in-app installation remains gated by
+# package.json updatesEnabled=false until the signed release workflow enables it.
+publish:
+  provider: github
+  owner: SpecterCoded
+  repo: MyAiLibrary
+  releaseType: release
+  channel: stable

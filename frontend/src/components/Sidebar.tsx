@@ -23,6 +23,7 @@ interface SidebarProps {
   user: BackendUser | null;
   activeTab?: string;
   hasActiveDownloads?: boolean;
+  hasUpdateAvailable?: boolean;
   onTabChange?: (tab: string) => void;
 }
 
@@ -37,7 +38,7 @@ const AVATAR_COLORS = [
   { bg: 'bg-teal-100', text: 'text-black', border: 'border-teal-200' },
 ];
 
-export default function Sidebar({ user, activeTab = 'home', hasActiveDownloads = false, onTabChange }: SidebarProps) {
+export default function Sidebar({ user, activeTab = 'home', hasActiveDownloads = false, hasUpdateAvailable = false, onTabChange }: SidebarProps) {
   const displayName = user?.username || user?.email?.split('@')[0] || 'Trader';
   const userId = user?.user_id || 'default_user';
 
@@ -169,6 +170,9 @@ export default function Sidebar({ user, activeTab = 'home', hasActiveDownloads =
               {item.icon}
               {item.id === 'downloads' && hasActiveDownloads && (
                 <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-blue-500 rounded-full border-2 border-white dark:border-slate-900 animate-pulse" />
+              )}
+              {item.id === 'settings' && hasUpdateAvailable && (
+                <span className="absolute -top-0.5 -right-0.5 w-3 h-3 bg-indigo-500 rounded-full border-2 border-white dark:border-slate-900 animate-pulse" />
               )}
               <div className="absolute left-full ml-5 px-2.5 py-1.5 bg-slate-800 text-white text-[11px] font-bold rounded-lg opacity-0 pointer-events-none whitespace-nowrap shadow-xl z-[100] transition-all duration-200 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0">
                 {item.tooltip}

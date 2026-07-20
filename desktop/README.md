@@ -21,4 +21,14 @@ Before packaging, populate `vendor/ffmpeg` with an x64 LGPL-compatible Windows d
 
 ## Signing and updates
 
-The test build is unsigned and unpublished. A future release can use `WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD`; no certificate material belongs in this repository. Add an electron-builder `publish` provider only when the update host is selected.
+The Updates tab and GitHub Releases provider are configured, but ordinary engineering builds keep `updatesEnabled` set to `false`. This prevents an unsigned build from installing updates.
+
+Production releases are created only by the tagged Windows release workflow. It requires `WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD` repository secrets, verifies the resulting Authenticode signature, and changes `updatesEnabled` to `true` only inside the release runner. Certificate material and GitHub publishing tokens must never be committed.
+
+Before installing a downloaded update, Electron stops the backend and invokes its offline maintenance mode. The helper checkpoints and backs up SQLite plus desktop configuration, verifies database integrity and SHA-256 hashes, and writes the completed snapshot beneath `%LOCALAPPDATA%\MyAILibrary\backups\pre-update`. A failed safety gate cancels installation and restarts the existing backend.
+
+For UI testing without a published release, set `MYAI_UPDATE_SIMULATION` to `available`, `downloading`, `ready`, or `installed` before running `npm run dev`. Simulation never contacts an update server or enables installation.
+
+For an actual local installer replacement test without a signing certificate, build specially marked engineering installers with `npm run build:test-update -- -Version 0.1.2` and `npm run build:test-update -- -Version 0.1.3 -SkipApplicationBuild`. Serve the newer version with `npm run serve:test-update -- -Version 0.1.3`, then use `npm run launch:test-update` from a second terminal to start the installed baseline with the required test environment. The updater accepts this mode only when the package contains `updatesTestMode=true`, and it rejects every feed that is not loopback HTTP. Ordinary and production packages retain `updatesTestMode=false` and cannot enable this channel through environment variables.
+
+Every packaged version must have `release-notes/<version>.md`. Both the engineering build helper and signed GitHub release workflow fail when the matching file is missing. electron-builder embeds these notes into update metadata so the Updates tab can show them before download and again after a successful restart.

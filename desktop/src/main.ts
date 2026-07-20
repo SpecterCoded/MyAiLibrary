@@ -1,12 +1,16 @@
 import { randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
-import { app, BrowserWindow, dialog, ipcMain, session, shell } from 'electron'
+import { app, autoUpdater as nativeAutoUpdater, BrowserWindow, dialog, ipcMain, session, shell } from 'electron'
 import { BackendRuntime, BackendState, startBackend, stopBackend } from './backend-process'
+import { createAndVerifyUpdateBackup } from './update-backup'
+import { DesktopUpdater } from './updater'
+import type { UpdatePreferences } from './update-types'
 
 let mainWindow: BrowserWindow | null = null
 let splashWindow: BrowserWindow | null = null
 let backend: BackendRuntime | null = null
+let updater: DesktopUpdater | null = null
 let quitting = false
 let allowedRendererOrigin = ''
 
@@ -71,6 +75,43 @@ function registerIpc(): void {
     return true
   })
   ipcMain.handle('desktop:get-version', (event) => senderIsTrusted(event.senderFrame?.url ?? '') ? app.getVersion() : '')
+  ipcMain.handle('desktop:get-update-state', (event) => senderIsTrusted(event.senderFrame?.url ?? '') ? updater?.getState() ?? null : null)
+  ipcMain.handle('desktop:check-for-updates', (event) => senderIsTrusted(event.senderFrame?.url ?? '') ? updater?.checkForUpdates(true) ?? null : null)
+  ipcMain.handle('desktop:download-update', (event) => senderIsTrusted(event.senderFrame?.url ?? '') ? updater?.downloadUpdate() ?? null : null)
+  ipcMain.handle('desktop:install-update', (event) => senderIsTrusted(event.senderFrame?.url ?? '') ? updater?.installUpdate() ?? null : null)
+  ipcMain.handle('desktop:get-update-preferences', (event) => senderIsTrusted(event.senderFrame?.url ?? '') ? updater?.getPreferences() ?? null : null)
+  ipcMain.handle('desktop:get-installed-update', (event) => senderIsTrusted(event.senderFrame?.url ?? '') ? updater?.getInstalledUpdate() ?? null : null)
+  ipcMain.handle('desktop:set-update-preferences', (event, preferences: unknown) => {
+    if (!senderIsTrusted(event.senderFrame?.url ?? '') || !preferences || typeof preferences !== 'object') return null
+    const candidate = preferences as Partial<UpdatePreferences>
+    if (
+      (candidate.automaticallyCheck !== undefined && typeof candidate.automaticallyCheck !== 'boolean') ||
+      (candidate.automaticallyDownload !== undefined && typeof candidate.automaticallyDownload !== 'boolean')
+    ) return null
+    return updater?.setPreferences(candidate) ?? null
+  })
+  ipcMain.handle('desktop:open-update-logs', (event) => senderIsTrusted(event.senderFrame?.url ?? '') ? updater?.openLogs() ?? false : false)
+}
+
+function configureBackendSession(origin: string, token: string): void {
+  session.defaultSession.webRequest.onBeforeSendHeaders({ urls: ['http://127.0.0.1:*/*'] }, (details, callback) => {
+    if (new URL(details.url).origin === origin || new URL(details.url).origin === allowedRendererOrigin) {
+      details.requestHeaders['x-myailibrary-desktop-token'] = token
+    }
+    callback({ requestHeaders: details.requestHeaders })
+  })
+  session.defaultSession.webRequest.onHeadersReceived({ urls: ['http://127.0.0.1:*/*'] }, (details, callback) => {
+    const responseOrigin = new URL(details.url).origin
+    if (!app.isPackaged || responseOrigin !== origin) {
+      callback({ responseHeaders: details.responseHeaders })
+      return
+    }
+    const responseHeaders = { ...details.responseHeaders }
+    delete responseHeaders['content-security-policy']
+    delete responseHeaders['Content-Security-Policy']
+    responseHeaders['Content-Security-Policy'] = [desktopContentSecurityPolicy]
+    callback({ responseHeaders })
+  })
 }
 
 function createSplash(): BrowserWindow {
@@ -124,19 +165,36 @@ function createMainWindow(): BrowserWindow {
 
 async function showStartupFailure(error: unknown, logPath?: string): Promise<void> {
   const message = error instanceof Error ? error.message : String(error)
+  let previousReleaseUrl: string | undefined
+  if (logPath) {
+    try {
+      const reportPath = path.join(path.dirname(logPath), 'migration-recovery.json')
+      const report = JSON.parse(readFileSync(reportPath, 'utf8')) as { previousVersion?: unknown }
+      if (typeof report.previousVersion === 'string' && /^\d+\.\d+\.\d+(?:[-.][0-9A-Za-z.-]+)?$/.test(report.previousVersion)) {
+        previousReleaseUrl = `https://github.com/SpecterCoded/MyAiLibrary/releases/tag/v${report.previousVersion}`
+      }
+    } catch {
+      // A recovery report exists only after an interrupted schema migration.
+    }
+  }
+  const buttons = ['Retry', ...(logPath ? ['Open logs'] : []), ...(previousReleaseUrl ? ['Open previous release'] : []), 'Exit']
   const choice = await dialog.showMessageBox({
     type: 'error',
     title: 'My AI Library could not start',
     message: 'The local AI service did not start.',
-    detail: `${message}${logPath ? `\n\nDiagnostics: ${logPath}` : ''}`,
-    buttons: logPath ? ['Retry', 'Open logs', 'Exit'] : ['Retry', 'Exit'],
+    detail: `${message}${logPath ? `\n\nDiagnostics: ${logPath}` : ''}${previousReleaseUrl ? '\n\nYour verified database backup was restored. You can reinstall the previous application version if this update cannot start.' : ''}`,
+    buttons,
     defaultId: 0,
-    cancelId: logPath ? 2 : 1,
+    cancelId: buttons.length - 1,
   })
-  if (choice.response === 0) {
+  const selected = buttons[choice.response]
+  if (selected === 'Retry') {
     await bootApplication()
-  } else if (logPath && choice.response === 1) {
+  } else if (selected === 'Open logs' && logPath) {
     shell.showItemInFolder(logPath)
+    await showStartupFailure(error, logPath)
+  } else if (selected === 'Open previous release' && previousReleaseUrl) {
+    await shell.openExternal(previousReleaseUrl)
     await showStartupFailure(error, logPath)
   } else {
     app.quit()
@@ -154,29 +212,7 @@ async function bootApplication(): Promise<void> {
     backend = await startBackend({ dataDir: dataRoot, token, onState: sendBackendState })
     const rendererUrl = app.isPackaged ? backend.origin : process.env.ELECTRON_RENDERER_URL || 'http://127.0.0.1:5173'
     allowedRendererOrigin = new URL(rendererUrl).origin
-
-    const localOrigins = new Set([backend.origin, allowedRendererOrigin])
-    session.defaultSession.webRequest.onBeforeSendHeaders({ urls: ['http://127.0.0.1:*/*'] }, (details, callback) => {
-      const origin = new URL(details.url).origin
-      if (localOrigins.has(origin)) {
-        details.requestHeaders['x-myailibrary-desktop-token'] = token
-      }
-      callback({ requestHeaders: details.requestHeaders })
-    })
-    session.defaultSession.webRequest.onHeadersReceived({ urls: ['http://127.0.0.1:*/*'] }, (details, callback) => {
-      const origin = new URL(details.url).origin
-      // Vite injects its React refresh bootstrap during development. Applying the
-      // production CSP to that page blocks the bootstrap and leaves a blank window.
-      if (!app.isPackaged || origin !== backend?.origin) {
-        callback({ responseHeaders: details.responseHeaders })
-        return
-      }
-      const responseHeaders = { ...details.responseHeaders }
-      delete responseHeaders['content-security-policy']
-      delete responseHeaders['Content-Security-Policy']
-      responseHeaders['Content-Security-Policy'] = [desktopContentSecurityPolicy]
-      callback({ responseHeaders })
-    })
+    configureBackendSession(backend.origin, token)
 
     mainWindow = createMainWindow()
     mainWindow.once('ready-to-show', () => {
@@ -185,6 +221,8 @@ async function bootApplication(): Promise<void> {
       mainWindow?.show()
     })
     await mainWindow.loadURL(rendererUrl)
+    updater?.markApplicationReady()
+    updater?.scheduleAutomaticCheck()
   } catch (error) {
     splashWindow?.hide()
     await showStartupFailure(error, backend?.logPath ?? path.join(dataRoot, 'logs', 'backend.log'))
@@ -202,6 +240,24 @@ app.on('second-instance', () => {
 app.whenReady().then(async () => {
   if (!gotSingleInstanceLock) return
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
+  const dataRoot = desktopDataRoot()
+  updater = new DesktopUpdater(dataRoot, async (targetVersion) => {
+    const previousToken = backend?.token ?? randomBytes(32).toString('hex')
+    await stopBackend(backend, sendBackendState)
+    backend = null
+    try {
+      await createAndVerifyUpdateBackup(dataRoot, app.getVersion(), targetVersion)
+    } catch (error) {
+      // The installer has not started, so restore normal app service before reporting the failure.
+      backend = await startBackend({ dataDir: dataRoot, token: previousToken, onState: sendBackendState })
+      const rendererUrl = app.isPackaged ? backend.origin : process.env.ELECTRON_RENDERER_URL || 'http://127.0.0.1:5173'
+      allowedRendererOrigin = new URL(rendererUrl).origin
+      configureBackendSession(backend.origin, previousToken)
+      if (app.isPackaged && mainWindow && !mainWindow.isDestroyed()) await mainWindow.loadURL(rendererUrl)
+      throw error
+    }
+  })
+  nativeAutoUpdater.on('before-quit-for-update', () => { quitting = true })
   registerIpc()
   await bootApplication()
 })
