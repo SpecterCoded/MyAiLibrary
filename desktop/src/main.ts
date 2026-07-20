@@ -86,7 +86,8 @@ function registerIpc(): void {
     const candidate = preferences as Partial<UpdatePreferences>
     if (
       (candidate.automaticallyCheck !== undefined && typeof candidate.automaticallyCheck !== 'boolean') ||
-      (candidate.automaticallyDownload !== undefined && typeof candidate.automaticallyDownload !== 'boolean')
+      (candidate.automaticallyDownload !== undefined && typeof candidate.automaticallyDownload !== 'boolean') ||
+      (candidate.channel !== undefined && candidate.channel !== 'stable' && candidate.channel !== 'testing')
     ) return null
     return updater?.setPreferences(candidate) ?? null
   })

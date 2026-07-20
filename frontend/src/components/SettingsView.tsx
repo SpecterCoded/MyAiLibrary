@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Slider from '@mui/material/Slider';
 import { type BackendUser } from './DashboardHeader';
-import { UploadCloud, CheckCircle2, Monitor, Moon, Sun, Plus, FolderOpen, Loader2, Info, RefreshCw, Download, ShieldCheck, Clock3, FileText, RotateCw } from 'lucide-react';
+import { UploadCloud, CheckCircle2, Monitor, Moon, Sun, Plus, FolderOpen, Loader2, Info, RefreshCw, Download, ShieldCheck, ShieldAlert, Clock3, FileText, RotateCw } from 'lucide-react';
 import { EmailAuthProvider, reauthenticateWithCredential, updatePassword, signOut } from 'firebase/auth';
 import { auth } from '../firebase';
 import { selectFile, selectFolder } from '../utils/desktop';
@@ -195,10 +195,12 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
   const [updatePreferences, setUpdatePreferences] = useState<DesktopUpdatePreferences>({
     automaticallyCheck: true,
     automaticallyDownload: false,
+    channel: 'stable',
   });
   const [updateActionPending, setUpdateActionPending] = useState(false);
   const [updatePreferenceError, setUpdatePreferenceError] = useState<string | null>(null);
   const [installedUpdateInfo, setInstalledUpdateInfo] = useState<DesktopInstalledUpdateInfo | null>(null);
+  const [confirmTestingChannel, setConfirmTestingChannel] = useState(false);
 
   // New storage path state
   const [newLibName, setNewLibName] = useState('');
@@ -271,7 +273,7 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
     }
   };
 
-  const changeUpdatePreference = async (key: keyof DesktopUpdatePreferences) => {
+  const changeUpdatePreference = async (key: 'automaticallyCheck' | 'automaticallyDownload') => {
     if (!window.desktop) return;
     const previous = updatePreferences;
     const next = { ...previous, [key]: !previous[key] };
@@ -284,6 +286,23 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
     } catch {
       setUpdatePreferences(previous);
       setUpdatePreferenceError('The update preference could not be saved.');
+    }
+  };
+
+  const changeUpdateChannel = async (channel: 'stable' | 'testing') => {
+    if (!window.desktop || channel === updatePreferences.channel) return;
+    const previous = updatePreferences;
+    const next = { ...previous, channel };
+    setUpdatePreferences(next);
+    setUpdatePreferenceError(null);
+    setConfirmTestingChannel(false);
+    try {
+      const saved = await window.desktop.setUpdatePreferences(next);
+      if (!saved || saved.channel !== channel) throw new Error('Channel was rejected.');
+      setUpdatePreferences(saved);
+    } catch {
+      setUpdatePreferences(previous);
+      setUpdatePreferenceError('The update channel could not be changed.');
     }
   };
 
@@ -1223,6 +1242,9 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
     status: window.desktop ? 'idle' : 'disabled',
     currentVersion: window.desktop ? 'Loading…' : 'Browser development',
     installationEnabled: false,
+    channel: 'stable',
+    testingChannelAvailable: false,
+    unsignedTestingMode: false,
     errorMessage: window.desktop
       ? undefined
       : 'Updates are available only in the installed desktop application.',
@@ -2775,8 +2797,12 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
                             <p className="mt-1 text-lg font-semibold text-gray-900 dark:text-white">{effectiveUpdateState.currentVersion}</p>
                           </div>
                         </div>
-                        <span className="inline-flex w-fit items-center rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 ring-1 ring-indigo-100 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-500/30">
-                          Stable channel
+                        <span className={`inline-flex w-fit items-center rounded-full px-3 py-1 text-xs font-semibold ring-1 ${
+                          effectiveUpdateState.channel === 'testing'
+                            ? 'bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-500/30'
+                            : 'bg-indigo-50 text-indigo-700 ring-indigo-100 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-500/30'
+                        }`}>
+                          {effectiveUpdateState.channel === 'testing' ? 'Testing channel' : 'Stable channel'}
                         </span>
                       </div>
                     </div>
@@ -2788,6 +2814,19 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
                       <p className="text-sm text-gray-500 dark:text-slate-500 mt-1">Updates install only after you approve the download and restart.</p>
                     </div>
                     <div className="space-y-4 min-w-0">
+                      {effectiveUpdateState.unsignedTestingMode && (
+                        <div className="rounded-2xl border border-amber-200 bg-amber-50/80 p-5 shadow-sm dark:border-amber-500/30 dark:bg-amber-500/10">
+                          <div className="flex items-start gap-3">
+                            <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
+                            <div>
+                              <h4 className="text-sm font-semibold text-amber-950 dark:text-amber-100">Unsigned Testing updates are enabled</h4>
+                              <p className="mt-1 text-sm leading-relaxed text-amber-800 dark:text-amber-200">
+                                Beta installers are verified against their published checksum and protected by the normal backup gate, but Windows cannot verify their publisher identity. Use this channel only for trusted preview releases.
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                       {installedUpdateInfo && (
                         <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-5 shadow-sm dark:border-emerald-500/30 dark:bg-emerald-500/10">
                           <div className="flex items-start gap-3">
@@ -2911,6 +2950,53 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
                       <p className="text-sm text-gray-500 dark:text-slate-500 mt-1">These preferences save immediately and are separate from other Settings changes.</p>
                     </div>
                     <div className="space-y-4">
+                      <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-white/5">
+                        <div className="mb-3">
+                          <h4 className="text-sm font-semibold text-gray-900 dark:text-white">Update channel</h4>
+                          <p className="mt-1 text-xs leading-relaxed text-gray-500 dark:text-slate-400">Stable requires signed releases. Testing accepts explicitly published unsigned Beta previews.</p>
+                        </div>
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                          <button
+                            type="button"
+                            onClick={() => void changeUpdateChannel('stable')}
+                            className={`rounded-xl border p-4 text-left transition-colors ${updatePreferences.channel === 'stable' ? 'border-indigo-400 bg-indigo-50 ring-1 ring-indigo-200 dark:border-indigo-400/60 dark:bg-indigo-500/10 dark:ring-indigo-500/30' : 'border-gray-200 hover:bg-gray-50 dark:border-white/10 dark:hover:bg-white/5'}`}
+                          >
+                            <div className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-white"><ShieldCheck className="h-4 w-4 text-indigo-600 dark:text-indigo-400" /> Stable</div>
+                            <p className="mt-1 text-xs leading-relaxed text-gray-500 dark:text-slate-400">Signed production releases only.</p>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={!effectiveUpdateState.testingChannelAvailable}
+                            onClick={() => setConfirmTestingChannel(true)}
+                            className={`rounded-xl border p-4 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${updatePreferences.channel === 'testing' ? 'border-amber-400 bg-amber-50 ring-1 ring-amber-200 dark:border-amber-400/60 dark:bg-amber-500/10 dark:ring-amber-500/30' : 'border-gray-200 hover:bg-gray-50 dark:border-white/10 dark:hover:bg-white/5'}`}
+                          >
+                            <div className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-white"><ShieldAlert className="h-4 w-4 text-amber-600 dark:text-amber-400" /> Testing</div>
+                            <p className="mt-1 text-xs leading-relaxed text-gray-500 dark:text-slate-400">Unsigned Beta releases for trusted testers.</p>
+                          </button>
+                        </div>
+                        {!effectiveUpdateState.testingChannelAvailable && (
+                          <p className="mt-3 text-xs text-gray-500 dark:text-slate-500">The Testing channel is available only in a Beta-capable installer.</p>
+                        )}
+                        <AnimatePresence initial={false}>
+                          {confirmTestingChannel && updatePreferences.channel !== 'testing' && (
+                            <motion.div
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: 'auto' }}
+                              exit={{ opacity: 0, height: 0 }}
+                              className="overflow-hidden"
+                            >
+                              <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-500/30 dark:bg-amber-500/10">
+                                <p className="text-sm font-semibold text-amber-950 dark:text-amber-100">Enable unsigned Testing updates?</p>
+                                <p className="mt-1 text-xs leading-relaxed text-amber-800 dark:text-amber-200">Only continue if you trust preview releases published by this project. Windows may show Unknown publisher warnings.</p>
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                  <button type="button" onClick={() => void changeUpdateChannel('testing')} className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-amber-700">Enable Testing</button>
+                                  <button type="button" onClick={() => setConfirmTestingChannel(false)} className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-900 transition-colors hover:bg-amber-100 dark:border-amber-500/40 dark:bg-transparent dark:text-amber-100 dark:hover:bg-amber-500/10">Cancel</button>
+                                </div>
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
                       {([
                         ['automaticallyCheck', 'Automatically check for updates', 'Check once per day after the local service is ready.'],
                         ['automaticallyDownload', 'Automatically download updates', 'Download only after you enable this option; restarting still requires approval.'],

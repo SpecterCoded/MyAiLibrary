@@ -1,22 +1,26 @@
-name: Windows signed release
+name: Windows unsigned beta release
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: Beta semantic version, for example 0.1.4-beta.1
+        required: true
+        type: string
   push:
     tags:
-      - "v*.*.*"
+      - "v*-beta.*"
 
 permissions:
   contents: write
 
 jobs:
   release:
-    if: ${{ !contains(github.ref_name, '-') }}
     runs-on: windows-2025
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-      WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      EP_PRE_RELEASE: "true"
     steps:
       - uses: actions/checkout@v4
 
@@ -36,12 +40,14 @@ jobs:
             backend/requirements.txt
             backend/requirements-build.txt
 
-      - name: Require signing credentials
+      - name: Validate beta version and release notes
         shell: pwsh
         run: |
-          if (-not $env:WIN_CSC_LINK -or -not $env:WIN_CSC_KEY_PASSWORD) {
-            throw "Signed releases require WIN_CSC_LINK and WIN_CSC_KEY_PASSWORD repository secrets."
-          }
+          $version = if ("${{ github.event_name }}" -eq "workflow_dispatch") { "${{ inputs.version }}" } else { "${{ github.ref_name }}".TrimStart("v") }
+          if ($version -notmatch '^\d+\.\d+\.\d+-beta\.\d+$') { throw "Testing releases require a version like 0.1.4-beta.1." }
+          $releaseNotes = (Resolve-Path "desktop/release-notes/$version.md" -ErrorAction Stop).Path
+          "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "RELEASE_NOTES_FILE=$releaseNotes" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Install dependencies
         shell: pwsh
@@ -50,17 +56,13 @@ jobs:
           npm ci --prefix desktop
           python -m pip install -r backend/requirements.txt -r backend/requirements-build.txt
 
-      - name: Set release version and secure update policy
+      - name: Enable only the unsigned beta channel
         shell: pwsh
         run: |
-          $version = "${{ github.ref_name }}".TrimStart("v")
-          if ($version -notmatch '^\d+\.\d+\.\d+([-.][0-9A-Za-z.-]+)?$') { throw "Release tag is not a semantic version." }
-          $releaseNotes = (Resolve-Path "desktop/release-notes/$version.md" -ErrorAction Stop).Path
-          "RELEASE_NOTES_FILE=$releaseNotes" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          npm --prefix desktop version $version --no-git-tag-version
-          npm --prefix desktop pkg set updatesEnabled=true
+          npm --prefix desktop version $env:RELEASE_VERSION --no-git-tag-version
+          npm --prefix desktop pkg set updatesEnabled=false
           npm --prefix desktop pkg set updatesTestMode=false
-          npm --prefix desktop pkg set updatesTestingEnabled=false
+          npm --prefix desktop pkg set updatesTestingEnabled=true
 
       - name: Prepare pinned FFmpeg
         shell: pwsh
@@ -70,25 +72,23 @@ jobs:
         shell: pwsh
         run: npm --prefix desktop run build
 
-      - name: Package and publish signed NSIS update
+      - name: Package and publish unsigned beta NSIS update
         shell: pwsh
         run: |
-          npm --prefix desktop exec electron-builder -- --win nsis --x64 --publish always --config.electronDist=node_modules/electron/dist --config.releaseInfo.releaseNotesFile="$env:RELEASE_NOTES_FILE"
+          npm --prefix desktop exec electron-builder -- --win nsis --x64 --publish always --config.electronDist=node_modules/electron/dist --config.win.verifyUpdateCodeSignature=false --config.publish.channel=beta --config.publish.releaseType=prerelease --config.releaseInfo.releaseNotesFile="$env:RELEASE_NOTES_FILE"
 
-      - name: Verify Authenticode and generate checksum
+      - name: Generate checksum
         shell: pwsh
         run: |
           $installer = Get-ChildItem desktop/release/MyAI-Library-Setup-*-x64.exe | Select-Object -Single
-          $signature = Get-AuthenticodeSignature -LiteralPath $installer.FullName
-          if ($signature.Status -ne 'Valid') { throw "Installer signature is not valid: $($signature.Status)" }
           $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $installer.FullName
           "$($hash.Hash.ToLower())  $($installer.Name)" | Set-Content desktop/release/SHA256SUMS.txt -Encoding ascii
-          gh release upload "${{ github.ref_name }}" desktop/release/SHA256SUMS.txt --clobber
+          gh release upload "v$env:RELEASE_VERSION" desktop/release/SHA256SUMS.txt --clobber
 
-      - name: Retain release artifacts
+      - name: Retain beta artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: my-ai-library-windows-${{ github.ref_name }}
+          name: my-ai-library-windows-${{ env.RELEASE_VERSION }}
           path: |
             desktop/release/MyAI-Library-Setup-*-x64.exe
             desktop/release/*.blockmap

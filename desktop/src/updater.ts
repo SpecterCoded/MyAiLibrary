@@ -21,7 +21,14 @@ function plainReleaseNotes(value: UpdateInfo['releaseNotes']): string | undefine
     ? value.map((note) => `${note.version ? `${note.version}\n` : ''}${note.note ?? ''}`).join('\n\n')
     : value
   if (!raw) return undefined
-  return raw.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 12_000) || undefined
+  return raw
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\r\n?/g, '\n')
+    .replace(/[\t ]+/g, ' ')
+    .replace(/ *\n */g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+    .slice(0, 12_000) || undefined
 }
 
 function safeError(error: unknown): string {
@@ -55,6 +62,8 @@ export class DesktopUpdater {
   private installedUpdate: InstalledUpdateInfo | null = null
   private readonly simulationMode: string
   private readonly localTestFeed: string | null
+  private readonly releaseUpdatesEnabled: boolean
+  private readonly unsignedTestingAvailable: boolean
 
   constructor(dataRoot: string, prepareInstall: PrepareInstall) {
     this.configDir = path.join(dataRoot, 'config')
@@ -77,13 +86,16 @@ export class DesktopUpdater {
     this.preferences = this.readPreferences()
     let releaseEnablesUpdates = false
     let packageAllowsLocalTesting = false
+    let packageAllowsUnsignedTesting = false
     try {
       const metadata = JSON.parse(readFileSync(path.join(app.getAppPath(), 'package.json'), 'utf8')) as {
         updatesEnabled?: unknown
         updatesTestMode?: unknown
+        updatesTestingEnabled?: unknown
       }
       releaseEnablesUpdates = metadata.updatesEnabled === true
       packageAllowsLocalTesting = metadata.updatesTestMode === true
+      packageAllowsUnsignedTesting = metadata.updatesTestingEnabled === true
     } catch (error) {
       log.warn('Could not read packaged update policy', safeError(error))
     }
@@ -97,9 +109,11 @@ export class DesktopUpdater {
     } else if (packageAllowsLocalTesting && process.env.MYAI_ENABLE_TEST_UPDATES === '1') {
       log.warn('Local engineering update mode was requested without a valid loopback HTTP feed.')
     }
-    const installationEnabled = app.isPackaged && (
-      releaseEnablesUpdates || process.env.MYAI_ENABLE_SIGNED_UPDATES === '1' || this.localTestFeed !== null
-    )
+    this.releaseUpdatesEnabled = app.isPackaged && (releaseEnablesUpdates || process.env.MYAI_ENABLE_SIGNED_UPDATES === '1')
+    this.unsignedTestingAvailable = app.isPackaged && packageAllowsUnsignedTesting
+    if (!this.unsignedTestingAvailable && this.preferences.channel === 'testing') this.preferences.channel = 'stable'
+    this.configureChannel()
+    const installationEnabled = this.installationEnabled()
     const simulatedStatus = this.simulationMode === 'available'
       ? 'available'
       : this.simulationMode === 'downloading'
@@ -118,6 +132,9 @@ export class DesktopUpdater {
       totalBytes: simulatedStatus ? 83_886_080 : undefined,
       lastCheckedAt: this.preferences.lastCheckedAt,
       installationEnabled,
+      channel: this.preferences.channel,
+      testingChannelAvailable: this.unsignedTestingAvailable,
+      unsignedTestingMode: this.unsignedTestingMode(),
       errorMessage: simulatedStatus
         ? 'Development simulation only. Downloading and installation are disabled.'
         : this.localTestFeed
@@ -137,6 +154,7 @@ export class DesktopUpdater {
       return {
         automaticallyCheck: typeof stored.automaticallyCheck === 'boolean' ? stored.automaticallyCheck : true,
         automaticallyDownload: typeof stored.automaticallyDownload === 'boolean' ? stored.automaticallyDownload : false,
+        channel: stored.channel === 'testing' ? 'testing' : 'stable',
         lastCheckedAt: typeof stored.lastCheckedAt === 'string' ? stored.lastCheckedAt : undefined,
       }
     } catch {
@@ -205,6 +223,7 @@ export class DesktopUpdater {
     return {
       automaticallyCheck: this.preferences.automaticallyCheck,
       automaticallyDownload: this.preferences.automaticallyDownload,
+      channel: this.preferences.channel,
     }
   }
 
@@ -258,8 +277,50 @@ export class DesktopUpdater {
   setPreferences(value: Partial<UpdatePreferences>): UpdatePreferences {
     if (typeof value.automaticallyCheck === 'boolean') this.preferences.automaticallyCheck = value.automaticallyCheck
     if (typeof value.automaticallyDownload === 'boolean') this.preferences.automaticallyDownload = value.automaticallyDownload
+    if (value.channel === 'stable' || (value.channel === 'testing' && this.unsignedTestingAvailable)) {
+      this.preferences.channel = value.channel
+      this.configureChannel()
+      this.busy = false
+      this.emit({
+        status: this.installationEnabled() ? 'idle' : 'disabled',
+        channel: this.preferences.channel,
+        installationEnabled: this.installationEnabled(),
+        unsignedTestingMode: this.unsignedTestingMode(),
+        availableVersion: undefined,
+        releaseDate: undefined,
+        releaseNotes: undefined,
+        percent: undefined,
+        transferredBytes: undefined,
+        totalBytes: undefined,
+        errorMessage: this.installationEnabled()
+          ? undefined
+          : 'Secure Stable updates will be enabled after this build is Authenticode-signed.',
+      })
+    }
     this.savePreferences()
     return this.getPreferences()
+  }
+
+  private configureChannel(): void {
+    if (this.localTestFeed) {
+      autoUpdater.allowPrerelease = false
+      autoUpdater.channel = 'stable'
+      return
+    }
+    const testing = this.preferences.channel === 'testing' && this.unsignedTestingAvailable
+    autoUpdater.allowPrerelease = testing
+    autoUpdater.channel = testing ? 'beta' : 'stable'
+    log.info('Update channel configured', { channel: testing ? 'testing' : 'stable' })
+  }
+
+  private unsignedTestingMode(): boolean {
+    return this.preferences.channel === 'testing' && this.unsignedTestingAvailable && this.localTestFeed === null
+  }
+
+  private installationEnabled(): boolean {
+    if (this.localTestFeed) return true
+    if (this.unsignedTestingMode()) return true
+    return this.releaseUpdatesEnabled
   }
 
   async checkForUpdates(manual = true): Promise<UpdateState> {

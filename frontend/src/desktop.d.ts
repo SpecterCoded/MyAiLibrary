@@ -18,11 +18,15 @@ declare global {
     lastCheckedAt?: string
     errorMessage?: string
     installationEnabled: boolean
+    channel: 'stable' | 'testing'
+    testingChannelAvailable: boolean
+    unsignedTestingMode: boolean
   }
 
   interface DesktopUpdatePreferences {
     automaticallyCheck: boolean
     automaticallyDownload: boolean
+    channel: 'stable' | 'testing'
   }
 
   interface DesktopInstalledUpdateInfo {
