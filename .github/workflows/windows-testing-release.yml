@@ -77,7 +77,7 @@ jobs:
         run: |
           Push-Location desktop
           try {
-            & .\node_modules\.bin\electron-builder.cmd --win nsis --x64 --publish always --config.electronDist=node_modules/electron/dist --config.win.verifyUpdateCodeSignature=false --config.publish.channel=beta --config.publish.releaseType=prerelease --config.releaseInfo.releaseNotesFile="$env:RELEASE_NOTES_FILE"
+            & .\node_modules\.bin\electron-builder.cmd --win nsis --x64 --publish always --config.win.verifyUpdateCodeSignature=false --config.publish.channel=beta --config.publish.releaseType=prerelease --config.releaseInfo.releaseNotesFile="$env:RELEASE_NOTES_FILE"
             if ($LASTEXITCODE -ne 0) { throw "Electron Builder failed with exit code $LASTEXITCODE." }
           } finally {
             Pop-Location
