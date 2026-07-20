@@ -2,7 +2,6 @@ appId: com.myailibrary.desktop
 productName: My AI Library
 copyright: Copyright © 2026 My AI Library
 asar: true
-electronDist: vendor/electron-dist
 
 directories:
   output: release
