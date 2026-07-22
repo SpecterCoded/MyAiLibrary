@@ -343,12 +343,12 @@ export const CarouselPreview: React.FC<CarouselPreviewProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/85 backdrop-blur-md animate-fade-in"
+      className="absolute inset-0 z-[9999] flex items-center justify-center bg-slate-950/85 backdrop-blur-md animate-fade-in"
       onClick={onClose}
     >
       <ToastContainer toasts={toasts} onDismiss={removeToast} />
       {/* Floating preview controls. Keep this compact so it does not read like the app navbar. */}
-      <div className="absolute top-5 left-6 right-[172px] flex items-start justify-between gap-4 pointer-events-none z-10">
+      <div className="absolute top-5 left-6 right-6 flex items-start justify-between gap-4 pointer-events-none z-10">
         <div className="max-w-[45vw] rounded-xl bg-black/20 px-3 py-2 text-white font-medium truncate select-none backdrop-blur-md">
           {currentItem.name}
         </div>

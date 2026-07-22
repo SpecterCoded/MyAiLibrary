@@ -464,7 +464,6 @@ export default function App() {
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isNotificationPanelOpen, setIsNotificationPanelOpen] = useState(false);
   const [isActivityLogOpen, setIsActivityLogOpen] = useState(false);
-  const [isFileCarouselOpen, setIsFileCarouselOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [currentView, setCurrentView] = useState<DashboardView>(() => {
     const params = new URLSearchParams(window.location.search);
@@ -814,19 +813,6 @@ export default function App() {
   }, [currentView]);
 
   useEffect(() => {
-    const handleFileCarouselState = (event: Event) => {
-      const open = Boolean((event as CustomEvent<{ open?: boolean }>).detail?.open);
-      setIsFileCarouselOpen(open);
-      void window.desktop?.setWindowControlsHidden(open);
-    };
-    window.addEventListener('myai:file-carousel-state', handleFileCarouselState);
-    return () => {
-      window.removeEventListener('myai:file-carousel-state', handleFileCarouselState);
-      void window.desktop?.setWindowControlsHidden(false);
-    };
-  }, []);
-
-  useEffect(() => {
     const handleAppNavigate = (e: Event) => {
       const customEvent = e as CustomEvent;
       const { view, id, name, resourceId } = customEvent.detail;
@@ -967,16 +953,14 @@ export default function App() {
         />
       ) : (
         <DashboardLayout key="dashboard-layout">
-          {!isFileCarouselOpen && (
-            <WorkspaceTitleBar
-              tabs={workspaceTabs}
-              activeTabId={workspaceTabsState.activeTabId}
-              maxTabs={MAX_WORKSPACE_TABS}
-              onSelectTab={handleSelectWorkspaceTab}
-              onNewTab={handleNewWorkspaceTab}
-              onCloseTab={handleCloseWorkspaceTab}
-            />
-          )}
+          <WorkspaceTitleBar
+            tabs={workspaceTabs}
+            activeTabId={workspaceTabsState.activeTabId}
+            maxTabs={MAX_WORKSPACE_TABS}
+            onSelectTab={handleSelectWorkspaceTab}
+            onNewTab={handleNewWorkspaceTab}
+            onCloseTab={handleCloseWorkspaceTab}
+          />
           <div className="relative flex min-h-0 flex-1 overflow-hidden">
           <AnimatePresence mode="wait">
             {activeWorkspaceTab?.kind === 'audio-player' ? (
