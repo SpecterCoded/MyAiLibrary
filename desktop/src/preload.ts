@@ -17,6 +17,10 @@ contextBridge.exposeInMainWorld('desktop', {
   getInstalledUpdate: (): Promise<InstalledUpdateInfo | null> => ipcRenderer.invoke('desktop:get-installed-update'),
   setUpdatePreferences: (preferences: Partial<UpdatePreferences>): Promise<UpdatePreferences | null> => ipcRenderer.invoke('desktop:set-update-preferences', preferences),
   openUpdateLogs: (): Promise<boolean> => ipcRenderer.invoke('desktop:open-update-logs'),
+  getAppInfo: (): Promise<Record<string, unknown> | null> => ipcRenderer.invoke('desktop:get-app-info'),
+  openBackendLogTerminal: (): Promise<boolean> => ipcRenderer.invoke('desktop:open-backend-log-terminal'),
+  setTitleBarTheme: (theme: 'light' | 'dark'): Promise<boolean> => ipcRenderer.invoke('desktop:set-titlebar-theme', theme),
+  setWindowControlsHidden: (hidden: boolean): Promise<boolean> => ipcRenderer.invoke('desktop:set-window-controls-hidden', hidden),
   onBackendState: (listener: BackendStateListener): (() => void) => {
     const wrapped = (_event: Electron.IpcRendererEvent, state: BackendState, detail?: string) => listener(state, detail)
     ipcRenderer.on('desktop:backend-state', wrapped)

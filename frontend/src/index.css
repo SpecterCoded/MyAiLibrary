@@ -1,6 +1,15 @@
 @import "tailwindcss";
 @custom-variant dark (&:where(.dark, .dark *));
 
+.workspace-drag-region {
+  -webkit-app-region: drag;
+}
+
+.workspace-tab,
+.workspace-tab-add {
+  -webkit-app-region: no-drag;
+}
+
 @theme {
   --font-sans: "Plus Jakarta Sans", "Outfit", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-display: "Plus Jakarta Sans", "Outfit", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -510,6 +519,72 @@ a.hover\:bg-white\/50:hover {
   background-color: rgba(255, 255, 255, 0.05) !important;
 }
 
+/* Notebook dialogs must stay opaque above the glassy notebook workspace. */
+html body .notebook-settings-dialog,
+html body .notebook-help-dialog {
+  background: #ffffff !important;
+  background-color: #ffffff !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+html body .notebook-settings-sidebar,
+html body .notebook-help-header {
+  background: #f7f7f5 !important;
+  background-color: #f7f7f5 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+html body .notebook-settings-panel,
+html body .notebook-help-body {
+  background: #ffffff !important;
+  background-color: #ffffff !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+html.dark body .notebook-settings-dialog,
+html.dark body .notebook-help-dialog {
+  background: var(--dk-surface-1) !important;
+  background-color: var(--dk-surface-1) !important;
+}
+
+html.dark body .notebook-settings-sidebar,
+html.dark body .notebook-help-header {
+  background: var(--dk-surface-2) !important;
+  background-color: var(--dk-surface-2) !important;
+}
+
+html.dark body .notebook-settings-panel,
+html.dark body .notebook-help-body {
+  background: var(--dk-surface-1) !important;
+  background-color: var(--dk-surface-1) !important;
+}
+
+html body .notebook-sidebar-shell {
+  border-right: 0 !important;
+}
+
+html body #sidebar-panel-container.notebook-sidebar-shell {
+  border-right: 0 !important;
+  box-shadow: none !important;
+}
+
+html body .notebook-sidebar-footer {
+  background: inherit !important;
+  background-color: inherit !important;
+  border-top: 0 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+html.dark body .notebook-sidebar-footer {
+  background: inherit !important;
+  background-color: inherit !important;
+  border-top: 0 !important;
+}
+
 /* =====================================================================
    2. HOVER STATES
    ===================================================================== */
@@ -642,6 +717,127 @@ a.hover\:bg-white\/50:hover {
 .dark #reader-backlinks-panel {
   background-color: var(--dk-surface-2) !important;
   border-top-color: var(--dk-line) !important;
+}
+
+/* ---- Command Search Modal Light Theme ---------------------------- */
+html:not(.dark) #search-modal-container {
+  background-color: #ffffff !important;
+  border-color: #e9e9e7 !important;
+  color: #0f172a !important;
+  box-shadow: 0 28px 70px -24px rgba(15, 23, 42, 0.24), 0 12px 28px -20px rgba(15, 23, 42, 0.18) !important;
+}
+
+html:not(.dark) #search-modal-header {
+  background-color: #ffffff !important;
+  border-bottom-color: #e9e9e7 !important;
+}
+
+html:not(.dark) #search-modal-header svg {
+  color: #94a3b8 !important;
+}
+
+html:not(.dark) #search-modal-header input {
+  color: #0f172a !important;
+}
+
+html:not(.dark) #search-modal-header input::placeholder {
+  color: #94a3b8 !important;
+}
+
+html:not(.dark) #search-modal-header button {
+  background-color: #f8fafc !important;
+  color: #64748b !important;
+}
+
+html:not(.dark) #search-modal-header button:hover {
+  background-color: #f1f5f9 !important;
+  color: #334155 !important;
+}
+
+html:not(.dark) #search-modal-filters {
+  background-color: #ffffff !important;
+  border-bottom-color: #e9e9e7 !important;
+}
+
+html:not(.dark) #search-modal-filters button {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  color: #475569 !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04) !important;
+}
+
+html:not(.dark) #search-modal-filters button:hover {
+  background-color: #f8fafc !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+}
+
+html:not(.dark) #search-modal-filters button.bg-\[\#2E2C29\] {
+  background-color: #1f2937 !important;
+  border-color: #1f2937 !important;
+  color: #ffffff !important;
+}
+
+html:not(.dark) #search-modal-results {
+  background-color: #ffffff !important;
+}
+
+html:not(.dark) #search-modal-results .result-item {
+  color: #475569 !important;
+}
+
+html:not(.dark) #search-modal-results .result-item h3,
+html:not(.dark) #search-modal-results .result-item h4,
+html:not(.dark) #search-modal-results h3 {
+  color: #0f172a !important;
+}
+
+html:not(.dark) #search-modal-results .result-item p,
+html:not(.dark) #search-modal-results p {
+  color: #64748b !important;
+}
+
+html:not(.dark) #search-modal-results .result-item:hover {
+  background-color: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+}
+
+html:not(.dark) #search-modal-results .result-item.bg-\[\#F2EFE9\] {
+  background-color: #f1f5f9 !important;
+  border-color: #dbe4ef !important;
+}
+
+html:not(.dark) #search-modal-results .bg-white {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+}
+
+html:not(.dark) #search-modal-results .bg-\[\#FAF8F5\] {
+  background-color: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+}
+
+html:not(.dark) #search-modal-footer {
+  background-color: #ffffff !important;
+  border-top-color: #e9e9e7 !important;
+  color: #64748b !important;
+  box-shadow: inset 0 1px 0 rgba(15, 23, 42, 0.02) !important;
+}
+
+html:not(.dark) #search-modal-footer span,
+html:not(.dark) #search-modal-footer svg {
+  color: #64748b !important;
+}
+
+html:not(.dark) #search-modal-footer > div:first-child svg {
+  color: #cbd5e1 !important;
+}
+
+html:not(.dark) #search-modal-footer kbd {
+  background-color: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+  color: #475569 !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04) !important;
 }
 
 /* ---- Command Search Modal Dark Theme ----------------------------- */
@@ -1133,10 +1329,64 @@ a.hover\:bg-white\/50:hover {
   will-change: transform, opacity;
 }
 
-/* Structural wrappers stay layout-neutral at normal desktop heights. */
-.home-layout,
+/* Home page rhythm: header stays independent; content below it uses one
+   predictable stack so restored/maximized Electron sizes feel consistent. */
+.home-layout {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+  gap: clamp(28px, 4vh, 42px);
+  padding-top: clamp(44px, 7vh, 92px);
+}
+
 .home-hero {
-  display: contents;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(16px, 2.4vh, 24px);
+}
+
+.home-welcome {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+}
+
+.home-title {
+  display: inline-block;
+  line-height: 1.24 !important;
+  padding-bottom: 0.14em;
+}
+
+.home-actions {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+}
+
+.home-playlist-section {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(20px, 2.6vh, 28px);
+}
+
+.home-playlist-card,
+.playlist-card-skeleton--home {
+  height: 450px;
+  min-height: 450px;
+}
+
+.playlist-card-skeleton--library {
+  height: 386px;
+  min-height: 386px;
+}
+
+.home-empty-state {
+  width: min(100%, clamp(500px, 42vw, 580px));
+  max-width: 580px !important;
+  height: clamp(320px, 42vh, 420px);
+  min-height: clamp(320px, 42vh, 420px);
+  margin-inline: auto !important;
+  justify-content: center;
+  padding: clamp(28px, 4vh, 44px) !important;
 }
 
 .playlist-card-skeleton::after {
@@ -1176,6 +1426,13 @@ a.hover\:bg-white\/50:hover {
 @media (prefers-reduced-motion: reduce) {
   .playlist-card-skeleton::after {
     animation: none;
+  }
+}
+
+@media (min-height: 960px) {
+  .notification-panel-popover {
+    top: 9rem !important;
+    max-height: calc(100vh - 10.25rem) !important;
   }
 }
 
@@ -1256,87 +1513,10 @@ a.hover\:bg-white\/50:hover {
     margin-bottom: 16px !important;
   }
 
-  .home-view {
-    padding: 20px !important;
-  }
-
-  .dashboard-header {
-    margin-bottom: 0 !important;
-  }
-
-  .home-layout {
-    display: grid;
-    grid-template-rows: auto auto auto;
-    align-content: space-evenly;
-    min-height: 0;
-  }
-
-  .home-hero {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .home-welcome {
-    margin-top: 0 !important;
-    margin-bottom: 0 !important;
-  }
-
-  .home-title {
-    font-size: 2.25rem !important;
-    line-height: 1.1 !important;
-  }
-
-  .home-actions {
-    margin-top: 0 !important;
-    margin-bottom: 0 !important;
-  }
-
-  .home-playlist-section {
-    display: contents;
-  }
-
-  .home-playlist-section--empty {
-    padding-bottom: 0;
-  }
-
-  .home-playlist-grid {
-    gap: 16px !important;
-  }
-
-  .home-empty-state {
-    margin: 0 auto !important;
-    height: 450px;
-    min-height: 450px;
-    justify-content: center;
-    padding: 32px !important;
-  }
-
-  .home-empty-state .empty-state-icon {
-    margin-bottom: 12px !important;
-  }
-
-  .home-empty-state .empty-state-description {
+  .app-sidebar-panel {
+    height: calc(100% - 32px) !important;
+    margin-top: 16px !important;
     margin-bottom: 16px !important;
-  }
-
-  .home-playlist-card {
-    height: 450px !important;
-    min-height: 450px !important;
-    padding: 20px !important;
-  }
-
-  .home-playlist-card .playlist-card-cover {
-    height: 10rem !important;
-    margin-bottom: 20px !important;
-  }
-
-  .home-playlist-card .playlist-card-metadata {
-    margin-bottom: 16px !important;
-  }
-
-  .home-playlist-card .playlist-card-footer {
-    margin-top: 24px !important;
   }
 
   .ragx-header {
@@ -1392,35 +1572,6 @@ a.hover\:bg-white\/50:hover {
 }
 
 @media (max-height: 720px) {
-  .home-view {
-    padding: 16px !important;
-  }
-
-  .dashboard-header {
-    margin-bottom: 0 !important;
-  }
-
-  .home-welcome > :first-child {
-    display: none !important;
-  }
-
-  .home-title {
-    font-size: 1.75rem !important;
-  }
-
-  .home-actions {
-    margin-top: 0 !important;
-    margin-bottom: 0 !important;
-  }
-
-  .home-empty-state {
-    padding: 28px !important;
-  }
-
-  .home-playlist-card .playlist-card-cover {
-    height: 10rem !important;
-  }
-
   .ragx-header p,
   .ragx-empty-guide {
     display: none !important;
@@ -1435,6 +1586,60 @@ a.hover\:bg-white\/50:hover {
   .ragx-toolbar,
   .ragx-empty-card {
     padding: 10px 12px !important;
+  }
+}
+
+/* The custom workspace titlebar uses 40px of vertical space. Treat restored
+   Electron windows as compact a little earlier so Home still breathes. */
+@media (max-height: 960px) {
+  .app-main-panel {
+    height: calc(100% - 16px) !important;
+    margin-top: 8px !important;
+    margin-bottom: 8px !important;
+  }
+
+  .app-sidebar-panel {
+    height: calc(100% - 16px) !important;
+    margin-top: 8px !important;
+    margin-bottom: 8px !important;
+  }
+
+  .home-view {
+    padding: 20px 24px 24px !important;
+  }
+
+  .home-layout {
+    gap: 28px;
+    padding-top: clamp(28px, 4.5vh, 52px);
+  }
+
+  .home-hero {
+    gap: 16px;
+  }
+
+  .home-title {
+    font-size: 2.25rem !important;
+    line-height: 1.24 !important;
+    padding-bottom: 0.14em;
+  }
+
+  .home-playlist-grid {
+    gap: 16px !important;
+  }
+
+  .playlist-card-skeleton--home {
+    height: 450px;
+    min-height: 450px;
+  }
+
+  .playlist-card-skeleton--library {
+    height: 386px;
+    min-height: 386px;
+  }
+
+  .home-empty-state {
+    height: clamp(330px, 44vh, 395px);
+    min-height: clamp(330px, 44vh, 395px);
   }
 }
 

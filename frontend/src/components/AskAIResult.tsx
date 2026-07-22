@@ -355,15 +355,21 @@ export default function AskAIResult({ query, onClose, onLoadingChange }: AskAIRe
                             animate={{ opacity: 1, x: 0 }}
                             transition={{ delay: 0.2 + i * 0.06, duration: 0.2 }}
                             onClick={() => {
-                              const token = localStorage.getItem('access_token');
                               const fileUrl = `${window.location.origin}/resources/${src.resource_id}/file`;
                               const isVideo = iconType === 'video';
                               const isAudio = iconType === 'audio';
 
                               if (isVideo || isAudio) {
-                                const paramKey = isAudio ? "audioUrl" : "videoUrl";
-                                const playerUrl = `${window.location.origin}/?${paramKey}=${encodeURIComponent(fileUrl)}&resourceId=${src.resource_id}&token=${token}`;
-                                window.open(playerUrl, '_blank');
+                                window.dispatchEvent(new CustomEvent('app-navigate', {
+                                  detail: {
+                                    view: isAudio ? 'audio-player' : 'video-player',
+                                    title,
+                                    params: {
+                                      mediaUrl: fileUrl,
+                                      resourceId: src.resource_id,
+                                    },
+                                  },
+                                }));
                               } else {
                                 window.open(fileUrl, '_blank');
                               }

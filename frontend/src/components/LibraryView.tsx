@@ -19,12 +19,14 @@ interface BackendPlaylist {
 interface LibraryViewProps {
   onNavigateToFolder: (id: string, name: string) => void;
   onCreatePlaylistClick: () => void;
+  onOpenPlaylistInNewTab?: (id: string, name: string) => void;
   onShare?: (id: string, name: string) => void;
 }
 
 export default function LibraryView({
   onNavigateToFolder,
   onCreatePlaylistClick,
+  onOpenPlaylistInNewTab,
   onShare
 }: LibraryViewProps) {
   const [playlists, setPlaylists] = useState<BackendPlaylist[]>([]);
@@ -86,15 +88,13 @@ export default function LibraryView({
       "Sync session documents, notes, and resources for team alignment.",
       "UX/UI research papers, design system specs, and assets collection."
     ];
-    const iconTypes: PlaylistIconType[] = ['shape', 'initials'];
-
     return {
       category: categories[idx % categories.length],
       title: name,
       date: dates[idx % dates.length],
       timeframe: timeframes[idx % timeframes.length],
       description: (description && description.trim()) ? description : fallbackDescriptions[idx % fallbackDescriptions.length],
-      iconType: (iconType && iconType.trim()) ? (iconType as PlaylistIconType) : iconTypes[idx % iconTypes.length],
+      iconType: (iconType && iconType.trim()) ? (iconType as PlaylistIconType) : 'avvv-initials',
       itemCount: itemCount != null ? `${itemCount} item${itemCount === 1 ? '' : 's'}` : '0 items'
     };
   };
@@ -162,8 +162,8 @@ export default function LibraryView({
           <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto justify-start sm:justify-end">
             
             {/* Search Filter Input */}
-            <div className="relative flex-1 sm:w-60 bg-white rounded-xl border border-slate-200/70 px-3.5 py-2 flex items-center gap-2.5 shadow-sm">
-              <svg className="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24">
+            <div className="relative flex-1 sm:w-60 bg-white dark:bg-slate-800/80 rounded-xl border border-slate-200/70 dark:border-slate-700 px-3.5 py-2 flex items-center gap-2.5 shadow-sm">
+              <svg className="w-4 h-4 text-slate-400 dark:text-slate-400 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
               </svg>
               <input 
@@ -171,7 +171,7 @@ export default function LibraryView({
                 onChange={(e) => setFilterQuery(e.target.value)}
                 type="text" 
                 placeholder="Filter playlists..." 
-                className="w-full bg-transparent border-none text-[13px] outline-none text-slate-700 placeholder-slate-400 font-medium" 
+                className="w-full bg-transparent border-none text-[13px] outline-none text-slate-700 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-400 font-medium" 
               />
             </div>
 
@@ -180,13 +180,13 @@ export default function LibraryView({
               <button
                 type="button"
                 onClick={() => setSortDropdownOpen(!sortDropdownOpen)}
-                className="flex items-center gap-2 bg-white border border-slate-200/80 hover:bg-slate-50 text-slate-700 font-bold text-[13px] pl-3 pr-2.5 py-2.5 rounded-xl shadow-sm transition-all cursor-pointer focus:outline-none"
+                className="flex items-center gap-2 bg-white dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-100 font-bold text-[13px] pl-3 pr-2.5 py-2.5 rounded-xl shadow-sm transition-all cursor-pointer focus:outline-none"
               >
-                <svg className="w-4 h-4 text-slate-500 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <svg className="w-4 h-4 text-slate-500 dark:text-slate-300 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12"/>
                 </svg>
                 <span className="truncate">{SORT_OPTIONS.find(o => o.value === sortOption)?.label}</span>
-                <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform duration-200 ${sortDropdownOpen ? 'rotate-180' : ''}`} />
+                <ChevronDown className={`w-3.5 h-3.5 text-slate-400 dark:text-slate-300 shrink-0 transition-transform duration-200 ${sortDropdownOpen ? 'rotate-180' : ''}`} />
               </button>
 
               <AnimatePresence>
@@ -198,7 +198,7 @@ export default function LibraryView({
                       animate={{ opacity: 1, scale: 1, y: 0 }}
                       exit={{ opacity: 0, scale: 0.95, y: -4 }}
                       transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
-                      className="absolute right-0 top-full mt-1.5 w-48 bg-white/90 backdrop-blur-xl rounded-xl shadow-xl border border-slate-100 py-1.5 z-50"
+                      className="absolute right-0 top-full mt-1.5 w-48 bg-white/90 dark:bg-slate-900/95 backdrop-blur-xl rounded-xl shadow-xl border border-slate-100 dark:border-slate-700 py-1.5 z-50"
                     >
                       {SORT_OPTIONS.map((opt) => (
                         <button
@@ -209,12 +209,12 @@ export default function LibraryView({
                           }}
                           className={`w-full text-left px-3 py-2 text-xs font-semibold flex items-center gap-2.5 transition-colors rounded-lg mx-0.5 ${
                             sortOption === opt.value
-                              ? 'text-indigo-700 bg-indigo-50'
-                              : 'text-slate-600 hover:bg-slate-50 hover:text-slate-800'
+                              ? 'text-indigo-700 dark:text-indigo-200 bg-indigo-50 dark:bg-indigo-500/20'
+                              : 'text-slate-600 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-slate-800 dark:hover:text-white'
                           }`}
                         >
                           <span className="flex-1">{opt.label}</span>
-                          {sortOption === opt.value && <Check className="w-3.5 h-3.5 text-indigo-600 shrink-0" />}
+                          {sortOption === opt.value && <Check className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-300 shrink-0" />}
                         </button>
                       ))}
                     </motion.div>
@@ -249,9 +249,9 @@ export default function LibraryView({
               transition={{ duration: 0.35, ease: 'easeOut' }}
               className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
             >
-              <PlaylistCardSkeleton />
-              <PlaylistCardSkeleton />
-              <PlaylistCardSkeleton />
+              <PlaylistCardSkeleton variant="library" />
+              <PlaylistCardSkeleton variant="library" />
+              <PlaylistCardSkeleton variant="library" />
             </motion.div>
           ) : filteredPlaylists.length === 0 ? (
             <EmptyState
@@ -294,6 +294,7 @@ export default function LibraryView({
                     variant="library"
                     isFavorite={playlist.is_favorite === 1}
                     onNavigate={() => onNavigateToFolder(playlist.id, playlist.name)}
+                    onOpenInNewTab={onOpenPlaylistInNewTab}
                     onShare={onShare}
                     createdAt={playlist.created_at}
                     updatedAt={playlist.updated_at}

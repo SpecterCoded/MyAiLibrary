@@ -11,7 +11,7 @@ from pathlib import Path
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="My AI Library desktop backend")
+    parser = argparse.ArgumentParser(description="MyAiLibrary desktop backend")
     parser.add_argument("--port", type=int)
     parser.add_argument("--token")
     parser.add_argument("--data-dir", required=True)

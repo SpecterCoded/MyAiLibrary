@@ -130,7 +130,7 @@ export default function Sidebar({ user, activeTab = 'home', hasActiveDownloads =
   ];
 
   return (
-    <aside className="w-20 h-[calc(100%-48px)] my-6 ml-6 flex flex-col items-center py-4 px-2 bg-white/65 dark:bg-slate-900/40 backdrop-blur-[20px] border border-white/50 dark:border-white/10 shrink-0 select-none rounded-[32px] shadow-sm relative z-50">
+    <aside className="app-sidebar-panel w-20 h-[calc(100%-48px)] my-6 ml-6 flex flex-col items-center py-4 px-2 bg-white/65 dark:bg-slate-900/40 backdrop-blur-[20px] border border-white/50 dark:border-white/10 shrink-0 select-none rounded-[32px] shadow-sm relative z-50">
       
       {/* Logo Section */}
       <div 
@@ -141,7 +141,7 @@ export default function Sidebar({ user, activeTab = 'home', hasActiveDownloads =
           <Sparkles className="w-5 h-5 text-white" strokeWidth={2} />
         </div>
         <div className="absolute left-full ml-5 px-2.5 py-1.5 bg-slate-800 text-white text-[11px] font-bold rounded-lg opacity-0 pointer-events-none whitespace-nowrap shadow-xl z-[100] transition-all duration-200 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0">
-          MyAILibrary
+          MyAiLibrary
           <div className="absolute right-full top-1/2 -translate-y-1/2 border-[5px] border-transparent border-r-slate-800"></div>
         </div>
       </div>

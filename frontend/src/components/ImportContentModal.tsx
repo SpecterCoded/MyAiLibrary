@@ -687,7 +687,7 @@ export default function ImportContentModal({ isOpen, onClose, onNavigateToDownlo
           y: { type: 'spring', stiffness: 420, damping: 33, mass: 0.8 },
           filter: { duration: 0.24, ease: [0.16, 1, 0.3, 1] },
         }}
-        className="relative w-full bg-white rounded-[28px] shadow-2xl border border-slate-200/60 overflow-hidden flex flex-col"
+        className="relative w-full bg-white dark:bg-slate-900 rounded-[28px] shadow-2xl border border-slate-200/60 dark:border-slate-600/80 overflow-hidden flex flex-col text-slate-900 dark:text-slate-100"
         style={{ maxWidth: hasQueued ? 680 : 480 }}
         role="dialog"
         aria-modal="true"
@@ -699,7 +699,7 @@ export default function ImportContentModal({ isOpen, onClose, onNavigateToDownlo
         {/* Header */}
         <div className="flex items-center justify-between px-8 pt-7 pb-3">
           <div className="flex items-center gap-3">
-            <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-slate-50 border border-slate-200/60 shadow-sm flex-shrink-0">
+            <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200/60 dark:border-slate-600 shadow-sm flex-shrink-0">
               {activeTab === 'youtube' ? (
                 <PlayCircle className="w-5 h-5 text-red-500" />
               ) : activeTab === 'twitter' ? (
@@ -708,7 +708,7 @@ export default function ImportContentModal({ isOpen, onClose, onNavigateToDownlo
                 <InstagramLogo />
               )}
             </div>
-            <h2 id="import-modal-title" className="text-lg font-semibold tracking-tight text-slate-900">
+            <h2 id="import-modal-title" className="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-50">
               {activeTab === 'youtube'
                 ? 'Import YouTube Videos'
                 : activeTab === 'twitter'
@@ -719,7 +719,7 @@ export default function ImportContentModal({ isOpen, onClose, onNavigateToDownlo
           <button
             onClick={onClose}
             disabled={isAdding}
-            className="p-2 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-all duration-200"
+            className="p-2 rounded-full text-slate-400 dark:text-slate-300 hover:text-slate-700 dark:hover:text-slate-50 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all duration-200"
             aria-label="Close"
           >
             <X size={18} />
@@ -727,13 +727,13 @@ export default function ImportContentModal({ isOpen, onClose, onNavigateToDownlo
         </div>
 
         {/* Tabs */}
-        <div className="flex px-8 border-b border-slate-100 mb-5">
+        <div className="flex px-8 border-b border-slate-100 dark:border-slate-700/70 mb-5">
           <button
             onClick={() => { setActiveTab('youtube'); setError(''); setUrl(''); setShowReplaceConfirm(false); setCookieFile(null); }}
             className={`flex-1 py-3 text-sm font-semibold border-b-2 text-center transition-all ${
               activeTab === 'youtube'
-                ? 'border-indigo-600 text-indigo-600'
-                : 'border-transparent text-slate-400 hover:text-slate-600'
+                ? 'border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-300'
+                : 'border-transparent text-slate-400 dark:text-slate-300 hover:text-slate-600 dark:hover:text-slate-100'
             }`}
           >
             YouTube
@@ -742,8 +742,8 @@ export default function ImportContentModal({ isOpen, onClose, onNavigateToDownlo
             onClick={() => { setActiveTab('twitter'); setError(''); setUrl(''); setShowReplaceConfirm(false); setCookieFile(null); }}
             className={`flex-1 py-3 text-sm font-semibold border-b-2 text-center transition-all ${
               activeTab === 'twitter'
-                ? 'border-indigo-600 text-indigo-600'
-                : 'border-transparent text-slate-400 hover:text-slate-600'
+                ? 'border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-300'
+                : 'border-transparent text-slate-400 dark:text-slate-300 hover:text-slate-600 dark:hover:text-slate-100'
             }`}
           >
             Twitter / X
@@ -752,8 +752,8 @@ export default function ImportContentModal({ isOpen, onClose, onNavigateToDownlo
             onClick={() => { setActiveTab('instagram'); setError(''); setUrl(''); setShowReplaceConfirm(false); setCookieFile(null); }}
             className={`flex-1 py-3 text-sm font-semibold border-b-2 text-center transition-all ${
               activeTab === 'instagram'
-                ? 'border-indigo-600 text-indigo-600'
-                : 'border-transparent text-slate-400 hover:text-slate-600'
+                ? 'border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-300'
+                : 'border-transparent text-slate-400 dark:text-slate-300 hover:text-slate-600 dark:hover:text-slate-100'
             }`}
           >
             Instagram
@@ -765,7 +765,7 @@ export default function ImportContentModal({ isOpen, onClose, onNavigateToDownlo
           <div className="flex-1 px-8 pb-8 space-y-5 min-w-0">
             {/* URL Input */}
             <div className="space-y-1.5">
-              <label htmlFor="url-input" className="text-sm font-medium text-slate-700">
+              <label htmlFor="url-input" className="text-sm font-medium text-slate-700 dark:text-slate-200">
                 {activeTab === 'youtube'
                   ? 'YouTube URL'
                   : activeTab === 'twitter'
@@ -773,7 +773,7 @@ export default function ImportContentModal({ isOpen, onClose, onNavigateToDownlo
                   : 'Instagram Profile URL'}
               </label>
               <div className="relative group">
-                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-400 group-focus-within:text-indigo-500 transition-colors duration-200">
+                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-400 dark:text-slate-400 group-focus-within:text-indigo-500 dark:group-focus-within:text-indigo-300 transition-colors duration-200">
                   <LinkIcon className="w-4 h-4" />
                 </div>
                 <input
@@ -790,19 +790,19 @@ export default function ImportContentModal({ isOpen, onClose, onNavigateToDownlo
                       ? 'https://x.com/username or https://twitter.com/username'
                       : 'https://instagram.com/username'
                   }
-                  className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200/80 rounded-xl text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all duration-200 shadow-sm disabled:opacity-50 text-sm"
+                  className="w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-800/90 border border-slate-200/80 dark:border-slate-600 rounded-xl text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-400 focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:focus:ring-indigo-400/30 focus:border-indigo-500 dark:focus:border-indigo-400 transition-all duration-200 shadow-sm disabled:opacity-50 text-sm"
                 />
               </div>
             </div>
 
             {/* Destination selector */}
             <div className="space-y-1.5">
-              <label className="text-sm font-medium text-slate-700">
+              <label className="text-sm font-medium text-slate-700 dark:text-slate-200">
                 {activeTab === 'youtube' ? 'Destination' : 'Playlist'}
               </label>
               {/* Breadcrumb for YouTube */}
               {activeTab === 'youtube' && selectedPlaylist && (
-                <div className="flex items-center gap-1 text-xs text-indigo-600">
+                <div className="flex items-center gap-1 text-xs text-indigo-600 dark:text-indigo-300">
                   <ListVideo size={12} />
                   <span className="font-medium truncate max-w-[400px]">{getSelectedPath()}</span>
                 </div>
@@ -810,28 +810,28 @@ export default function ImportContentModal({ isOpen, onClose, onNavigateToDownlo
               {/* Search (YouTube only) */}
               {activeTab === 'youtube' && (
                 <div className="relative">
-                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-400" />
                   <input
                     type="text"
                     value={notebookSearchQuery}
                     onChange={(e) => setNotebookSearchQuery(e.target.value)}
                     placeholder="Search playlists and folders..."
-                    className="w-full pl-9 pr-4 py-2.5 text-sm border border-slate-200/80 bg-slate-50 rounded-xl outline-none focus:bg-white focus:border-indigo-500 transition-all"
+                    className="w-full pl-9 pr-4 py-2.5 text-sm border border-slate-200/80 dark:border-slate-600 bg-slate-50 dark:bg-slate-800/90 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-400 rounded-xl outline-none focus:bg-white dark:focus:bg-slate-800 focus:border-indigo-500 dark:focus:border-indigo-400 transition-all"
                   />
                 </div>
               )}
               {/* Tree (YouTube) or flat list (Twitter/Instagram) */}
-              <div className="max-h-[155px] overflow-y-auto rounded-2xl border border-slate-200 bg-slate-50 p-2">
+              <div className="max-h-[155px] overflow-y-auto rounded-2xl border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-800/70 p-2">
                 {isLoadingTree ? (
                   <div className="flex items-center justify-center py-6 gap-2">
                     <Loader2 size={16} className="animate-spin text-indigo-500" />
-                    <span className="text-xs text-slate-500">Loading...</span>
+                    <span className="text-xs text-slate-500 dark:text-slate-300">Loading...</span>
                   </div>
                 ) : activeTab === 'youtube' ? (
                   /* YouTube: full tree (playlist > folder > subfolder) */
                   filteredTree.length === 0 ? (
                     <div className="py-6 text-center">
-                      <p className="text-xs text-slate-500">
+                      <p className="text-xs text-slate-500 dark:text-slate-300">
                         {notebookSearchQuery ? 'No results match your search.' : 'No playlists found.'}
                       </p>
                     </div>
@@ -846,19 +846,19 @@ export default function ImportContentModal({ isOpen, onClose, onNavigateToDownlo
                           }}
                           className={`w-full flex items-center gap-2 px-3 py-2 rounded-xl text-left text-sm transition-colors ${
                             selectedPlaylist === playlist.id && !selectedFolder
-                              ? 'bg-indigo-100 text-indigo-700'
-                              : 'text-slate-700 hover:bg-white'
+                              ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-200'
+                              : 'text-slate-700 dark:text-slate-200 hover:bg-white dark:hover:bg-slate-700/80'
                           }`}
                         >
                           {playlist.children.length > 0 ? (
                             <ChevronDown
                               size={14}
-                              className={`shrink-0 transition-transform ${expandedPlaylistIds.has(playlist.id) ? 'rotate-0' : '-rotate-90'} text-slate-400`}
+                              className={`shrink-0 transition-transform ${expandedPlaylistIds.has(playlist.id) ? 'rotate-0' : '-rotate-90'} text-slate-400 dark:text-slate-300`}
                             />
                           ) : (
                             <span className="w-[14px] shrink-0" />
                           )}
-                          <ListVideo size={14} className="text-slate-400" />
+                          <ListVideo size={14} className="text-slate-400 dark:text-slate-300" />
                           <span className="font-medium truncate">{playlist.name}</span>
                         </button>
                         {expandedPlaylistIds.has(playlist.id) && playlist.children.length > 0 && (
@@ -873,19 +873,19 @@ export default function ImportContentModal({ isOpen, onClose, onNavigateToDownlo
                                   }}
                                   className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-left text-xs transition-colors ${
                                     selectedFolder === folder.id
-                                      ? 'bg-indigo-100 text-indigo-700'
-                                      : 'text-slate-600 hover:bg-white'
+                                      ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-200'
+                                      : 'text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-700/80'
                                   }`}
                                 >
                                   {folder.children?.length > 0 ? (
                                     <ChevronDown
                                       size={12}
-                                      className={`shrink-0 transition-transform ${expandedFolderIds.has(folder.id) ? 'rotate-0' : '-rotate-90'} text-slate-400`}
+                                      className={`shrink-0 transition-transform ${expandedFolderIds.has(folder.id) ? 'rotate-0' : '-rotate-90'} text-slate-400 dark:text-slate-300`}
                                     />
                                   ) : (
                                     <span className="w-[12px] shrink-0" />
                                   )}
-                                  <Folder size={13} className="text-slate-400" />
+                                  <Folder size={13} className="text-slate-400 dark:text-slate-300" />
                                   <span className="truncate">{folder.name}</span>
                                 </button>
                                 {expandedFolderIds.has(folder.id) && folder.children?.length > 0 && (
@@ -897,12 +897,12 @@ export default function ImportContentModal({ isOpen, onClose, onNavigateToDownlo
                                         onClick={() => handleSelectTreeFolder(sub.id)}
                                         className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-left text-xs transition-colors ${
                                           selectedFolder === sub.id
-                                            ? 'bg-indigo-100 text-indigo-700'
-                                            : 'text-slate-600 hover:bg-white'
+                                            ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-200'
+                                            : 'text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-700/80'
                                         }`}
                                       >
                                         <span className="w-[12px] shrink-0" />
-                                        <Folder size={13} className="text-slate-400" />
+                                        <Folder size={13} className="text-slate-400 dark:text-slate-300" />
                                         <span className="truncate">{sub.name}</span>
                                       </button>
                                     ))}
@@ -919,7 +919,7 @@ export default function ImportContentModal({ isOpen, onClose, onNavigateToDownlo
                   /* Twitter/Instagram: flat playlist list only */
                   playlists.length === 0 ? (
                     <div className="py-6 text-center">
-                      <p className="text-xs text-slate-500">No playlists found.</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-300">No playlists found.</p>
                     </div>
                   ) : (
                     playlists.map((p) => (
@@ -929,11 +929,11 @@ export default function ImportContentModal({ isOpen, onClose, onNavigateToDownlo
                         onClick={() => handleSelectTreePlaylist(p.id)}
                         className={`w-full flex items-center gap-2 px-3 py-2 rounded-xl text-left text-sm transition-colors ${
                           selectedPlaylist === p.id
-                            ? 'bg-indigo-100 text-indigo-700'
-                            : 'text-slate-700 hover:bg-white'
+                            ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-200'
+                            : 'text-slate-700 dark:text-slate-200 hover:bg-white dark:hover:bg-slate-700/80'
                         }`}
                       >
-                        <ListVideo size={14} className="text-slate-400" />
+                        <ListVideo size={14} className="text-slate-400 dark:text-slate-300" />
                         <span className="font-medium truncate">{p.name}</span>
                       </button>
                     ))
@@ -944,11 +944,11 @@ export default function ImportContentModal({ isOpen, onClose, onNavigateToDownlo
 
             {/* Quality Selector - Only for YouTube */}
             {activeTab === 'youtube' && (
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium text-slate-700">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-200">
                   Quality
                 </label>
-                <div className="flex w-full gap-2">
+                <div className="mt-3 flex w-full gap-2">
                   {[
                     { value: 'best', label: 'Best' },
                     { value: '1080', label: '1080p' },
@@ -965,7 +965,7 @@ export default function ImportContentModal({ isOpen, onClose, onNavigateToDownlo
 'px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 border flex-1 text-center ' +
 (youtubeQuality === opt.value
 ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm shadow-indigo-500/20'
-: 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300 hover:text-indigo-600 hover:bg-indigo-50')
+: 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-200 border-slate-200 dark:border-slate-600 hover:border-indigo-300 dark:hover:border-indigo-400 hover:text-indigo-600 dark:hover:text-indigo-200 hover:bg-indigo-50 dark:hover:bg-indigo-500/10')
 + ' disabled:opacity-50'
                       }
                     >
@@ -978,62 +978,62 @@ export default function ImportContentModal({ isOpen, onClose, onNavigateToDownlo
 
             {/* Cookie File Upload — required for Twitter/X and Instagram */}
             {(
-              <div className="space-y-1.5">
-                <label htmlFor="cookie-file-input" className="text-sm font-medium text-slate-700 flex items-center gap-1.5">
+              <div className={`space-y-1.5 ${activeTab === 'youtube' ? '!mt-1.5' : ''}`}>
+                <label htmlFor="cookie-file-input" className="text-sm font-medium text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
                   {activeCookiePlatformLabel} Cookies File
                   {activeTab === 'youtube' || hasSavedActiveCookies ? (
                     <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full uppercase tracking-wide ${
                       hasSavedActiveCookies
-                        ? 'bg-emerald-100 text-emerald-600'
-                        : 'bg-slate-100 text-slate-500'
+                        ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-200'
+                        : 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-300'
                     }`}>
                       {isSavingActiveCookies ? 'Saving' : activeTab === 'youtube' && isCheckingYoutubeCookies ? 'Checking' : hasSavedActiveCookies ? 'Saved' : 'Optional'}
                     </span>
                   ) : (
-                    <span className="text-[10px] font-semibold bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full uppercase tracking-wide">Required</span>
+                    <span className="text-[10px] font-semibold bg-red-100 dark:bg-red-500/20 text-red-600 dark:text-red-200 px-1.5 py-0.5 rounded-full uppercase tracking-wide">Required</span>
                   )}
                 </label>
-                <p className="text-xs text-slate-400">
-                  Upload {activeCookiePlatformLabel} <code className="text-indigo-600 bg-indigo-50 px-1 rounded text-[11px]">cookies.txt</code> once. The app saves it globally for this platform; uploading another file replaces the saved cookie.
+                <p className="text-xs text-slate-400 dark:text-slate-300">
+                  Upload {activeCookiePlatformLabel} <code className="text-indigo-600 dark:text-indigo-200 bg-indigo-50 dark:bg-indigo-500/20 px-1 rounded text-[11px]">cookies.txt</code> once. The app saves it globally for this platform; uploading another file replaces the saved cookie.
                 </p>
                 <div
                   className={`relative flex items-center gap-3 px-4 py-3 border-2 border-dashed rounded-xl cursor-pointer transition-all duration-200 ${
                     cookieFile || hasSavedActiveCookies
-                      ? 'border-emerald-400 bg-emerald-50'
-                      : 'border-slate-200 bg-slate-50 hover:border-indigo-400 hover:bg-indigo-50/30'
+                      ? 'border-emerald-400 dark:border-emerald-400/80 bg-emerald-50 dark:bg-emerald-500/10'
+                      : 'border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-800/70 hover:border-indigo-400 dark:hover:border-indigo-400 hover:bg-indigo-50/30 dark:hover:bg-indigo-500/10'
                   }`}
                   onClick={() => !isAdding && !isSavingActiveCookies && document.getElementById('cookie-file-input')?.click()}
                 >
                   <div className={`flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center ${
-                    cookieFile || hasSavedActiveCookies ? 'bg-emerald-100' : 'bg-slate-100'
+                    cookieFile || hasSavedActiveCookies ? 'bg-emerald-100 dark:bg-emerald-500/20' : 'bg-slate-100 dark:bg-slate-700'
                   }`}>
                     {isSavingActiveCookies ? (
                       <Loader2 className="w-4 h-4 text-indigo-500 animate-spin" />
                     ) : cookieFile || hasSavedActiveCookies ? (
                       <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                     ) : (
-                      <Folder className="w-4 h-4 text-slate-400" />
+                      <Folder className="w-4 h-4 text-slate-400 dark:text-slate-300" />
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
                     {cookieFile ? (
                       <>
-                        <p className="text-sm font-semibold text-emerald-700 truncate">{cookieFile.name}</p>
-                        <p className="text-[11px] text-emerald-600">Cookie file ready — click to change</p>
+                        <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-200 truncate">{cookieFile.name}</p>
+                        <p className="text-[11px] text-emerald-600 dark:text-emerald-300">Cookie file ready — click to change</p>
                       </>
                     ) : hasSavedActiveCookies || isSavingActiveCookies ? (
                       <>
-                        <p className="text-sm font-semibold text-emerald-700">
+                        <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-200">
                           {isSavingActiveCookies ? `Saving ${activeCookiePlatformLabel} cookies...` : `Saved ${activeCookiePlatformLabel} cookies available`}
                         </p>
-                        <p className="text-[11px] text-emerald-600">
+                        <p className="text-[11px] text-emerald-600 dark:text-emerald-300">
                           {isSavingActiveCookies ? 'Replacing saved cookies...' : 'Click to replace with a new cookies.txt'}
                         </p>
                       </>
                     ) : (
                       <>
-                        <p className="text-sm font-medium text-slate-500">Click to upload cookies.txt</p>
-                        <p className="text-[11px] text-slate-400">Netscape format (.txt)</p>
+                        <p className="text-sm font-medium text-slate-500 dark:text-slate-200">Click to upload cookies.txt</p>
+                        <p className="text-[11px] text-slate-400 dark:text-slate-300">Netscape format (.txt)</p>
                       </>
                     )}
                   </div>
@@ -1041,7 +1041,7 @@ export default function ImportContentModal({ isOpen, onClose, onNavigateToDownlo
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); setCookieFile(null); }}
-                      className="flex-shrink-0 p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                      className="flex-shrink-0 p-1.5 text-slate-400 dark:text-slate-300 hover:text-red-500 dark:hover:text-red-200 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-lg transition-colors"
                       aria-label="Remove cookie file"
                     >
                       <X size={14} />
@@ -1070,13 +1070,13 @@ export default function ImportContentModal({ isOpen, onClose, onNavigateToDownlo
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
                   exit={{ opacity: 0, height: 0 }}
-                  className="p-4 bg-amber-50 border border-amber-200 rounded-xl space-y-3"
+                  className="p-4 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-400/40 rounded-xl space-y-3"
                 >
                   <div className="flex items-start gap-2.5">
-                    <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                    <AlertCircle className="w-5 h-5 text-amber-600 dark:text-amber-300 shrink-0 mt-0.5" />
                     <div>
-                      <p className="text-sm font-semibold text-amber-800">Folder already exists</p>
-                      <p className="text-xs text-amber-700 mt-1">
+                      <p className="text-sm font-semibold text-amber-800 dark:text-amber-100">Folder already exists</p>
+                      <p className="text-xs text-amber-700 dark:text-amber-200 mt-1">
                         A folder named <strong>{extractedUsername}</strong> already exists inside the "Media" folder of this playlist. 
                         Replacing it will permanently delete all existing files and resources within that folder.
                       </p>
@@ -1085,7 +1085,7 @@ export default function ImportContentModal({ isOpen, onClose, onNavigateToDownlo
                   <div className="flex gap-2 justify-end">
                     <button
                       onClick={() => setShowReplaceConfirm(false)}
-                      className="px-3 py-1.5 bg-white border border-slate-200 text-xs font-semibold text-slate-600 rounded-lg hover:bg-slate-50 transition-colors"
+                      className="px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 text-xs font-semibold text-slate-600 dark:text-slate-200 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
                     >
                       Cancel
                     </button>
@@ -1107,7 +1107,7 @@ export default function ImportContentModal({ isOpen, onClose, onNavigateToDownlo
                   initial={{ opacity: 0, y: -6 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -6 }}
-                  className="flex items-start gap-2.5 px-4 py-3 bg-red-50/80 border border-red-100 rounded-xl text-red-600"
+                  className="flex items-start gap-2.5 px-4 py-3 bg-red-50/80 dark:bg-red-500/10 border border-red-100 dark:border-red-400/40 rounded-xl text-red-600 dark:text-red-200"
                 >
                   <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
                   <p className="text-sm font-medium">{error}</p>
@@ -1124,7 +1124,7 @@ export default function ImportContentModal({ isOpen, onClose, onNavigateToDownlo
                 isAdding || isSavingActiveCookies
                   ? 'bg-indigo-400 cursor-wait'
                   : !url.trim() || !selectedPlaylist || (activeTab !== 'youtube' && !hasSavedSocialCookies[activeTab] && !cookieFile)
-                  ? 'bg-slate-300 dark:bg-slate-800 cursor-not-allowed text-slate-500 dark:text-slate-500'
+                  ? 'bg-slate-300 dark:bg-slate-700 cursor-not-allowed text-slate-500 dark:text-slate-300'
                   : 'bg-indigo-600 hover:bg-indigo-700 shadow-sm hover:shadow-md hover:shadow-indigo-500/20 active:scale-[0.98]'
               }`}
             >
@@ -1144,7 +1144,7 @@ export default function ImportContentModal({ isOpen, onClose, onNavigateToDownlo
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: 8 }}
                   onClick={handleGoToDownloads}
-                  className="w-full py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all duration-200 border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-400 active:scale-[0.98]"
+                  className="w-full py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all duration-200 border-2 border-indigo-200 dark:border-indigo-400/50 text-indigo-700 dark:text-indigo-200 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 hover:border-indigo-400 active:scale-[0.98]"
                 >
                   <ArrowRight className="w-4 h-4" />
                   Go to Downloads ({queuedItems.length} queued)
@@ -1161,10 +1161,10 @@ export default function ImportContentModal({ isOpen, onClose, onNavigateToDownlo
                 animate={{ width: 240, opacity: 1 }}
                 exit={{ width: 0, opacity: 0 }}
                 transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-                className="border-l border-slate-100 overflow-hidden flex-shrink-0"
+                className="border-l border-slate-100 dark:border-slate-700/70 overflow-hidden flex-shrink-0"
               >
                 <div className="w-60 h-full flex flex-col px-5 pb-8 pt-2">
-                  <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
+                  <p className="text-xs font-semibold text-slate-400 dark:text-slate-300 uppercase tracking-wider mb-3">
                     Queued ({queuedItems.length})
                   </p>
                   <div className="space-y-2.5 overflow-y-auto flex-1 pr-1">
@@ -1177,38 +1177,38 @@ export default function ImportContentModal({ isOpen, onClose, onNavigateToDownlo
                             initial={{ opacity: 0, x: 20 }}
                             animate={{ opacity: 1, x: 0 }}
                             exit={{ opacity: 0, x: 20 }}
-                            className="flex items-start gap-2.5 p-2.5 bg-slate-50 border border-slate-100 rounded-xl group"
+                            className="flex items-start gap-2.5 p-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-100 dark:border-slate-700 rounded-xl group"
                           >
                             {/* Thumbnail */}
-                            <div className="w-14 h-10 rounded-lg overflow-hidden bg-slate-200 flex-shrink-0">
+                            <div className="w-14 h-10 rounded-lg overflow-hidden bg-slate-200 dark:bg-slate-700 flex-shrink-0">
                               {thumb ? (
                                 <img src={thumb} alt="" className="w-full h-full object-cover" />
                               ) : (
-                                <div className="w-full h-full flex items-center justify-center bg-slate-100 text-slate-400">
+                                <div className="w-full h-full flex items-center justify-center bg-slate-100 dark:bg-slate-700 text-slate-400 dark:text-slate-300">
                                   {item.title.includes('Instagram') ? (
                                     <InstagramLogo className="w-4 h-4 text-pink-500" />
                                   ) : item.title.includes('X.com') ? (
-                                    <TwitterLogo className="w-4 h-4 text-slate-700 fill-current" />
+                                    <TwitterLogo className="w-4 h-4 text-slate-700 dark:text-slate-100 fill-current" />
                                   ) : (
-                                    <PlayCircle className="w-4 h-4 text-slate-400" />
+                                    <PlayCircle className="w-4 h-4 text-slate-400 dark:text-slate-300" />
                                   )}
                                 </div>
                               )}
                             </div>
                             {/* Info */}
                             <div className="flex-1 min-w-0">
-                              <p className="text-xs font-medium text-slate-800 line-clamp-2 leading-tight">
+                              <p className="text-xs font-medium text-slate-800 dark:text-slate-100 line-clamp-2 leading-tight">
                                 {item.title}
                               </p>
                               <div className="flex items-center gap-1 mt-1">
-                                <Clock className="w-3 h-3 text-slate-400" />
-                                <span className="text-[10px] text-slate-400">Queued</span>
+                                <Clock className="w-3 h-3 text-slate-400 dark:text-slate-400" />
+                                <span className="text-[10px] text-slate-400 dark:text-slate-300">Queued</span>
                               </div>
                             </div>
                             {/* Remove */}
                             <button
                               onClick={() => removeFromLocalQueue(item.taskId)}
-                              className="opacity-0 group-hover:opacity-100 transition-opacity p-1 text-slate-300 hover:text-red-400 rounded-lg"
+                              className="opacity-0 group-hover:opacity-100 transition-opacity p-1 text-slate-300 dark:text-slate-400 hover:text-red-400 dark:hover:text-red-300 rounded-lg"
                               aria-label="Remove from list"
                             >
                               <Trash2 className="w-3 h-3" />

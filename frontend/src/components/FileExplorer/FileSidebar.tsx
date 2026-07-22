@@ -328,7 +328,7 @@ export const FileSidebar: React.FC<PrettySidebarProps> = ({
         {/* SECTION 3: LOCAL MACHINE DEVICE MAP (FILTERS) */}
         <div>
           <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-3 mb-2">
-            This PC
+            Filter
           </div>
           <nav className="space-y-0.5">
             <SidebarItem

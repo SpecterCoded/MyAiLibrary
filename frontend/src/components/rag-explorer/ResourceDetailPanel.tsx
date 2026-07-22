@@ -254,7 +254,7 @@ export function ResourceDetailPanel({ resource, onClose, onOpenPreview }: Resour
                       <div key={stage.id} className="relative flex items-center gap-6 py-4">
                         <div className="w-6 h-6 rounded-full border-2 bg-panel flex items-center justify-center z-10 
                           ${isCompleted ? 'border-emerald-500' : isFailed ? 'border-rose-500' : isCurrent ? 'border-white/80' : 'border-border-strong'}"
-                          style={{ borderColor: isCompleted ? '#10b981' : isFailed ? '#f43f5e' : isCurrent ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.2)' }}
+                          style={{ borderColor: isCompleted ? '#10b981' : isFailed ? '#f43f5e' : isCurrent ? 'var(--ragx-brand)' : 'var(--ragx-border-strong)' }}
                         >
                           {isCompleted && <div className="w-2 h-2 rounded-full bg-emerald-500" />}
                           {isCurrent && !isFailed && <div className="w-2 h-2 rounded-full bg-brand animate-pulse" />}

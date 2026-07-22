@@ -120,7 +120,7 @@ export const FileToolbar: React.FC<PrettyToolbarProps> = ({
   };
 
   return (
-    <div className="w-full border-b dark:border-none border-gray-100 bg-white px-8 pt-5 pb-3 flex flex-col gap-4 shrink-0 select-none">
+    <div className="w-full border-b border-gray-100 dark:border-slate-800/40 bg-white dark:bg-[#25272b] px-8 pt-5 pb-3 flex flex-col gap-4 shrink-0 select-none">
       
       {/* UPPER ROW: Breadcrumbs & Windows Operating Window Controls */}
       <div className="flex items-center justify-between w-full">
@@ -165,18 +165,24 @@ export const FileToolbar: React.FC<PrettyToolbarProps> = ({
         </div>
 
         {/* Minimalist Native OS Control Triggers */}
-        <div className="flex items-center gap-4 text-gray-400">
-          <button onClick={onClose} className="hover:text-red-500 transition-colors"><X className="w-3.5 h-3.5 stroke-[2.5]" /></button>
+        <div className="flex items-center gap-2 text-gray-400 dark:text-slate-500 shrink-0">
+          <button
+            onClick={onClose}
+            title="Close File Explorer"
+            className="flex h-8 w-8 items-center justify-center rounded-xl hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10 dark:hover:text-red-300 transition-colors"
+          >
+            <X className="w-4 h-4 stroke-[2.5]" />
+          </button>
         </div>
       </div>
 
       {/* LOWER ROW: Structural Functional Toolbar Matrix */}
-      <div className="flex items-center justify-between w-full pt-1">
+      <div className="flex items-center justify-between w-full pt-1 gap-3 min-w-0 overflow-hidden">
         
         {/* Left Control Cluster: Browser Arrows, Scaling Grid Engine */}
-        <div className="flex items-center gap-6">
+        <div className={`flex items-center min-w-0 shrink ${showDetails ? "gap-3" : "gap-6"}`}>
           {/* History Nav Arrow Toggles */}
-          <div className="flex items-center gap-3 text-gray-400">
+          <div className="flex items-center gap-3 text-gray-400 shrink-0">
             <button 
               onClick={onBackArrowClick} 
               disabled={!canGoBack} 
@@ -194,7 +200,7 @@ export const FileToolbar: React.FC<PrettyToolbarProps> = ({
           </div>
 
           {/* Precision Layout Sizing Engine Component */}
-          <div className="flex items-center gap-2.5 bg-gray-50/50 dark:bg-slate-800 border border-gray-100 dark:border-none px-3 py-1.5 rounded-xl">
+          <div className="flex items-center gap-2.5 bg-gray-50/50 dark:bg-slate-800 border border-gray-100 dark:border-none px-3 py-1.5 rounded-xl shrink-0">
             <LayoutGrid className="w-4 h-4 text-gray-400 dark:text-slate-500" />
             <input 
               type="range"
@@ -211,26 +217,28 @@ export const FileToolbar: React.FC<PrettyToolbarProps> = ({
           {/* Sort Order Action Trigger */}
           <button 
             onClick={() => setSortOrder(sortOrder === "asc" ? "desc" : "asc")}
-            className="flex items-center gap-1.5 text-xs font-bold text-gray-800 dark:text-slate-200 hover:bg-gray-50 dark:hover:bg-slate-800 px-2.5 py-1.5 rounded-xl transition-all border border-transparent hover:border-gray-100 dark:hover:border-transparent"
+            title={`Sort ${sortOrder === "asc" ? "A - Z" : "Z - A"}`}
+            className={`h-8 shrink-0 whitespace-nowrap flex items-center justify-center gap-1.5 text-xs font-bold text-gray-800 dark:text-slate-200 hover:bg-gray-50 dark:hover:bg-slate-800 py-1.5 rounded-xl transition-all border border-transparent hover:border-gray-100 dark:hover:border-transparent ${showDetails ? "w-8 px-0" : "px-2.5"}`}
           >
             <ArrowUpDown className="w-4 h-4 text-gray-500 dark:text-slate-400 stroke-[2.5]" />
-            <span>{sortOrder === "asc" ? "A - Z" : "Z - A"}</span>
+            <span className={`${showDetails ? "sr-only" : "whitespace-nowrap leading-none"}`}>{sortOrder === "asc" ? "A - Z" : "Z - A"}</span>
           </button>
           
           {/* Explicit View Toggle */}
           <button 
             onClick={() => setViewMode(viewMode === "grid" ? "list" : "grid")}
-            className="flex items-center gap-1.5 text-xs font-bold text-gray-800 dark:text-slate-200 hover:bg-gray-50 dark:hover:bg-slate-800 px-2.5 py-1.5 rounded-xl transition-all border border-transparent hover:border-gray-100 dark:hover:border-transparent"
+            title={`Switch to ${viewMode === "grid" ? "list" : "grid"} view`}
+            className={`h-8 shrink-0 whitespace-nowrap flex items-center justify-center gap-1.5 text-xs font-bold text-gray-800 dark:text-slate-200 hover:bg-gray-50 dark:hover:bg-slate-800 py-1.5 rounded-xl transition-all border border-transparent hover:border-gray-100 dark:hover:border-transparent ${showDetails ? "w-8 px-0" : "px-2.5"}`}
           >
             <LayoutGrid className="w-4 h-4 text-gray-500 dark:text-slate-400 stroke-[2.5]" />
-            <span>{viewMode === "grid" ? "Grid" : "List"}</span>
+            <span className={`${showDetails ? "sr-only" : "whitespace-nowrap leading-none"}`}>{viewMode === "grid" ? "Grid" : "List"}</span>
           </button>
         </div>
 
         {/* Right Control Cluster: Interactive Macros, Visibility Toggles, Search */}
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-2 shrink-0 ml-3">
           
-          <div className="flex items-center gap-0.5 border-r border-gray-100 dark:border-none pr-2 mr-2">
+          <div className="flex items-center gap-1 border-r border-gray-100 dark:border-none pr-2 mr-1">
             {activeFilter === "recycle" ? (
               <>
                 <button 
@@ -351,15 +359,15 @@ export const FileToolbar: React.FC<PrettyToolbarProps> = ({
             >
               <Info className="w-4 h-4 stroke-[2.2]" />
             </button>
-            <div className="relative flex items-center group ml-1">
-              <Search className="absolute left-2.5 w-3.5 h-3.5 text-gray-400 dark:text-slate-500 group-focus-within:text-gray-900 dark:group-focus-within:text-slate-200 transition-colors pointer-events-none stroke-[2.5]" />
+            <div className="relative flex min-w-0 items-center group ml-1">
+              <Search className="absolute left-3 w-3.5 h-3.5 text-gray-400 dark:text-slate-500 group-focus-within:text-gray-900 dark:group-focus-within:text-slate-200 transition-colors pointer-events-none stroke-[2.5]" />
               <input
                 type="text"
                 placeholder="Search..."
                 aria-label="Search files"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="bg-gray-50/50 dark:bg-slate-800 border border-gray-100 dark:border-none pl-8 pr-3 py-1.5 rounded-xl text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-slate-700 focus:bg-white dark:focus:bg-slate-800 text-gray-850 dark:text-slate-200 w-32 focus:w-48 transition-all placeholder:text-gray-400 dark:placeholder:text-slate-500 placeholder:font-medium"
+                className="h-8 bg-gray-100/65 dark:bg-slate-800/70 border-0 pl-8 pr-3 rounded-full text-xs font-semibold focus:outline-none focus:ring-0 focus:bg-white dark:focus:bg-slate-800 text-gray-850 dark:text-slate-200 w-32 focus:w-48 transition-all placeholder:text-gray-400 dark:placeholder:text-slate-500 placeholder:font-medium"
               />
             </div>
           </div>

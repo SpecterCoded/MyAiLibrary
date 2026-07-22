@@ -253,7 +253,7 @@ export function Sidebar({ className }: SidebarProps) {
       </div>
 
       {/* Bottom Actions */}
-      <div className="mt-auto px-2 pb-4 pt-2 border-t border-[#EFEFED]">
+      <div className="notebook-sidebar-footer mt-auto px-2 pb-4 pt-2 border-t-0">
         <SidebarItem icon={<Settings size={16} />} label="Settings" onClick={() => setSettingsOpen(true)} />
         <SidebarItem icon={<HelpCircle size={16} />} label="Help & Support" onClick={() => setHelpOpen(true)} />
       </div>

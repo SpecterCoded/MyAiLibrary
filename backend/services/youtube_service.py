@@ -17,6 +17,7 @@ from services.resource_service import compute_external_content_hash, compute_fil
 from repositories.resource_repository import save_resource
 from services.queue_service import create_processing_job
 from core.paths import COOKIES_DIR, EXTRA_FILES_DIR
+from subprocess_utils import run_hidden
 
 SERVICE_DIR = os.path.dirname(os.path.abspath(__file__))
 BACKEND_ROOT = os.path.dirname(SERVICE_DIR)
@@ -289,7 +290,7 @@ def download_youtube_audio(url: str, resource_id: str, user_id: str | None = Non
     ]
 
     try:
-        subprocess.run(ffmpeg_cmd, check=True, capture_output=True, text=True)
+        run_hidden(ffmpeg_cmd, check=True, capture_output=True, text=True)
         
         # Step 3: Remove the original file
         if os.path.exists(downloaded_file) and downloaded_file != wav_file:
@@ -491,7 +492,7 @@ def download_youtube_video(url: str, out_dir: str = UPLOADS_ROOT, user_id: str |
     ]
 
     try:
-        subprocess.run(ffmpeg_cmd, check=True, capture_output=True, text=True)
+        run_hidden(ffmpeg_cmd, check=True, capture_output=True, text=True)
     except subprocess.CalledProcessError as e:
         print("ERROR merging audio/video:", e.stderr)
         if os.path.exists(final_output_path):

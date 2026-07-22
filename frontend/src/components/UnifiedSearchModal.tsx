@@ -250,10 +250,17 @@ export default function UnifiedSearchModal({ isOpen, onClose }: { isOpen: boolea
     const resourceType = item.resource_type || item.content_type;
     const resourceId = item.resource_id || item.source_id;
     if ((resourceType === 'video' || resourceType === 'audio') && resourceId && item.local_path) {
-      const param = resourceType === 'video' ? 'videoUrl' : 'audioUrl';
-      let query = `${param}=${encodeURIComponent(item.local_path)}&resourceId=${encodeURIComponent(resourceId)}`;
-      if (typeof item.timestamp === 'number') query += `&t=${item.timestamp}`;
-      window.location.search = query;
+      window.dispatchEvent(new CustomEvent('app-navigate', {
+        detail: {
+          view: resourceType === 'video' ? 'video-player' : 'audio-player',
+          title: item.resource_title || item.title,
+          params: {
+            mediaUrl: item.local_path,
+            resourceId,
+            time: typeof item.timestamp === 'number' ? item.timestamp : undefined,
+          },
+        },
+      }));
       return;
     }
 

@@ -8,7 +8,6 @@ interface DashboardViewProps {
   volumeData: RagLibraryVolumeDatum[];
   onViewVolume: () => void;
   onViewActivity: () => void;
-  isDarkMode?: boolean;
 }
 
 export interface DashboardJob {
@@ -156,7 +155,7 @@ const toneToClass = (tone: PipelineHealthItem['tone']) => {
   return { text: 'text-rose-400', bg: 'bg-rose-500' };
 };
 
-export function DashboardView({ resources, volumeData, onViewVolume, onViewActivity, isDarkMode }: DashboardViewProps) {
+export function DashboardView({ resources, volumeData, onViewVolume, onViewActivity }: DashboardViewProps) {
   const { pipelineHealth, recentJobs, recentActivity } = buildDashboardData(resources);
 
   return (
@@ -172,13 +171,14 @@ export function DashboardView({ resources, volumeData, onViewVolume, onViewActiv
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart barCategoryGap={20} barGap={10} data={volumeData} margin={{ top: 10, right: 8, left: -8, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? 'rgba(255,255,255,0.22)' : 'rgba(17,17,17,0.12)'} vertical={false} />
-                <XAxis dataKey="label" stroke={isDarkMode ? 'rgba(255,255,255,0.35)' : 'rgba(17,17,17,0.35)'} fontSize={12} tickLine={false} axisLine={false} />
-                <YAxis stroke={isDarkMode ? 'rgba(255,255,255,0.25)' : 'rgba(17,17,17,0.25)'} fontSize={12} tickLine={false} axisLine={false} />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--ragx-border)" vertical={false} />
+                <XAxis dataKey="label" stroke="var(--ragx-ink-faint)" fontSize={12} tickLine={false} axisLine={false} />
+                <YAxis stroke="var(--ragx-ink-faint)" fontSize={12} tickLine={false} axisLine={false} />
                 <Tooltip
-                  contentStyle={{ backgroundColor: '#121212', border: '1px solid rgba(255,255,255,0.1)' }}
-                  itemStyle={{ color: '#fafafa' }}
-                  cursor={{ fill: 'rgba(17,17,17,0.03)' }}
+                  contentStyle={{ backgroundColor: 'var(--ragx-panel-elev)', border: '1px solid var(--ragx-border)', color: 'var(--ragx-ink)' }}
+                  itemStyle={{ color: 'var(--ragx-ink)' }}
+                  labelStyle={{ color: 'var(--ragx-ink)' }}
+                  cursor={{ fill: 'var(--ragx-surface)' }}
                 />
                 <Bar dataKey="chunks" fill="#cfcfcf" name="Total Chunks" radius={[2, 2, 0, 0]} />
                 <Bar dataKey="vectors" fill="#1cb68a" name="Generated Vectors" radius={[2, 2, 0, 0]} />

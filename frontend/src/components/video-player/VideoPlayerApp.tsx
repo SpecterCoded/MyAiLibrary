@@ -16,6 +16,15 @@ import './index.css';
 
 import { parseTranscript } from '../../utils/transcriptUtils';
 
+interface VideoPlayerAppProps {
+  embedded?: boolean;
+  mediaUrl?: string;
+  resourceId?: string;
+  initialTime?: number;
+  onBack?: () => void;
+  onTitleChange?: (title: string) => void;
+}
+
 function convertSrtToVtt(srtText: string): string {
   const normalized = srtText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   const vttBody = normalized.replace(
@@ -32,7 +41,7 @@ function resolvePendingReindexState(value: unknown): boolean | string {
   return false;
 }
 
-export default function VideoPlayerApp() {
+export default function VideoPlayerApp({ embedded = false, mediaUrl, resourceId: propResourceId, initialTime, onBack, onTitleChange }: VideoPlayerAppProps = {}) {
   const [activeTab, setActiveTab] = useState('Transcript');
   const [isAiOpen, setIsAiOpen] = useState(false);
   const [pendingAiQuery, setPendingAiQuery] = useState('');
@@ -92,16 +101,16 @@ export default function VideoPlayerApp() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    let vSrc = params.get("videoUrl");
+    let vSrc = mediaUrl || params.get("videoUrl");
     if (vSrc) {
       try {
         const urlObj = new URL(vSrc);
         vSrc = urlObj.pathname + urlObj.search;
       } catch (e) { }
     }
-    const rId = params.get("resourceId");
+    const rId = propResourceId || params.get("resourceId");
     const tok = params.get("token") || localStorage.getItem("access_token");
-    const requestedTime = Number(params.get("t"));
+    const requestedTime = initialTime ?? Number(params.get("t"));
     if (Number.isFinite(requestedTime) && requestedTime >= 0) setSeekTime(requestedTime);
 
     setResourceId(rId);
@@ -117,7 +126,10 @@ export default function VideoPlayerApp() {
             if (data.resource.transcript && !srtLoadedRef.current) {
               setTranscript(parseTranscript(data.resource.transcript));
             }
-            if (data.resource.title) setResourceTitle(data.resource.title);
+            if (data.resource.title) {
+              setResourceTitle(data.resource.title);
+              onTitleChange?.(data.resource.title);
+            }
             if (data.resource.summary) setSummary(data.resource.summary);
             setProcessingStatus(data.resource.processing_status);
             setPendingReindex(resolvePendingReindexState(data.resource.is_embedded));
@@ -201,7 +213,7 @@ export default function VideoPlayerApp() {
     } else {
       setLoading(false);
     }
-  }, []);
+  }, [mediaUrl, propResourceId, initialTime]);
 
   // Poll for pipeline status when processing
   useEffect(() => {
@@ -274,6 +286,10 @@ export default function VideoPlayerApp() {
   const processedTranscript = transcript;
 
   const handleBack = () => {
+    if (onBack) {
+      onBack();
+      return;
+    }
     const params = new URLSearchParams();
     params.set("view", "folder");
     if (playlistId) {
@@ -293,9 +309,9 @@ export default function VideoPlayerApp() {
   };
 
   const handleOpenInKnowledge = () => {
-    const params = new URLSearchParams({ view: "concepts" });
-    if (resourceId) params.set("resourceId", resourceId);
-    window.location.href = `/?${params.toString()}`;
+    window.dispatchEvent(new CustomEvent('app-navigate', {
+      detail: { view: 'concepts', resourceId },
+    }));
   };
 
   const toggleStar = async (msg: any) => {
@@ -332,7 +348,7 @@ export default function VideoPlayerApp() {
   };
 
   return (
-    <div className="video-player-page-root w-screen h-screen bg-[#eaeaea] dark:bg-[#2b2d31] dark:text-[#f2f3f5] flex items-center justify-center font-sans overflow-hidden">
+    <div className={`video-player-page-root ${embedded ? 'h-full w-full' : 'w-screen h-screen'} bg-[#eaeaea] dark:bg-[#2b2d31] dark:text-[#f2f3f5] flex items-center justify-center font-sans overflow-hidden`}>
       <ToastContainer toasts={toasts} onDismiss={removeToast} />
 
       {/* Main App Container */}

@@ -12,6 +12,7 @@ from services.resource_service import create_resource
 from services.resource_service import compute_file_content_hash
 from repositories.resource_repository import DuplicateResourceError, find_duplicate_resource_by_hash, save_resource
 from core.paths import COOKIES_DIR
+from subprocess_utils import run_hidden
 
 SERVICE_DIR = os.path.dirname(os.path.abspath(__file__))
 BACKEND_ROOT = os.path.dirname(SERVICE_DIR)
@@ -121,7 +122,7 @@ def download_social_profile(task_id: str, url: str, folder_id: str, db_session: 
         files_before = set(f for f in os.listdir(out_dir) if f != "cookies.txt")
         
         print("[SOCIAL SERVICE] Executing gallery-dl command")
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+        result = run_hidden(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
         
         if result.returncode != 0:
             print(f"[GALLERY-DL ERROR] Exit code: {result.returncode}")

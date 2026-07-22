@@ -86,12 +86,12 @@ export function SettingsDialog() {
   if (!settingsOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={() => setSettingsOpen(false)}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 dark:bg-black/45" onClick={() => setSettingsOpen(false)}>
       <div 
-        className="flex w-full max-w-[800px] h-[600px] bg-white dark:bg-[#191919] rounded-xl shadow-2xl border border-gray-200 dark:border-gray-800 overflow-hidden"
+        className="notebook-settings-dialog flex w-full max-w-[800px] h-[600px] rounded-xl shadow-2xl border border-gray-200 dark:border-gray-800 overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
-        <div className="w-[240px] bg-[#F7F7F5] dark:bg-[#202020] border-r border-[#EFEFED] dark:border-gray-800 p-4 pt-6">
+        <div className="notebook-settings-sidebar w-[240px] border-r border-[#EFEFED] dark:border-gray-800 p-4 pt-6">
           <div className="font-semibold text-[11px] uppercase tracking-wider text-[#9A9A97] mb-3 px-2">Account</div>
           <div 
             className={`flex items-center gap-2 px-2 py-1.5 rounded-md text-[14px] cursor-pointer mb-1 transition-colors ${activeTab === 'account' ? 'bg-[#EFEFED] dark:bg-[#333] font-medium text-[#37352F] dark:text-gray-200' : 'hover:bg-[#EFEFED] dark:hover:bg-[#333] text-[#737373]'}`}
@@ -121,7 +121,7 @@ export function SettingsDialog() {
           </div>
         </div>
         
-        <div className="flex-1 flex flex-col p-10 bg-white dark:bg-[#191919] relative">
+        <div className="notebook-settings-panel flex-1 flex flex-col p-10 relative">
           <button className="absolute top-6 right-6 text-gray-400 hover:text-[#37352F] dark:hover:text-gray-200 transition-colors" onClick={() => setSettingsOpen(false)}>
             <X size={20} />
           </button>

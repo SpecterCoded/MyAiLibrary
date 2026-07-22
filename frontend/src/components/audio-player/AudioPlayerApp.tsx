@@ -14,6 +14,15 @@ import type { ActiveTranscriptCue } from "../../hooks/useTranscriptSync";
 
 import { parseTranscript } from '../../utils/transcriptUtils';
 
+interface AudioPlayerAppProps {
+  embedded?: boolean;
+  mediaUrl?: string;
+  resourceId?: string;
+  initialTime?: number;
+  onBack?: () => void;
+  onTitleChange?: (title: string) => void;
+}
+
 function convertSrtToVtt(srtText: string): string {
   const normalized = srtText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   const vttBody = normalized.replace(
@@ -30,7 +39,7 @@ function resolvePendingReindexState(value: unknown): boolean | string {
   return false;
 }
 
-export default function AudioPlayerApp() {
+export default function AudioPlayerApp({ embedded = false, mediaUrl, resourceId: propResourceId, initialTime, onBack, onTitleChange }: AudioPlayerAppProps = {}) {
   const [activeTab, setActiveTab] = useState<"transcript" | "summary" | "quiz" | "flashcard" | "mindmap" | "notes" | "ask">("transcript");
   const [isRecording, setIsRecording] = useState<boolean>(false);
   const [timerSeconds, setTimerSeconds] = useState<number>(0);
@@ -91,7 +100,7 @@ export default function AudioPlayerApp() {
   // Query Params Extraction and Fetch Data
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    let audioSrc = params.get("audioUrl");
+    let audioSrc = mediaUrl || params.get("audioUrl");
     if (audioSrc) {
       try {
         const urlObj = new URL(audioSrc);
@@ -100,9 +109,9 @@ export default function AudioPlayerApp() {
         // Fallback if already relative
       }
     }
-    const rId = params.get("resourceId");
+    const rId = propResourceId || params.get("resourceId");
     const tok = params.get("token") || localStorage.getItem("access_token");
-    const requestedTime = Number(params.get("t"));
+    const requestedTime = initialTime ?? Number(params.get("t"));
     initialSeekTimeRef.current = Number.isFinite(requestedTime) && requestedTime >= 0 ? requestedTime : null;
 
     setResourceId(rId);
@@ -125,6 +134,7 @@ export default function AudioPlayerApp() {
             }
             if (data.resource.title) {
               setResourceTitle(data.resource.title);
+              onTitleChange?.(data.resource.title);
             }
             if (data.resource.summary) {
               setSummary(data.resource.summary);
@@ -210,7 +220,7 @@ export default function AudioPlayerApp() {
         })
         .catch(err => console.warn("Failed to load SRT file:", err));
     }
-  }, []);
+  }, [mediaUrl, propResourceId, initialTime]);
 
   useEffect(() => {
     if (prevAudioUrlRef.current && prevAudioUrlRef.current !== audioUrl) {
@@ -450,6 +460,11 @@ export default function AudioPlayerApp() {
   };
 
   const handleCloseCall = () => {
+    if (onBack) {
+      audioRef.current?.pause();
+      onBack();
+      return;
+    }
     if (confirm("Are you sure you want to exit the study companion?")) {
       audioRef.current?.pause();
       const params = new URLSearchParams(window.location.search);
@@ -463,13 +478,13 @@ export default function AudioPlayerApp() {
   };
 
   const handleOpenInKnowledge = () => {
-    const params = new URLSearchParams({ view: "concepts" });
-    if (resourceId) params.set("resourceId", resourceId);
-    window.location.href = `/?${params.toString()}`;
+    window.dispatchEvent(new CustomEvent('app-navigate', {
+      detail: { view: 'concepts', resourceId },
+    }));
   };
 
   return (
-    <div className="h-screen w-screen flex flex-col font-sans selection:bg-neutral-800 selection:text-white bg-[#FCFCFD] dark:bg-[#1e1f22] dark:text-[#f2f3f5] overflow-hidden">
+    <div className={`${embedded ? 'h-full w-full' : 'h-screen w-screen'} flex flex-col font-sans selection:bg-neutral-800 selection:text-white bg-[#FCFCFD] dark:bg-[#1e1f22] dark:text-[#f2f3f5] overflow-hidden`}>
 
       {/* Main Container Card occupying full screen */}
       <div className="w-full h-full flex flex-col overflow-hidden bg-[#FCFCFD] dark:bg-[#1e1f22]">

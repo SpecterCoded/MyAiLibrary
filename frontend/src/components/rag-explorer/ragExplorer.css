@@ -9,18 +9,21 @@
    CSS Variables — light mode
 ────────────────────────────────────────────────────────────── */
 .ragx-scope {
-  --ragx-canvas:         #f5f3f0;
+  /* Chat/project light palette */
+  --ragx-canvas:         #ffffff;
   --ragx-panel:          #ffffff;
-  --ragx-panel-elev:     #faf8f5;
-  --ragx-ink:            #111111;
-  --ragx-ink-muted:      rgba(17,17,17,0.6);
-  --ragx-ink-faint:      rgba(17,17,17,0.4);
-  --ragx-border:         rgba(17,17,17,0.1);
-  --ragx-border-strong:  rgba(17,17,17,0.2);
-  --ragx-surface:        rgba(17,17,17,0.04);
-  --ragx-surface-hover:  rgba(17,17,17,0.08);
-  --ragx-brand:          #111111;
+  --ragx-panel-elev:     #f7f7f5;
+  --ragx-ink:            #37352f;
+  --ragx-ink-muted:      #6e6c68;
+  --ragx-ink-faint:      #9a9a97;
+  --ragx-border:         #e9e9e7;
+  --ragx-border-strong:  #d9d9d6;
+  --ragx-surface:        rgba(55, 53, 47, 0.045);
+  --ragx-surface-hover:  #efefed;
+  --ragx-brand:          #ff7d54;
   --ragx-brand-fg:       #ffffff;
+  --color-border:        var(--ragx-border);
+  --color-ink:           var(--ragx-ink);
 }
 
 /* ──────────────────────────────────────────────────────────────
@@ -28,18 +31,21 @@
 ────────────────────────────────────────────────────────────── */
 .dark .ragx-scope,
 .ragx-scope.dark {
-  --ragx-canvas:         #050505;
-  --ragx-panel:          #0a0a0a;
-  --ragx-panel-elev:     #121212;
-  --ragx-ink:            #fafafa;
-  --ragx-ink-muted:      rgba(255,255,255,0.6);
-  --ragx-ink-faint:      rgba(255,255,255,0.4);
-  --ragx-border:         rgba(255,255,255,0.1);
-  --ragx-border-strong:  rgba(255,255,255,0.2);
-  --ragx-surface:        rgba(255,255,255,0.05);
-  --ragx-surface-hover:  rgba(255,255,255,0.1);
-  --ragx-brand:          #ffffff;
-  --ragx-brand-fg:       #000000;
+  /* Chat/project dark palette: softer RAG layering */
+  --ragx-canvas:         #313338;
+  --ragx-panel:          #2b2d31;
+  --ragx-panel-elev:     #3f4147;
+  --ragx-ink:            #f2f3f5;
+  --ragx-ink-muted:      #cfd3da;
+  --ragx-ink-faint:      #949ba4;
+  --ragx-border:         rgba(255, 255, 255, 0.08);
+  --ragx-border-strong:  rgba(255, 255, 255, 0.14);
+  --ragx-surface:        rgba(255, 255, 255, 0.055);
+  --ragx-surface-hover:  #3f4147;
+  --ragx-brand:          #ff7d54;
+  --ragx-brand-fg:       #ffffff;
+  --color-border:        var(--ragx-border);
+  --color-ink:           var(--ragx-ink);
 }
 
 /* ──────────────────────────────────────────────────────────────
@@ -58,17 +64,46 @@
   -moz-osx-font-smoothing: grayscale !important;
 }
 
+.ragx-scope.dark .ragx-header {
+  background-color: var(--ragx-canvas) !important;
+}
+
+.ragx-scope.dark .ragx-stats-grid > div,
+.ragx-scope.dark .ragx-empty-card,
+.ragx-scope.dark .bg-canvas {
+  background-color: var(--ragx-canvas) !important;
+}
+
+.ragx-scope.dark .ragx-empty-card,
+.ragx-scope.dark .border.border-border.bg-canvas {
+  box-shadow: 0 24px 56px rgba(0, 0, 0, 0.22) !important;
+}
+
+.ragx-scope .ragx-health .ragx-health-pie {
+  width: 88px !important;
+  height: 88px !important;
+  min-width: 88px !important;
+}
+
 /* Headings use display font */
 .ragx-scope h1, .ragx-scope h2, .ragx-scope h3,
 .ragx-scope h4, .ragx-scope h5, .ragx-scope h6 {
   font-family: "Space Grotesk", ui-sans-serif, system-ui, sans-serif !important;
 }
 
-/* Scrollbar */
-.ragx-scope ::-webkit-scrollbar          { width: 6px; height: 6px; }
-.ragx-scope ::-webkit-scrollbar-track    { background: transparent; }
-.ragx-scope ::-webkit-scrollbar-thumb    { background: var(--ragx-border-strong); border-radius: 10px; }
-.ragx-scope ::-webkit-scrollbar-thumb:hover { background: var(--ragx-ink-faint); }
+/* Hide RAG Explorer scrollbars while keeping scroll behavior. */
+.ragx-scope,
+.ragx-scope * {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+
+.ragx-scope::-webkit-scrollbar,
+.ragx-scope *::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  display: none !important;
+}
 
 /* ──────────────────────────────────────────────────────────────
    FONT FAMILY utilities
@@ -151,7 +186,7 @@
    DIVIDE utilities
 ────────────────────────────────────────────────────────────── */
 .ragx-scope .divide-white\/5 > :not([hidden]) ~ :not([hidden]) {
-  border-color: rgba(255,255,255,0.05) !important;
+  border-color: var(--ragx-border) !important;
 }
 .ragx-scope .divide-y > :not([hidden]) ~ :not([hidden]) {
   border-top-width: 1px;
@@ -165,8 +200,8 @@
 .ragx-scope .accent-brand         { accent-color: var(--ragx-brand) !important; }
 
 /* SVG fill */
-.ragx-scope .fill-black           { fill: #000000 !important; }
-.dark .ragx-scope .fill-black     { fill: #000000 !important; }
+.ragx-scope .fill-black           { fill: var(--ragx-brand-fg) !important; }
+.dark .ragx-scope .fill-black     { fill: var(--ragx-brand-fg) !important; }
 
 /* ──────────────────────────────────────────────────────────────
    SHADOW with design-token variable
@@ -175,7 +210,7 @@
   box-shadow: 0 0 20px var(--ragx-border) !important;
 }
 .ragx-scope .hover\:shadow-\[0_0_30px_rgba\(255\2C255\2C255\2C0\.2\)\]:hover {
-  box-shadow: 0 0 30px rgba(255,255,255,0.2) !important;
+  box-shadow: 0 0 30px color-mix(in srgb, var(--ragx-brand) 28%, transparent) !important;
 }
 
 /* ──────────────────────────────────────────────────────────────
@@ -203,7 +238,7 @@
    BEFORE pseudo-element (pipeline timeline gradient line)
 ────────────────────────────────────────────────────────────── */
 .ragx-scope .before\:bg-gradient-to-b::before {
-  background-image: linear-gradient(to bottom, transparent, rgba(255,255,255,0.1), transparent) !important;
+  background-image: linear-gradient(to bottom, transparent, var(--ragx-border-strong), transparent) !important;
 }
 
 /* ──────────────────────────────────────────────────────────────

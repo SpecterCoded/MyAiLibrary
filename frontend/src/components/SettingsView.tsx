@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Slider from '@mui/material/Slider';
 import { type BackendUser } from './DashboardHeader';
-import { UploadCloud, CheckCircle2, Monitor, Moon, Sun, Plus, FolderOpen, Loader2, Info, RefreshCw, Download, ShieldCheck, ShieldAlert, Clock3, FileText, RotateCw } from 'lucide-react';
+import { UploadCloud, CheckCircle2, Monitor, Moon, Sun, Plus, FolderOpen, Loader2, Info, RefreshCw, Download, ShieldCheck, ShieldAlert, Clock3, FileText, RotateCw, Copy, ExternalLink, Database, AppWindow, HardDrive, Cpu } from 'lucide-react';
 import { EmailAuthProvider, reauthenticateWithCredential, updatePassword, signOut } from 'firebase/auth';
 import { auth } from '../firebase';
 import { selectFile, selectFolder } from '../utils/desktop';
@@ -14,7 +14,7 @@ interface SettingsViewProps {
   setTheme: (theme: 'light' | 'dark' | 'system') => void;
 }
 
-type TabType = 'account' | 'team' | 'integrations' | 'ai' | 'storage' | 'appearance' | 'updates';
+type TabType = 'account' | 'team' | 'integrations' | 'ai' | 'storage' | 'appearance' | 'updates' | 'about';
 
 const PRESET_AVATARS = [
   'https://api.dicebear.com/7.x/notionists/svg?seed=Felix',
@@ -75,10 +75,48 @@ const formatUpdateDate = (value?: string) => {
   return Number.isNaN(date.getTime()) ? 'Unknown' : date.toLocaleString();
 };
 
+const SocialIcon = ({ type }: { type: 'telegram' | 'youtube' | 'instagram' | 'x' }) => {
+  if (type === 'telegram') {
+    return (
+      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor" aria-hidden="true">
+        <path d="M21.8 4.4 18.5 20c-.25 1.1-.9 1.35-1.82.84l-5-3.69-2.42 2.33c-.27.27-.5.5-1.02.5l.36-5.1 9.28-8.38c.4-.36-.09-.56-.62-.2L5.79 13.52.85 11.98c-1.08-.34-1.1-1.08.23-1.6L20.4 2.94c.9-.34 1.68.2 1.4 1.46Z" />
+      </svg>
+    );
+  }
+  if (type === 'youtube') {
+    return (
+      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor" aria-hidden="true">
+        <path d="M23.5 6.2a3 3 0 0 0-2.12-2.12C19.5 3.6 12 3.6 12 3.6s-7.5 0-9.38.5A3 3 0 0 0 .5 6.2 31.1 31.1 0 0 0 0 12a31.1 31.1 0 0 0 .5 5.8 3 3 0 0 0 2.12 2.12c1.88.5 9.38.5 9.38.5s7.5 0 9.38-.5a3 3 0 0 0 2.12-2.12A31.1 31.1 0 0 0 24 12a31.1 31.1 0 0 0-.5-5.8ZM9.6 15.6V8.4L15.85 12 9.6 15.6Z" />
+      </svg>
+    );
+  }
+  if (type === 'instagram') {
+    return (
+      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+        <rect x="3" y="3" width="18" height="18" rx="5" />
+        <circle cx="12" cy="12" r="4" />
+        <circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor" aria-hidden="true">
+      <path d="M18.9 2h3.3l-7.2 8.24L23.5 22h-6.66l-5.22-6.82L5.64 22H2.34l7.7-8.8L1.9 2h6.83l4.72 6.24L18.9 2Zm-1.16 17.93h1.83L7.72 3.96H5.76l11.98 15.97Z" />
+    </svg>
+  );
+};
+
+const ABOUT_SOCIAL_LINKS = [
+  { label: 'Telegram', type: 'telegram' as const, href: 'https://t.me/ChartedByICT' },
+  { label: 'YouTube', type: 'youtube' as const, href: 'https://www.youtube.com/@ChartedByICT' },
+  { label: 'Instagram', type: 'instagram' as const, href: 'https://www.instagram.com/ChartedByICT' },
+  { label: 'X / Twitter', type: 'x' as const, href: 'https://x.com/ChartedByICT' },
+];
+
 export default function SettingsView({ user, onUserUpdate, theme: propTheme, setTheme: propSetTheme }: SettingsViewProps) {
   const [activeTab, setActiveTab] = useState<TabType>(() => {
     const requested = new URLSearchParams(window.location.search).get('tab');
-    return ['account', 'team', 'integrations', 'ai', 'storage', 'appearance', 'updates'].includes(requested || '')
+    return ['account', 'team', 'integrations', 'ai', 'storage', 'appearance', 'updates', 'about'].includes(requested || '')
       ? requested as TabType
       : 'account';
   });
@@ -201,6 +239,8 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
   const [updatePreferenceError, setUpdatePreferenceError] = useState<string | null>(null);
   const [installedUpdateInfo, setInstalledUpdateInfo] = useState<DesktopInstalledUpdateInfo | null>(null);
   const [confirmTestingChannel, setConfirmTestingChannel] = useState(false);
+  const [appInfo, setAppInfo] = useState<DesktopAppInfo | null>(null);
+  const [diagnosticsCopied, setDiagnosticsCopied] = useState(false);
 
   // New storage path state
   const [newLibName, setNewLibName] = useState('');
@@ -215,7 +255,8 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
     { id: 'ai', label: 'AI Models & API Keys' },
     { id: 'storage', label: 'Workspace Storage' },
     { id: 'appearance', label: 'Interface' },
-    { id: 'updates', label: 'Updates' }
+    { id: 'updates', label: 'Updates' },
+    { id: 'about', label: 'About' }
   ];
 
   useEffect(() => {
@@ -225,11 +266,13 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
       window.desktop.getUpdateState(),
       window.desktop.getUpdatePreferences(),
       window.desktop.getInstalledUpdate(),
-    ]).then(([state, preferences, installed]) => {
+      window.desktop.getAppInfo(),
+    ]).then(([state, preferences, installed, info]) => {
       if (!active) return;
       if (state) setUpdateState(state);
       if (preferences) setUpdatePreferences(preferences);
       if (installed) setInstalledUpdateInfo(installed);
+      if (info) setAppInfo(info);
     }).catch(() => {
       if (active) setUpdatePreferenceError('Desktop update information could not be loaded.');
     });
@@ -303,6 +346,46 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
     } catch {
       setUpdatePreferences(previous);
       setUpdatePreferenceError('The update channel could not be changed.');
+    }
+  };
+
+  const openAboutPath = async (targetPath?: string) => {
+    if (!window.desktop || !targetPath) return;
+    const opened = await window.desktop.revealPath(targetPath);
+    if (!opened) setErrorMessage('That folder is not available yet.');
+  };
+
+  const openExternalUrl = (url: string) => {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
+  const copyDiagnostics = async () => {
+    const info = appInfo;
+    const diagnostics = [
+      `App: ${info?.appName ?? 'MyAiLibrary'}`,
+      `Version: ${info?.version ?? effectiveUpdateState.currentVersion}`,
+      `App ID: ${info?.appId ?? 'com.myailibrary.desktop'}`,
+      `Build type: ${info?.buildType ?? (window.desktop ? 'Electron Desktop' : 'Browser development')}`,
+      `Update channel: ${info?.updateChannel ?? effectiveUpdateState.channel}`,
+      `Update status: ${info?.updateStatus ?? effectiveUpdateState.status}`,
+      `Installation enabled: ${String(info?.installationEnabled ?? effectiveUpdateState.installationEnabled)}`,
+      `Platform: ${info?.platform ?? 'browser'}`,
+      `Windows version: ${info?.osRelease ?? 'unknown'}`,
+      `Electron: ${info?.electronVersion ?? 'n/a'}`,
+      `Chromium: ${info?.chromeVersion ?? 'n/a'}`,
+      `Node: ${info?.nodeVersion ?? 'n/a'}`,
+      `Data folder: ${info?.dataDir ?? 'n/a'}`,
+      `Logs folder: ${info?.logsDir ?? 'n/a'}`,
+      `User: ${email || 'unknown'}`,
+    ].join('\n');
+
+    try {
+      await navigator.clipboard.writeText(diagnostics);
+      setDiagnosticsCopied(true);
+      setSuccessMessage('Diagnostics copied to clipboard.');
+      window.setTimeout(() => setDiagnosticsCopied(false), 2000);
+    } catch {
+      setErrorMessage('Could not copy diagnostics to clipboard.');
     }
   };
 
@@ -1262,6 +1345,36 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
     installing: 'Restarting to install…',
     error: 'Update could not be completed',
   };
+  const aboutInfo = appInfo ?? {
+    appName: 'MyAiLibrary',
+    appId: 'com.myailibrary.desktop',
+    version: effectiveUpdateState.currentVersion,
+    buildType: window.desktop ? 'Electron Desktop' : 'Browser development',
+    platform: window.desktop ? 'Windows x64' : 'Browser',
+    osRelease: window.desktop ? 'Unknown' : navigator.platform,
+    electronVersion: window.desktop ? 'Loading...' : 'n/a',
+    chromeVersion: window.desktop ? 'Loading...' : 'n/a',
+    nodeVersion: window.desktop ? 'Loading...' : 'n/a',
+    dataDir: window.desktop ? 'Loading...' : 'Available only in desktop',
+    logsDir: window.desktop ? 'Loading...' : 'Available only in desktop',
+    updateChannel: effectiveUpdateState.channel,
+    updateStatus: effectiveUpdateState.status,
+    installationEnabled: effectiveUpdateState.installationEnabled,
+  };
+  const aboutRows = [
+    ['Version', aboutInfo.version],
+    ['Channel', aboutInfo.updateChannel === 'testing' ? 'Testing / Beta' : 'Stable'],
+    ['Build type', aboutInfo.buildType],
+    ['Update status', updateStatusLabel[aboutInfo.updateStatus] ?? aboutInfo.updateStatus],
+    ['App ID', aboutInfo.appId],
+  ];
+  const systemRows = [
+    ['Platform', aboutInfo.platform],
+    ['Windows version', aboutInfo.osRelease],
+    ['Electron', aboutInfo.electronVersion],
+    ['Chromium', aboutInfo.chromeVersion],
+    ['Node.js', aboutInfo.nodeVersion],
+  ];
 
   return (
     <div className="flex-1 flex flex-col h-full w-full bg-white/65 dark:bg-slate-900/40 backdrop-blur-[24px] border border-white/50 dark:border-white/10 rounded-[32px] overflow-hidden relative shadow-sm dark:shadow-[0_12px_30px_-4px_rgba(0,0,0,0.5)]">
@@ -1620,6 +1733,17 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
                       <p className="text-sm text-gray-500 dark:text-slate-500 mt-1">Manage your team members and their account permissions here.</p>
                     </div>
                     <div className="space-y-4">
+                      <div className="rounded-2xl border border-amber-200 bg-amber-50/80 p-5 shadow-sm dark:border-amber-500/30 dark:bg-amber-500/10">
+                        <div className="flex items-start gap-3">
+                          <Info className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
+                          <div>
+                            <h4 className="text-sm font-semibold text-amber-950 dark:text-amber-100">Team feature is not available right now</h4>
+                            <p className="mt-1 text-sm leading-relaxed text-amber-800 dark:text-amber-200">
+                              Team workspaces, invitations, and permission management are coming soon. Your personal library remains fully available while this feature is being prepared.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
                       <div className="p-8 border-2 border-dashed border-gray-200 dark:border-white/10 rounded-xl text-center">
                         <div className="mx-auto w-12 h-12 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mb-3">
                           <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1628,9 +1752,9 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
                         </div>
                         <h4 className="text-sm font-semibold text-gray-900 dark:text-white">No team members yet</h4>
                         <p className="text-sm text-gray-500 dark:text-slate-500 mt-1 max-w-sm mx-auto">Get started by inviting your team members to collaborate on your AI workspace.</p>
-                        <button className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold shadow-sm hover:bg-indigo-700 transition-colors inline-flex items-center gap-2">
+                        <button disabled className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold shadow-sm transition-colors inline-flex items-center gap-2 opacity-50 cursor-not-allowed">
                           <Plus className="w-4 h-4" />
-                          Invite members
+                          Invite members — coming soon
                         </button>
                       </div>
                     </div>
@@ -3021,8 +3145,229 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
                         <p className="text-sm text-red-600 dark:text-red-400">{updatePreferenceError}</p>
                       )}
                       <div className="rounded-xl border border-indigo-100 bg-indigo-50/60 p-4 text-sm leading-relaxed text-indigo-800 dark:border-indigo-500/20 dark:bg-indigo-500/10 dark:text-indigo-200">
-                        Before installation, My AI Library stops its local service and verifies a protected database backup. If that safety check fails, the update is cancelled and your current data is left unchanged.
+                        Before installation, MyAiLibrary stops its local service and verifies a protected database backup. If that safety check fails, the update is cancelled and your current data is left unchanged.
                       </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* === About Tab === */}
+              {activeTab === 'about' && (
+                <div className="space-y-8">
+                  <div className="grid grid-cols-1 md:grid-cols-[280px_1fr] gap-8 py-6 border-b border-gray-200/60 dark:border-white/10">
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-900 dark:text-white">About MyAiLibrary</h3>
+                      <p className="text-sm text-gray-500 dark:text-slate-500 mt-1">Application identity, diagnostics, local data, and project links.</p>
+                    </div>
+                    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-white/5">
+                      <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex items-center gap-4 min-w-0">
+                          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 via-blue-500 to-violet-600 text-white shadow-lg shadow-indigo-500/20">
+                            <AppWindow className="h-7 w-7" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-slate-500">Desktop application</p>
+                            <h4 className="mt-1 text-2xl font-extrabold tracking-tight text-gray-900 dark:text-white">{aboutInfo.appName}</h4>
+                            <p className="mt-1 text-sm leading-relaxed text-gray-500 dark:text-slate-400">
+                              Your local AI library for playlists, notes, resources, media, and retrieval.
+                            </p>
+                          </div>
+                        </div>
+                        <span className={`inline-flex w-fit items-center rounded-full px-3 py-1 text-xs font-semibold ring-1 ${
+                          aboutInfo.updateChannel === 'testing'
+                            ? 'bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-500/30'
+                            : 'bg-indigo-50 text-indigo-700 ring-indigo-100 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-500/30'
+                        }`}>
+                          {aboutInfo.updateChannel === 'testing' ? 'Beta channel' : 'Stable channel'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-[280px_1fr] gap-8 py-6 border-b border-gray-200/60 dark:border-white/10">
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Application details</h3>
+                      <p className="text-sm text-gray-500 dark:text-slate-500 mt-1">Version and update information useful for support.</p>
+                    </div>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      {aboutRows.map(([label, value]) => (
+                        <div key={label} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-white/5">
+                          <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-slate-500">{label}</p>
+                          <p className="mt-2 break-words text-sm font-semibold text-gray-900 dark:text-white">{value}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-[280px_1fr] gap-8 py-6 border-b border-gray-200/60 dark:border-white/10">
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-900 dark:text-white">System runtime</h3>
+                      <p className="text-sm text-gray-500 dark:text-slate-500 mt-1">Desktop runtime versions and platform information.</p>
+                    </div>
+                    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-white/5">
+                      <div className="mb-4 flex items-center gap-3">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-300">
+                          <Cpu className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-semibold text-gray-900 dark:text-white">Runtime stack</h4>
+                          <p className="text-xs text-gray-500 dark:text-slate-400">Useful when reporting desktop-only issues.</p>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        {systemRows.map(([label, value]) => (
+                          <div key={label} className="rounded-xl bg-gray-50 px-4 py-3 dark:bg-white/5">
+                            <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-slate-500">{label}</p>
+                            <p className="mt-1 break-words text-sm font-medium text-gray-800 dark:text-slate-200">{value}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-[280px_1fr] gap-8 py-6 border-b border-gray-200/60 dark:border-white/10">
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Local data and logs</h3>
+                      <p className="text-sm text-gray-500 dark:text-slate-500 mt-1">User data stays outside the installation folder.</p>
+                    </div>
+                    <div className="space-y-4">
+                      <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-white/5">
+                        <div className="flex items-start gap-3">
+                          <Database className="mt-0.5 h-5 w-5 shrink-0 text-indigo-600 dark:text-indigo-400" />
+                          <div className="min-w-0 flex-1">
+                            <h4 className="text-sm font-semibold text-gray-900 dark:text-white">Application data folder</h4>
+                            <p className="mt-1 break-all text-sm text-gray-500 dark:text-slate-400">{aboutInfo.dataDir}</p>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-white/5">
+                        <div className="flex items-start gap-3">
+                          <HardDrive className="mt-0.5 h-5 w-5 shrink-0 text-indigo-600 dark:text-indigo-400" />
+                          <div className="min-w-0 flex-1">
+                            <h4 className="text-sm font-semibold text-gray-900 dark:text-white">Logs folder</h4>
+                            <p className="mt-1 break-all text-sm text-gray-500 dark:text-slate-400">{aboutInfo.logsDir}</p>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-3">
+                        <button
+                          type="button"
+                          onClick={() => void openAboutPath(aboutInfo.dataDir)}
+                          disabled={!window.desktop || !appInfo}
+                          className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/20 dark:bg-white/5 dark:text-slate-300 dark:hover:bg-white/10"
+                        >
+                          <FolderOpen className="h-4 w-4" /> Open data folder
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void openAboutPath(aboutInfo.logsDir)}
+                          disabled={!window.desktop || !appInfo}
+                          className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/20 dark:bg-white/5 dark:text-slate-300 dark:hover:bg-white/10"
+                        >
+                          <FileText className="h-4 w-4" /> Open logs folder
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void copyDiagnostics()}
+                          className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm shadow-indigo-600/20 transition-colors hover:bg-indigo-700"
+                        >
+                          <Copy className="h-4 w-4" /> {diagnosticsCopied ? 'Copied' : 'Copy diagnostics'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-[280px_1fr] gap-8 py-6 border-b border-gray-200/60 dark:border-white/10">
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Privacy and update safety</h3>
+                      <p className="text-sm text-gray-500 dark:text-slate-500 mt-1">What the desktop app protects locally.</p>
+                    </div>
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-5 shadow-sm dark:border-emerald-500/30 dark:bg-emerald-500/10">
+                        <div className="flex items-start gap-3">
+                          <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                          <div>
+                            <h4 className="text-sm font-semibold text-gray-900 dark:text-white">User data is preserved</h4>
+                            <p className="mt-1 text-sm leading-relaxed text-gray-600 dark:text-slate-300">
+                              Playlists, notes, SQLite data, Chroma indexes, uploads, cookies, models, and settings stay in your local app data folder. Updates replace app files, not user data.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="rounded-2xl border border-indigo-100 bg-indigo-50/60 p-5 shadow-sm dark:border-indigo-500/20 dark:bg-indigo-500/10">
+                        <div className="flex items-start gap-3">
+                          <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-indigo-600 dark:text-indigo-400" />
+                          <div>
+                            <h4 className="text-sm font-semibold text-gray-900 dark:text-white">Installer trust</h4>
+                            <p className="mt-1 text-sm leading-relaxed text-gray-600 dark:text-slate-300">
+                              Stable update installation stays gated until signed releases are available. Beta/testing builds may show a Windows unknown-publisher warning.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-[280px_1fr] gap-8 py-6 border-b border-gray-200/60 dark:border-white/10">
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Credits and licenses</h3>
+                      <p className="text-sm text-gray-500 dark:text-slate-500 mt-1">Core desktop and media-processing technology used by the app.</p>
+                    </div>
+                    <div className="space-y-4">
+                      <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-white/5">
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                          {['Electron and Chromium', 'FastAPI and PyInstaller', 'FFmpeg and FFprobe', 'React, Vite, and open-source UI libraries'].map((item) => (
+                            <div key={item} className="rounded-xl bg-gray-50 px-4 py-3 text-sm font-medium text-gray-700 dark:bg-white/5 dark:text-slate-300">
+                              {item}
+                            </div>
+                          ))}
+                        </div>
+                        <p className="mt-4 text-xs leading-relaxed text-gray-500 dark:text-slate-400">
+                          FFmpeg attribution and third-party notices should ship with public installers before broad distribution.
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-3">
+                        <button
+                          type="button"
+                          onClick={() => openExternalUrl('https://github.com/SpecterCoded/MyAiLibrary')}
+                          className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50 dark:border-white/20 dark:bg-white/5 dark:text-slate-300 dark:hover:bg-white/10"
+                        >
+                          <ExternalLink className="h-4 w-4" /> Open GitHub project
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => openExternalUrl('https://github.com/SpecterCoded/MyAiLibrary/releases')}
+                          className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50 dark:border-white/20 dark:bg-white/5 dark:text-slate-300 dark:hover:bg-white/10"
+                        >
+                          <FileText className="h-4 w-4" /> Release notes
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-[280px_1fr] gap-8 py-6">
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Social links</h3>
+                      <p className="text-sm text-gray-500 dark:text-slate-500 mt-1">Follow project updates and videos.</p>
+                    </div>
+                    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-white/5">
+                      <div className="flex flex-wrap gap-3">
+                        {ABOUT_SOCIAL_LINKS.map((link) => (
+                          <button
+                            key={link.label}
+                            type="button"
+                            onClick={() => openExternalUrl(link.href)}
+                            className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-gray-50 px-4 py-2 text-sm font-semibold text-gray-700 transition-all hover:-translate-y-0.5 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 dark:border-white/10 dark:bg-white/5 dark:text-slate-300 dark:hover:border-indigo-400/40 dark:hover:bg-indigo-500/10 dark:hover:text-indigo-300"
+                          >
+                            <SocialIcon type={link.type} />
+                            {link.label}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="mt-4 text-xs text-gray-500 dark:text-slate-500">
+                        These links are easy to change before release if any handle is different.
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -3031,7 +3376,7 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
           </AnimatePresence>
 
           {/* Action Buttons */}
-          {activeTab !== 'updates' && <div className="mt-8 pt-6 border-t border-gray-200/60 dark:border-white/10 flex justify-end gap-3 pb-8">
+          {activeTab !== 'updates' && activeTab !== 'about' && <div className="mt-8 pt-6 border-t border-gray-200/60 dark:border-white/10 flex justify-end gap-3 pb-8">
             <button 
               type="button" 
               onClick={handleCancel}

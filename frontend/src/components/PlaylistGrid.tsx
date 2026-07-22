@@ -9,6 +9,7 @@ interface PlaylistGridProps {
   isLoading?: boolean;
   onNavigateToFolder: (id: string, name: string) => void;
   onCreatePlaylistClick: () => void;
+  onOpenPlaylistInNewTab?: (id: string, name: string) => void;
   onSeeAllClick?: () => void;
   limit?: number;
   onShare?: (id: string, name: string) => void;
@@ -29,6 +30,7 @@ const PlaylistGrid: React.FC<PlaylistGridProps> = ({
   isLoading: initialLoading = false, 
   onNavigateToFolder,
   onCreatePlaylistClick,
+  onOpenPlaylistInNewTab,
   onSeeAllClick,
   limit,
   onShare
@@ -82,15 +84,13 @@ const PlaylistGrid: React.FC<PlaylistGridProps> = ({
       "Sync session documents, notes, and resources for team alignment.",
       "UX/UI research papers, design system specs, and assets collection."
     ];
-    const iconTypes: PlaylistIconType[] = ['shape', 'initials'];
-
     return {
       category: categories[idx % categories.length],
       title: name,
       date: dates[idx % dates.length],
       timeframe: timeframes[idx % timeframes.length],
       description: (description && description.trim()) ? description : fallbackDescriptions[idx % fallbackDescriptions.length],
-      iconType: (iconType && iconType.trim()) ? (iconType as PlaylistIconType) : iconTypes[idx % iconTypes.length],
+      iconType: (iconType && iconType.trim()) ? (iconType as PlaylistIconType) : 'avvv-initials',
       itemCount: itemCount != null ? `${itemCount} item${itemCount === 1 ? '' : 's'}` : '0 items'
     };
   };
@@ -100,18 +100,20 @@ const PlaylistGrid: React.FC<PlaylistGridProps> = ({
 
   return (
     <section className={`home-playlist-section flex flex-col gap-5 ${isEmpty ? 'home-playlist-section--empty' : ''}`}>
-      <div className="flex items-center justify-between select-none px-1">
-        <h2 className="text-xl font-bold text-slate-800 tracking-tight">Latest Playlists</h2>
-        {!showLoading && limit && playlists.length > limit && (
-          <button
-            onClick={onSeeAllClick}
-            className="flex items-center gap-1.5 text-[13px] font-bold text-slate-400 hover:text-indigo-600 transition-colors group cursor-pointer"
-          >
-            Explore All
-            <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
-          </button>
-        )}
-      </div>
+      {!isEmpty && (
+        <div className="flex items-center justify-between select-none px-1">
+          <h2 className="text-xl font-bold text-slate-800 tracking-tight">Latest Playlists</h2>
+          {!showLoading && limit && playlists.length > limit && (
+            <button
+              onClick={onSeeAllClick}
+              className="flex items-center gap-1.5 text-[13px] font-bold text-slate-400 hover:text-indigo-600 transition-colors group cursor-pointer"
+            >
+              Explore All
+              <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+            </button>
+          )}
+        </div>
+      )}
 
       <AnimatePresence mode="wait">
         {showLoading ? (
@@ -123,9 +125,9 @@ const PlaylistGrid: React.FC<PlaylistGridProps> = ({
             transition={{ duration: 0.35, ease: 'easeOut' }}
             className="home-playlist-grid grid grid-cols-1 lg:grid-cols-3 gap-6"
           >
-            <PlaylistCardSkeleton />
-            <PlaylistCardSkeleton />
-            <PlaylistCardSkeleton />
+            <PlaylistCardSkeleton variant="home" />
+            <PlaylistCardSkeleton variant="home" />
+            <PlaylistCardSkeleton variant="home" />
           </motion.div>
         ) : isEmpty ? (
           <EmptyState key="empty" onNewDocument={onCreatePlaylistClick} />
@@ -147,6 +149,7 @@ const PlaylistGrid: React.FC<PlaylistGridProps> = ({
                   {...cardProps}
                   isFavorite={playlist.is_favorite === 1}
                   onNavigate={() => onNavigateToFolder(playlist.id, playlist.name)}
+                  onOpenInNewTab={onOpenPlaylistInNewTab}
                   onShare={onShare}
                   createdAt={playlist.created_at}
                   updatedAt={playlist.updated_at}

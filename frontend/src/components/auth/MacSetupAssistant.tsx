@@ -287,7 +287,7 @@ export function MacSetupAssistant({ user, onSetupComplete, isTempOnboarding = fa
             </div>
 
             <p className="text-slate-600 text-sm leading-relaxed mb-8 font-medium">
-              To index codebases, transcripts, mind maps, and documents, MyAILibrary needs a designated workspace folder on your local drive. Please specify a directory path below.
+              To index codebases, transcripts, mind maps, and documents, MyAiLibrary needs a designated workspace folder on your local drive. Please specify a directory path below.
             </p>
 
             <form onSubmit={handleSubmit} className="space-y-6">

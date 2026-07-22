@@ -15,7 +15,7 @@ class Playlist(Base):
     user_id = Column(String, ForeignKey("users.id"), nullable=True)
     storage_root = Column(String, nullable=True)
     description = Column(String, nullable=True)
-    icon_type = Column(String, default="standup")
+    icon_type = Column(String, default="avvv-initials")
     is_favorite = Column(Integer, default=0)
     created_at = Column(String, nullable=True)
     updated_at = Column(String, nullable=True)

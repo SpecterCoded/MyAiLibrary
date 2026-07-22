@@ -369,7 +369,7 @@ class QueueWorker:
                                 resource_title = resource.title or "AI Resource"
                                 title, message = failure.notification_for(resource_title) if failure else (
                                     "Processing failed",
-                                    f'“{resource_title}” stopped because MyAILibrary encountered an unexpected processing error. You can resume the pipeline; if it fails again, contact support with the job ID.',
+                                    f'“{resource_title}” stopped because MyAiLibrary encountered an unexpected processing error. You can resume the pipeline; if it fails again, contact support with the job ID.',
                                 )
                                 notification_link = (
                                     "/settings?tab=ai"

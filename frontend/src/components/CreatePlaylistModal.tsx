@@ -74,7 +74,7 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({ isOpen, onClo
       const token = localStorage.getItem('access_token');
       
       // 1. Create playlist
-      const response = await fetch(`/playlists?name=${encodeURIComponent(playlistName.trim())}&description=${encodeURIComponent(playlistDescription.trim())}`, {
+      const response = await fetch(`/playlists?name=${encodeURIComponent(playlistName.trim())}&description=${encodeURIComponent(playlistDescription.trim())}&icon_type=${encodeURIComponent('avvv-initials')}`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`
@@ -174,7 +174,7 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({ isOpen, onClo
 
       {/* Modal Container */}
       <motion.div
-        className="create-playlist-modal relative w-full max-w-2xl border border-slate-200/80 dark:border-white/10 shadow-[0_24px_50px_-12px_rgba(142,160,185,0.4)] dark:shadow-[0_24px_60px_-12px_rgba(0,0,0,0.6)] rounded-[32px] p-8"
+        className="create-playlist-modal relative w-full max-w-2xl border border-slate-200/80 dark:border-slate-600/45 shadow-[0_24px_50px_-12px_rgba(142,160,185,0.4)] dark:shadow-[0_24px_60px_-12px_rgba(0,0,0,0.6)] rounded-[32px] p-8"
         initial={{ opacity: 0, scale: 0.94, y: 26, filter: 'blur(8px)' }}
         animate={animate ? { opacity: 1, scale: 1, y: 0, filter: 'blur(0px)' } : { opacity: 0, scale: 0.96, y: 18, filter: 'blur(6px)' }}
         exit={{ opacity: 0, scale: 0.96, y: 18, filter: 'blur(6px)' }}
@@ -207,7 +207,7 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({ isOpen, onClo
               value={playlistName}
               onChange={(e) => setPlaylistName(e.target.value)}
               placeholder="Enter playlist name..." 
-              className="w-full bg-white/50 border border-slate-200/60 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all font-medium text-slate-700" 
+              className="w-full bg-white/50 dark:bg-slate-950/10 border border-slate-200/60 dark:border-slate-600/55 rounded-xl px-4 py-3 outline-none focus:border-indigo-400/70 dark:focus:border-indigo-400/60 focus:ring-2 focus:ring-indigo-500/20 transition-all font-medium text-slate-700 dark:text-slate-100 dark:placeholder:text-slate-400" 
             />
             <div className="text-[11px] text-slate-400 text-right mt-1">{playlistName.length}/100</div>
           </div>
@@ -220,7 +220,7 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({ isOpen, onClo
               placeholder="Add a short description..." 
               rows={3} 
               maxLength={300}
-              className="w-full bg-white/50 border border-slate-200/60 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all font-medium text-slate-700"
+              className="w-full bg-white/50 dark:bg-slate-950/10 border border-slate-200/60 dark:border-slate-600/55 rounded-xl px-4 py-3 outline-none focus:border-indigo-400/70 dark:focus:border-indigo-400/60 focus:ring-2 focus:ring-indigo-500/20 transition-all font-medium text-slate-700 dark:text-slate-100 dark:placeholder:text-slate-400"
             />
             <div className="text-[11px] text-slate-400 text-right mt-1">{playlistDescription.length}/300</div>
           </div>
@@ -238,7 +238,7 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({ isOpen, onClo
             </div>
             <p className="text-[11px] text-slate-400 mb-3">Resources and Notes folders will be created by default.</p>
             
-            <div className="create-playlist-folders bg-white/40 border border-slate-200/60 rounded-xl p-3 max-h-[160px] overflow-y-auto">
+            <div className="create-playlist-folders bg-white/40 dark:bg-slate-950/10 border border-slate-200/60 dark:border-slate-600/55 rounded-xl p-3 max-h-[160px] overflow-y-auto">
               <div className="flex items-center justify-between">
                 <div 
                   className="flex items-center gap-2 text-slate-700 font-bold truncate cursor-pointer hover:text-indigo-600 transition-colors"
@@ -265,7 +265,7 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({ isOpen, onClo
                   transition={{ duration: 0.34, ease: [0.16, 1, 0.3, 1] }}
                   className="overflow-hidden"
                 >
-                <div className="ml-10 mt-1 space-y-1 border-l border-slate-300/60 pl-4 py-1">
+                <div className="ml-10 mt-1 space-y-1 border-l border-slate-300/60 dark:border-slate-600/45 pl-4 py-1">
                   {subfolders.map((folder) => (
                     <div key={folder.id} className="group flex items-center justify-between py-1.5">
                       <div className="flex items-center gap-2 text-slate-600 font-medium truncate flex-1">
@@ -277,7 +277,7 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({ isOpen, onClo
                             onChange={(e) => setEditValue(e.target.value)}
                             onBlur={saveEdit}
                             onKeyDown={(e) => e.key === 'Enter' && saveEdit()}
-                            className="bg-white border border-indigo-200 rounded px-1.5 py-0.5 outline-none w-full text-[13px]"
+                            className="bg-white dark:bg-slate-950/40 border border-indigo-200 dark:border-indigo-400/40 rounded px-1.5 py-0.5 outline-none w-full text-[13px] dark:text-slate-100"
                           />
                         ) : (
                           <span className="truncate text-[13px]">{folder.name}</span>
@@ -310,7 +310,7 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({ isOpen, onClo
             <p className="text-[11px] text-slate-400 mb-3">Select the file formats you want to allow in this playlist.</p>
             <div className="create-playlist-file-types grid grid-cols-4 gap-3">
               {fileTypes.map((type) => (
-                <div key={type.name} className="create-playlist-file-type bg-white/50 border border-slate-200/60 rounded-xl p-4 text-center hover:border-indigo-300 hover:bg-white/80 hover:shadow-sm transition-[border-color,background-color,box-shadow] duration-200 cursor-pointer group">
+                <div key={type.name} className="create-playlist-file-type bg-white/50 dark:bg-slate-950/10 border border-slate-200/60 dark:border-slate-600/55 rounded-xl p-4 text-center hover:border-indigo-300 dark:hover:border-indigo-400/55 hover:bg-white/80 dark:hover:bg-slate-800/45 hover:shadow-sm transition-[border-color,background-color,box-shadow] duration-200 cursor-pointer group">
                   <div className="text-indigo-500 group-hover:text-indigo-600 mb-2 flex justify-center transition-colors">{type.icon}</div>
                   <div className="text-[11px] font-bold text-slate-600 group-hover:text-slate-800 transition-colors">{type.name}</div>
                 </div>

@@ -25,6 +25,8 @@ from glob import glob
 from typing import List
 from uuid import uuid4
 
+from subprocess_utils import run_hidden
+
 import sqlalchemy
 # ... (rest of imports)
 
@@ -37,7 +39,7 @@ sys_logger = get_logger("SYSTEM")
 BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 EXTRAA_FILES_ROOT = str(EXTRA_FILES_DIR)
 
-sys_logger.info("Initializing My AI Library...")
+sys_logger.info("Initializing MyAiLibrary...")
 
 from auth import create_access_token, create_refresh_token, get_current_user, get_current_user_id, validate_registration, validate_token, verify_firebase_token
 from embedding_service import (
@@ -241,7 +243,7 @@ with schema_migration_connection(engine, migration_required) as conn:
         if "description" not in existing_playlists:
             conn.execute(text("ALTER TABLE playlists ADD COLUMN description TEXT"))
         if "icon_type" not in existing_playlists:
-            conn.execute(text("ALTER TABLE playlists ADD COLUMN icon_type TEXT DEFAULT 'standup'"))
+            conn.execute(text("ALTER TABLE playlists ADD COLUMN icon_type TEXT DEFAULT 'avvv-initials'"))
         if "is_favorite" not in existing_playlists:
             conn.execute(text("ALTER TABLE playlists ADD COLUMN is_favorite INTEGER DEFAULT 0"))
         if "created_at" not in existing_playlists:
@@ -893,7 +895,7 @@ def root():
         if not index_file or not os.path.isfile(index_file):
             raise HTTPException(status_code=503, detail="Desktop interface is unavailable")
         return FileResponse(index_file)
-    return {"message": "MyAILibrary Running"}
+    return {"message": "MyAiLibrary Running"}
 
 
 # ==================================================
@@ -905,7 +907,7 @@ def root():
 def create_playlist(
     name: str,
     description: str = None,
-    icon_type: str = "standup",
+    icon_type: str = "avvv-initials",
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -3573,7 +3575,7 @@ async def transcribe_voice_input(
             "-c:a", "pcm_s16le",
             wav_path
         ]
-        subprocess.run(ffmpeg_cmd, check=True, capture_output=True)
+        run_hidden(ffmpeg_cmd, check=True, capture_output=True)
 
         result = transcribe_audio(wav_path)
         return {"transcript": (result.get("transcript") or "").strip()}
@@ -6046,6 +6048,16 @@ def get_embeddings(db: Session = Depends(get_db)):
     return db.query(Embedding).all()
 
 
+class CitationSource(BaseModel):
+    chunk_index: int
+    excerpt: str
+    rerank_score: float | None = None
+    hybrid_score: float | None = None
+    resource_id: str | None = None
+    resource_title: str | None = None
+    resource_path: str | None = None
+
+
 class AskQuestionResponse(BaseModel):
     answer: str
     sources: list[CitationSource]
@@ -6167,29 +6179,11 @@ class ResourceChatRequest(BaseModel):
     globe_on: bool = False
 
 
-class CitationSource(BaseModel):
-    chunk_index: int
-    excerpt: str
-    rerank_score: float | None = None
-    hybrid_score: float | None = None
-    resource_id: str | None = None
-    resource_title: str | None = None
-    resource_path: str | None = None
-
-
 class ResourceChatResponse(BaseModel):
     question: str
     answer: str
     session_id: str
     context: str
-    sources: list[CitationSource]
-    hallucinations: list[dict] = []
-    confidence: float | None = None
-    confidence_label: str | None = None
-
-
-class AskQuestionResponse(BaseModel):
-    answer: str
     sources: list[CitationSource]
     hallucinations: list[dict] = []
     confidence: float | None = None
@@ -9422,10 +9416,10 @@ async def test_local_dependency(request: Request, user_id: str = Depends(get_cur
             if not os.path.isdir(model_path):
                 raise local_path_failure(code="path_not_found", service=service, stage=stage, settings_section=section, path_label="WTP Canine model folder")
             try:
-                from wtpsplit import SaT
+                from services.sentence_segmentation_service import load_wtp_sat_model
                 with open(os.devnull, "w") as devnull:
                     with contextlib.redirect_stderr(devnull), contextlib.redirect_stdout(devnull):
-                        model = SaT(model_path)
+                        model = load_wtp_sat_model(model_path)
                         model.split("This is a test. This is another sentence.")
             except Exception:
                 raise local_path_failure(code="path_not_loadable", service=service, stage=stage, settings_section=section, path_label="WTP Canine model folder")
@@ -9434,7 +9428,7 @@ async def test_local_dependency(request: Request, user_id: str = Depends(get_cur
             raise local_path_failure(code="path_not_found", service=service, stage=stage, settings_section=section, path_label=f"{service} executable path")
         if model_path and not os.path.isfile(model_path):
             raise local_path_failure(code="path_not_found", service=service, stage=stage, settings_section=section, path_label="Whisper GGML model path")
-        completed = subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10, check=False)
+        completed = run_hidden(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10, check=False)
         if completed.returncode != 0:
             raise local_path_failure(code="path_not_executable", service=service, stage=stage, settings_section=section, path_label=f"{service} executable path")
         return {"success": True, "message": f"{service} configuration is ready."}
@@ -9748,7 +9742,7 @@ async def install_tesseract(user_id: str = Depends(get_current_user_id)):
 
     # Try to install via winget
     try:
-        result = subprocess.run(
+        result = run_hidden(
             ["winget", "install", "UB-Mannheim.TesseractOCR", "--accept-package-agreements", "--accept-source-agreements"],
             capture_output=True, text=True, timeout=120
         )
@@ -10333,6 +10327,7 @@ def download_wtp_model(model: str = "sat-3l", dest_path: str = ""):
         "sat-6l": "segment-any-text/sat-6l",
         "sat-12l": "segment-any-text/sat-12l",
     }
+    tokenizer_repo_id = "FacebookAI/xlm-roberta-base"
     expected_sizes = {
         "sat-3l": 350 * 1024 * 1024,
         "sat-6l": 600 * 1024 * 1024,
@@ -10372,6 +10367,7 @@ def download_wtp_model(model: str = "sat-3l", dest_path: str = ""):
 
             os.makedirs(dest_path, exist_ok=True)
             local_dir = os.path.join(dest_path, model)
+            tokenizer_dir = os.path.join(local_dir, "tokenizer")
 
             result = {"path": None, "error": None}
 
@@ -10381,6 +10377,20 @@ def download_wtp_model(model: str = "sat-3l", dest_path: str = ""):
                         result["path"] = snapshot_download(
                             repo_id=repo_id,
                             local_dir=local_dir,
+                        )
+                        snapshot_download(
+                            repo_id=tokenizer_repo_id,
+                            local_dir=tokenizer_dir,
+                            allow_patterns=[
+                                "config.json",
+                                "special_tokens_map.json",
+                                "tokenizer.json",
+                                "tokenizer_config.json",
+                                "sentencepiece.bpe.model",
+                                "tokenizer.model",
+                                "vocab.json",
+                                "merges.txt",
+                            ],
                         )
                         result["error"] = None
                         return
@@ -10407,6 +10417,17 @@ def download_wtp_model(model: str = "sat-3l", dest_path: str = ""):
 
             if result["error"]:
                 yield f"data: {json.dumps({"error": str(result["error"])})}\n\n"
+                return
+
+            yield f"data: {json.dumps({"progress": 98, "status": "validating"})}\n\n"
+            try:
+                from services.sentence_segmentation_service import load_wtp_sat_model
+                with open(os.devnull, "w") as devnull:
+                    with contextlib.redirect_stderr(devnull), contextlib.redirect_stdout(devnull):
+                        sat_model = load_wtp_sat_model(local_dir)
+                        sat_model.split("This is a test. This is another sentence.")
+            except Exception as exc:
+                yield f"data: {json.dumps({"error": f"Downloaded model could not be validated: {exc}"})}\n\n"
                 return
 
             normalized = result["path"].replace(os.sep, "/")
@@ -10444,7 +10465,7 @@ def get_system_info():
         system = platform.system()
         if system == "Windows":
             try:
-                result = subprocess.run(
+                result = run_hidden(
                     ["powershell", "-Command", "(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory"],
                     capture_output=True, text=True, timeout=10
                 )
@@ -10452,7 +10473,7 @@ def get_system_info():
                 ram_gb = round(bytes_val / (1024 ** 3), 1)
             except Exception:
                 try:
-                    result = subprocess.run(
+                    result = run_hidden(
                         ["wmic", "OS", "get", "TotalVisibleMemorySize", "/Value"],
                         capture_output=True, text=True, timeout=5
                     )
@@ -10471,7 +10492,7 @@ def get_system_info():
                         ram_gb = round(kb / (1024 * 1024), 1)
                         break
         elif system == "Darwin":
-            result = subprocess.run(
+            result = run_hidden(
                 ["sysctl", "-n", "hw.memsize"],
                 capture_output=True, text=True, timeout=5
             )

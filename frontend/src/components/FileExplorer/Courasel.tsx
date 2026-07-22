@@ -347,12 +347,12 @@ export const CarouselPreview: React.FC<CarouselPreviewProps> = ({
       onClick={onClose}
     >
       <ToastContainer toasts={toasts} onDismiss={removeToast} />
-      {/* Top Bar Details */}
-      <div className="absolute top-0 inset-x-0 h-16 flex items-center justify-between px-6 bg-gradient-to-b from-black/50 to-transparent pointer-events-none z-10">
-        <div className="text-white font-medium truncate max-w-[60%] select-none">
+      {/* Floating preview controls. Keep this compact so it does not read like the app navbar. */}
+      <div className="absolute top-5 left-6 right-[172px] flex items-start justify-between gap-4 pointer-events-none z-10">
+        <div className="max-w-[45vw] rounded-xl bg-black/20 px-3 py-2 text-white font-medium truncate select-none backdrop-blur-md">
           {currentItem.name}
         </div>
-        <div className="flex items-center gap-4 pointer-events-auto">
+        <div className="flex items-center gap-3 pointer-events-auto">
           {/* Embed button: in default folders only when processing is fully "ready" (not just "uploaded"), in other folders original logic */}
           {(canManuallyProcess
             ? !isAlreadyEmbedded && normalizedProcessingStatus === "ready"
@@ -392,19 +392,22 @@ export const CarouselPreview: React.FC<CarouselPreviewProps> = ({
               <button
                 onClick={() => {
                   const fileUrl = `${window.location.origin}/resources/${currentItem.id}/file`;
-                  const paramKey = currentItem.type === "audio" ? "audioUrl" : "videoUrl";
-                  const params = new URLSearchParams();
-                  params.set("view", "folder");
-                  params.set(paramKey, fileUrl);
-                  params.set("resourceId", currentItem.id);
-                  if (playlistId) params.set("playlistId", playlistId);
-                  if (playlistName) params.set("playlistName", playlistName);
-                  if (folderId) params.set("folderId", folderId);
-                  if (folderName) params.set("folderName", folderName);
-
-                  // Electron rejects unexpected local popup windows. Load the
-                  // dedicated player route in this trusted application window.
-                  window.location.assign(`${window.location.origin}/?${params.toString()}`);
+                  // Open media inside the active workspace tab instead of
+                  // replacing the whole Electron window.
+                  window.dispatchEvent(new CustomEvent("app-navigate", {
+                    detail: {
+                      view: currentItem.type === "audio" ? "audio-player" : "video-player",
+                      title: currentItem.name,
+                      params: {
+                        mediaUrl: fileUrl,
+                        resourceId: currentItem.id,
+                        playlistId: playlistId || undefined,
+                        playlistName: playlistName || undefined,
+                        folderId: folderId || undefined,
+                        folderName: folderName || undefined,
+                      },
+                    },
+                  }));
                 }}
                 className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold py-1.5 px-3.5 rounded-lg border border-indigo-500/20 transition-all cursor-pointer pointer-events-auto"
               >

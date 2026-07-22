@@ -1,6 +1,6 @@
 appId: com.myailibrary.desktop
-productName: My AI Library
-copyright: Copyright © 2026 My AI Library
+productName: MyAiLibrary
+copyright: Copyright © 2026 MyAiLibrary
 asar: true
 
 directories:
@@ -42,7 +42,7 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: My AI Library
+  shortcutName: MyAiLibrary
   artifactName: MyAI-Library-Setup-${version}-x64.${ext}
   installerIcon: build/installerIcon.ico
   uninstallerIcon: build/uninstallerIcon.ico

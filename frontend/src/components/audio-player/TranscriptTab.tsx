@@ -799,7 +799,7 @@ export default function TranscriptTab({
         </div>
 
         {/* Large Timer Display */}
-        <h1 className="font-mono text-7xl md:text-8xl font-bold text-[#1A1A1A] tracking-normal tabular-nums my-2">
+        <h1 className="font-display text-7xl md:text-8xl font-extrabold text-[#1A1A1A] dark:text-white tracking-[-0.055em] tabular-nums leading-none my-2">
           {formatTime(timerSeconds)}
         </h1>
 

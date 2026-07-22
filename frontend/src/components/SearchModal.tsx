@@ -250,9 +250,13 @@ const CommandSearchModal: React.FC<{ isOpen: boolean, onClose: () => void }> = (
       window.dispatchEvent(new CustomEvent('app-navigate', { detail: { view: 'folder', id: item.id } }));
     } else if (item.category === 'Resources') {
       if (raw.type === 'video') {
-        window.location.search = `videoUrl=${encodeURIComponent(raw.local_path)}&resourceId=${raw.id}`;
+        window.dispatchEvent(new CustomEvent('app-navigate', {
+          detail: { view: 'video-player', title: item.title, params: { mediaUrl: raw.local_path, resourceId: raw.id } }
+        }));
       } else if (raw.type === 'audio') {
-        window.location.search = `audioUrl=${encodeURIComponent(raw.local_path)}&resourceId=${raw.id}`;
+        window.dispatchEvent(new CustomEvent('app-navigate', {
+          detail: { view: 'audio-player', title: item.title, params: { mediaUrl: raw.local_path, resourceId: raw.id } }
+        }));
       } else {
         // PDF, markdown, images, etc: navigate to parent folder
         if (raw.folder_id) {
@@ -264,17 +268,24 @@ const CommandSearchModal: React.FC<{ isOpen: boolean, onClose: () => void }> = (
       const resPath = raw.resource_local_path || '';
       const resId = raw.resource_id || '';
       if (resId && resPath) {
-        let q = '';
+        let view: 'video-player' | 'audio-player' | '' = '';
         if (resType === 'video') {
-          q = `videoUrl=${encodeURIComponent(resPath)}&resourceId=${resId}`;
+          view = 'video-player';
         } else if (resType === 'audio') {
-          q = `audioUrl=${encodeURIComponent(resPath)}&resourceId=${resId}`;
+          view = 'audio-player';
         }
-        if (q && raw.start_time !== undefined) {
-          q += `&t=${raw.start_time}`;
-        }
-        if (q) {
-          window.location.search = q;
+        if (view) {
+          window.dispatchEvent(new CustomEvent('app-navigate', {
+            detail: {
+              view,
+              title: item.title,
+              params: {
+                mediaUrl: resPath,
+                resourceId: resId,
+                time: raw.start_time !== undefined ? Number(raw.start_time) : undefined,
+              },
+            },
+          }));
         }
       }
     } else if (item.category === 'Notes') {

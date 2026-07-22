@@ -9,12 +9,12 @@ export function HelpDialog() {
   if (!helpOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 dark:bg-black/45 p-4">
       <div 
-        className="bg-white dark:bg-[#191919] w-full max-w-[700px] rounded-xl shadow-2xl overflow-hidden flex flex-col font-sans transition-all max-h-[85vh]"
+        className="notebook-help-dialog w-full max-w-[700px] rounded-xl shadow-2xl overflow-hidden flex flex-col font-sans transition-all max-h-[85vh]"
         onClick={e => e.stopPropagation()}
       >
-        <div className="p-6 border-b border-[#EFEFED] dark:border-gray-800 relative bg-[#F7F7F5] dark:bg-[#202020]">
+        <div className="notebook-help-header p-6 border-b border-[#EFEFED] dark:border-gray-800 relative">
           <button 
              className="absolute top-6 right-6 text-[#9A9A97] hover:text-[#37352F] dark:hover:text-gray-200 transition-colors" 
              onClick={() => setHelpOpen(false)}
@@ -38,7 +38,7 @@ export function HelpDialog() {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6 bg-white dark:bg-[#191919]">
+        <div className="notebook-help-body flex-1 overflow-y-auto p-6">
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
             <div className="p-4 border border-[#EFEFED] dark:border-gray-800 rounded-lg hover:border-gray-300 dark:hover:border-gray-600 transition-colors cursor-pointer group flex flex-col items-start bg-white dark:bg-[#2A2A2A]">

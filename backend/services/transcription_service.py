@@ -9,6 +9,7 @@ import shutil
 from dotenv import load_dotenv
 from services.dependency_failure_service import DependencyFailure, local_path_failure, missing_configuration
 from core.paths import EXTRA_FILES_DIR
+from subprocess_utils import popen_hidden, run_hidden
 
 # Load environment variables
 load_dotenv()
@@ -234,7 +235,7 @@ def _run_openai_whisper_timestamp_pass(
     if initial_prompt:
         cmd.extend(["--initial_prompt", initial_prompt])
 
-    process = subprocess.Popen(
+    process = popen_hidden(
         cmd,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -309,7 +310,7 @@ def get_media_duration(file_path: str) -> float:
             "default=noprint_wrappers=1:nokey=1",
             file_path,
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = run_hidden(cmd, capture_output=True, text=True)
         if result.returncode == 0 and result.stdout.strip():
             return float(result.stdout.strip())
     except Exception:
@@ -340,7 +341,7 @@ def detect_speech_intervals(file_path: str, duration_seconds: float) -> list[tup
         return []
 
     try:
-        result = subprocess.run(
+        result = run_hidden(
             [
                 "ffmpeg",
                 "-i",
@@ -388,7 +389,7 @@ def _prepare_audio_input_for_whisper(file_path: str, output_dir: str) -> tuple[s
         return file_path, []
 
     prepared_path = os.path.join(output_dir, "__whisper_input.wav")
-    result = subprocess.run(
+    result = run_hidden(
         [
             "ffmpeg",
             "-y",
@@ -535,7 +536,7 @@ def transcribe_audio(
         file_path,
         output_paths["output_dir"],
     )
-    process = subprocess.Popen(
+    process = popen_hidden(
         [
             whisper_path,
             "-m", whisper_model_path,

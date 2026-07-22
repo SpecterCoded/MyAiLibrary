@@ -536,9 +536,6 @@ export default function App({ theme, setTheme }: RagExplorerPageProps) {
       {/* Sidebar Navigation */}
       <aside className="w-16 md:w-20 border-r border-border flex flex-col items-center justify-between py-8 bg-panel shrink-0">
         <div className="flex flex-col items-center gap-8 w-full">
-          <div className="w-10 h-10 bg-brand text-brand-foreground flex items-center justify-center font-display font-bold text-xl">
-            R
-          </div>
           <nav className="flex flex-col gap-6 w-full items-center">
             <button 
               onClick={() => setCurrentView('dashboard')}
@@ -618,7 +615,6 @@ export default function App({ theme, setTheme }: RagExplorerPageProps) {
             volumeData={volumeData}
             onViewVolume={() => setCurrentView('processing-volume')}
             onViewActivity={() => setCurrentView('activity-logs')}
-            isDarkMode={isDarkMode}
           />
         ) : currentView === 'processing-volume' ? (
           <div className="flex-1 overflow-auto p-8 bg-panel">
@@ -627,13 +623,14 @@ export default function App({ theme, setTheme }: RagExplorerPageProps) {
               <div className="h-96">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={volumeData} margin={{ top: 20, right: 30, left: 0, bottom: 10 }}>
-                    <XAxis dataKey="label" stroke={isDarkMode ? 'rgba(255,255,255,0.35)' : 'rgba(17,17,17,0.35)'} fontSize={12} tickLine={false} axisLine={false} />
-                    <YAxis stroke={isDarkMode ? 'rgba(255,255,255,0.25)' : 'rgba(17,17,17,0.25)'} fontSize={12} tickLine={false} axisLine={false} />
+                    <XAxis dataKey="label" stroke="var(--ragx-ink-faint)" fontSize={12} tickLine={false} axisLine={false} />
+                    <YAxis stroke="var(--ragx-ink-faint)" fontSize={12} tickLine={false} axisLine={false} />
                     <Line type="monotone" dataKey="chunks" stroke="#6366f1" strokeWidth={2} dot={{ r: 4, fill: '#6366f1', stroke: '#fff', strokeWidth: 1.5 }} activeDot={{ r: 6 }} />
                     <Line type="monotone" dataKey="vectors" stroke="#06b6d4" strokeWidth={2} dot={{ r: 4, fill: '#06b6d4', stroke: '#fff', strokeWidth: 1.5 }} activeDot={{ r: 6 }} />
                     <Tooltip
-                      contentStyle={{ backgroundColor: '#121212', border: '1px solid var(--ragx-border)' }}
-                      itemStyle={{ color: '#fafafa' }}
+                      contentStyle={{ backgroundColor: 'var(--ragx-panel-elev)', border: '1px solid var(--ragx-border)', color: 'var(--ragx-ink)' }}
+                      itemStyle={{ color: 'var(--ragx-ink)' }}
+                      labelStyle={{ color: 'var(--ragx-ink)' }}
                     />
                   </LineChart>
                 </ResponsiveContainer>
@@ -701,18 +698,18 @@ export default function App({ theme, setTheme }: RagExplorerPageProps) {
             </div>
           </div>
           
-          <div className="ragx-health p-6 md:p-8 border-l border-border w-full xl:w-96 flex flex-col justify-center bg-panel">
+          <div className="ragx-health p-6 md:p-8 border-l border-border w-full xl:w-96 flex flex-col justify-center bg-canvas">
             <div className="text-sm text-ink-muted font-mono mb-4 uppercase tracking-wider">Health Distribution</div>
             <div className="flex-1 flex items-center gap-6">
-              <div className="w-24 h-24 flex-shrink-0">
+              <div className="ragx-health-pie w-24 h-24 flex-shrink-0">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
                       data={healthData}
                       cx="50%"
                       cy="50%"
-                      innerRadius={25}
-                      outerRadius={40}
+                      innerRadius={20}
+                      outerRadius={32}
                       paddingAngle={2}
                       dataKey="value"
                       stroke="none"
@@ -722,8 +719,9 @@ export default function App({ theme, setTheme }: RagExplorerPageProps) {
                       ))}
                     </Pie>
                     <Tooltip 
-                      contentStyle={{ backgroundColor: '#121212', border: '1px solid var(--color-border)', borderRadius: '4px' }}
-                      itemStyle={{ color: 'var(--color-ink)', fontSize: '12px' }}
+                      contentStyle={{ backgroundColor: 'var(--ragx-panel-elev)', border: '1px solid var(--ragx-border)', borderRadius: '4px', color: 'var(--ragx-ink)' }}
+                      itemStyle={{ color: 'var(--ragx-ink)', fontSize: '12px' }}
+                      labelStyle={{ color: 'var(--ragx-ink)' }}
                     />
                   </PieChart>
                 </ResponsiveContainer>

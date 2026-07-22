@@ -361,7 +361,7 @@ Citation format rules:
 
     if globe_on:
         prompt = f"""
-You are MyAILibrary AI Tutor, acting as a general intelligent research assistant.
+You are MyAiLibrary AI Tutor, acting as a general intelligent research assistant.
 
 Your goal is to provide a fully detailed, deep, broad, and comprehensive answer relying primarily on your own extensive general knowledge and reasoning.
 Return a strong educational answer explaining definitions, how things work, examples, risks, and all relevant concepts around the topic.
@@ -387,7 +387,7 @@ Question:
 """
     elif concise:
         prompt = f"""
-You are MyAILibrary AI Tutor.
+You are MyAiLibrary AI Tutor.
 
 Answer the user's question concisely and clearly based on the provided context.
 Keep your answer focused, brief, and to the point — ideally 2-4 sentences.
@@ -416,7 +416,7 @@ Question:
 
         if is_complex and context:
             prompt = f"""
-You are MyAILibrary AI Tutor.
+You are MyAiLibrary AI Tutor.
 
 For this complex question, think step by step:
 1. First, identify the key concepts from the context that relate to the question.
@@ -440,7 +440,7 @@ Question:
 """
         else:
             prompt = f"""
-You are MyAILibrary AI Tutor.
+You are MyAiLibrary AI Tutor.
 
 Your goal is to provide an exceptionally detailed, deep, and comprehensive explanation in response to the user's question.
 Fully explain everything discussed in the context related to the question. Do not summarize briefly; instead, provide complete explanations, key points, step-by-step breakdowns, and all relevant details from the context.
@@ -520,7 +520,7 @@ def generate_answer_stream(
 
     if globe_on:
         prompt = f"""
-You are MyAILibrary AI Tutor, acting as a general intelligent research assistant.
+You are MyAiLibrary AI Tutor, acting as a general intelligent research assistant.
 
 Your goal is to provide a fully detailed, deep, broad, and comprehensive answer relying primarily on your own extensive general knowledge and reasoning.
 Return a strong educational answer explaining definitions, how things work, examples, risks, and all relevant concepts around the topic.
@@ -560,7 +560,7 @@ Question:
 """
     else:
         prompt = f"""
-You are MyAILibrary AI Tutor.
+You are MyAiLibrary AI Tutor.
 
 Your goal is to provide an exceptionally detailed, deep, and comprehensive explanation in response to the user's question.
 Fully explain everything discussed in the context related to the question. Do not summarize briefly; instead, provide complete explanations, key points, step-by-step breakdowns, and all relevant details from the context.
@@ -804,7 +804,7 @@ def generate_study_notes(content: str, user_id: str | None = None, resource_id: 
     """Create exceptionally deep, detailed, and beautifully structured study notes from the content."""
 
     prompt = f"""
-You are MyAILibrary AI Tutor.
+You are MyAiLibrary AI Tutor.
 
 Your task is to analyze the provided content and generate exceptionally deep, comprehensive, and detailed study notes. 
 

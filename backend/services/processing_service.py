@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from core.logger import get_logger
 from core.activity_log import log_user_activity
+from subprocess_utils import run_hidden
 from embedding_service import store_resource_embeddings
 from models import (
     Chapter,
@@ -222,7 +223,7 @@ def get_media_duration(file_path: str) -> float:
         "default=noprint_wrappers=1:nokey=1",
         file_path,
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = run_hidden(cmd, capture_output=True, text=True)
     if result.returncode != 0 or not result.stdout.strip():
         return 0
     return float(result.stdout.strip())

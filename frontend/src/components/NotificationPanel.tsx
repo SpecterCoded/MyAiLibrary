@@ -246,7 +246,18 @@ const NotificationPanel: React.FC<NotificationPanelProps> = ({ isOpen, onClose, 
       } else if (notif.link.startsWith('/audio-player') || notif.link.startsWith('/video-player')) {
         const queryParams = notif.link.split('?')[1];
         if (queryParams) {
-          window.location.search = queryParams;
+          const params = new URLSearchParams(queryParams);
+          const isAudio = notif.link.startsWith('/audio-player');
+          window.dispatchEvent(new CustomEvent('app-navigate', {
+            detail: {
+              view: isAudio ? 'audio-player' : 'video-player',
+              params: {
+                mediaUrl: params.get(isAudio ? 'audioUrl' : 'videoUrl') || undefined,
+                resourceId: params.get('resourceId') || undefined,
+                time: params.has('t') ? Number(params.get('t')) : undefined,
+              },
+            },
+          }));
         }
       }
     }
@@ -274,7 +285,7 @@ const NotificationPanel: React.FC<NotificationPanelProps> = ({ isOpen, onClose, 
       ></div>
 
       <div 
-        className={`fixed right-8 top-28 z-40 w-full max-w-[500px] bg-white dark:bg-slate-900 rounded-3xl border border-zinc-100 dark:border-white/10 shadow-[0_20px_50px_-12px_rgba(0,0,0,0.12)] p-6 font-sans text-zinc-900 dark:text-slate-100 select-none transition-all duration-400 origin-top-right ${animate ? 'translate-y-0 opacity-100 scale-100' : '-translate-y-4 opacity-0 scale-95'}`}
+        className={`notification-panel-popover fixed right-8 top-[8.5rem] z-50 w-full max-w-[500px] max-h-[calc(100vh-9.75rem)] overflow-hidden bg-white dark:bg-slate-900 rounded-3xl border border-zinc-100 dark:border-white/10 shadow-[0_20px_50px_-12px_rgba(0,0,0,0.12)] p-6 font-sans text-zinc-900 dark:text-slate-100 select-none transition-all duration-400 origin-top-right ${animate ? 'translate-y-0 opacity-100 scale-100' : '-translate-y-2 opacity-0 scale-95'}`}
         style={{ transitionTimingFunction: "cubic-bezier(0.16, 1, 0.3, 1)" }}
       >
         
@@ -336,7 +347,7 @@ const NotificationPanel: React.FC<NotificationPanelProps> = ({ isOpen, onClose, 
         </div>
 
         {/* Notification Stream */}
-        <div className="max-h-[380px] overflow-y-auto pr-1 space-y-4 no-scrollbar">
+        <div className="max-h-[calc(100vh-19rem)] overflow-y-auto pr-1 space-y-4 no-scrollbar">
           {loading ? (
             <div className="py-12 flex flex-col items-center justify-center text-zinc-400">
               <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mb-3"></div>

@@ -1870,18 +1870,19 @@ function DrawerContent({ n, conceptById, edges, isFav, onClose, onJump, onFav, o
       onToast('This source does not have a media player.');
       return;
     }
-    const params = new URLSearchParams();
     const fileUrl = '/resources/' + encodeURIComponent(reference.resource_id) + '/file';
-    params.set(isAudio ? 'audioUrl' : 'videoUrl', fileUrl);
-    params.set('resourceId', reference.resource_id);
     const startSeconds = reference.jump_target?.start_seconds;
-    if (typeof startSeconds === 'number' && Number.isFinite(startSeconds)) {
-      params.set('t', String(Math.max(0, startSeconds)));
-    }
-    params.set('tab', 'transcript');
-    const token = localStorage.getItem('access_token');
-    if (token) params.set('token', token);
-    window.location.href = '/?' + params.toString();
+    window.dispatchEvent(new CustomEvent('app-navigate', {
+      detail: {
+        view: isAudio ? 'audio-player' : 'video-player',
+        title: reference.resource_title || 'Reference',
+        params: {
+          mediaUrl: fileUrl,
+          resourceId: reference.resource_id,
+          time: typeof startSeconds === 'number' && Number.isFinite(startSeconds) ? Math.max(0, startSeconds) : undefined,
+        },
+      },
+    }));
   }
 
   async function handleViewSources() {

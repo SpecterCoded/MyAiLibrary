@@ -27,8 +27,10 @@ import MetricsDashboard from './components/MetricsDashboard';
 import LogoLoading from './components/LogoLoading';
 import DocumentIntelligencePage from './components/DocumentIntelligencePage';
 import RagExplorerPage from './components/rag-explorer/RagExplorerPage';
+import WorkspaceTitleBar from './components/WorkspaceTitleBar';
 import { init as initActivityLogger, destroy as destroyActivityLogger } from './utils/activityLogger';
 import { auth } from './firebase';
+import type { WorkspaceTab, WorkspaceTabKind, WorkspaceTabParams } from './types/workspaceTabs';
 
 interface PlaylistData {
   id: number;
@@ -60,6 +62,110 @@ export interface AuthContextType {
   setView: (view: AuthView) => void;
   onLoginSuccess: () => void;
 }
+
+type DashboardView = 'home' | 'library' | 'folder' | 'downloads' | 'notebooks' | 'concepts' | 'chat' | 'metrics' | 'settings' | 'document-intelligence' | 'rag-explorer';
+
+interface WorkspaceTabsState {
+  tabs: WorkspaceTab[];
+  activeTabId: string;
+}
+
+const MAX_WORKSPACE_TABS = 5;
+const WORKSPACE_TABS_STORAGE_KEY = 'myai_workspace_tabs_v1';
+
+const isDashboardView = (value: string | null): value is DashboardView =>
+  !!value && ['home', 'library', 'folder', 'downloads', 'notebooks', 'concepts', 'chat', 'metrics', 'settings', 'document-intelligence', 'rag-explorer'].includes(value);
+
+const makeWorkspaceTabId = () => `tab-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+const getWorkspaceTabTitle = (kind: WorkspaceTabKind, params: WorkspaceTabParams = {}) => {
+  if (kind === 'folder') return params.playlistName || params.folderName || 'Folder';
+  if (kind === 'audio-player') return params.playlistName || 'Audio';
+  if (kind === 'video-player') return params.playlistName || 'Video';
+  if (kind === 'document-intelligence') return 'Document Intelligence';
+  if (kind === 'rag-explorer') return 'RAG Explorer';
+  return ({
+    home: 'Home',
+    library: 'Library',
+    downloads: 'Downloads',
+    notebooks: 'Notebooks',
+    concepts: 'Knowledge',
+    chat: 'Ask AI',
+    metrics: 'Metrics',
+    settings: 'Settings',
+  } as Partial<Record<WorkspaceTabKind, string>>)[kind] || 'Home';
+};
+
+const createWorkspaceTab = (kind: WorkspaceTabKind = 'home', params: WorkspaceTabParams = {}, title?: string): WorkspaceTab => {
+  const now = Date.now();
+  return {
+    id: makeWorkspaceTabId(),
+    kind,
+    params,
+    title: title || getWorkspaceTabTitle(kind, params),
+    createdAt: now,
+    updatedAt: now,
+  };
+};
+
+const normalizeWorkspaceTabsState = (state: WorkspaceTabsState): WorkspaceTabsState => {
+  const validTabs = state.tabs
+    .filter((tab) => tab && tab.id && tab.kind)
+    .filter((tab) => {
+      if ((tab.kind === 'audio-player' || tab.kind === 'video-player') && (!tab.params?.resourceId || !tab.params?.mediaUrl)) return false;
+      return true;
+    })
+    .slice(0, MAX_WORKSPACE_TABS);
+
+  const tabs = validTabs.length > 0 ? validTabs : [createWorkspaceTab('home')];
+  const activeTabId = tabs.some((tab) => tab.id === state.activeTabId) ? state.activeTabId : tabs[0].id;
+  return { tabs, activeTabId };
+};
+
+const readInitialWorkspaceTabsState = (): WorkspaceTabsState => {
+  const params = new URLSearchParams(window.location.search);
+  const audioUrl = params.get('audioUrl');
+  const videoUrl = params.get('videoUrl');
+  const resourceId = params.get('resourceId') || undefined;
+  const playlistId = params.get('playlistId') || undefined;
+  const playlistName = params.get('playlistName') || undefined;
+  const folderId = params.get('folderId') || undefined;
+  const folderName = params.get('folderName') || undefined;
+  const time = Number(params.get('t'));
+
+  if (resourceId && (audioUrl || videoUrl)) {
+    const kind: WorkspaceTabKind = audioUrl ? 'audio-player' : 'video-player';
+    const mediaUrl = audioUrl || videoUrl || undefined;
+    const tab = createWorkspaceTab(kind, {
+      resourceId,
+      mediaUrl,
+      playlistId,
+      playlistName,
+      folderId,
+      folderName,
+      time: Number.isFinite(time) ? time : undefined,
+    });
+    window.history.replaceState({}, '', window.location.pathname);
+    return { tabs: [tab], activeTabId: tab.id };
+  }
+
+  try {
+    const stored = localStorage.getItem(WORKSPACE_TABS_STORAGE_KEY);
+    if (stored) return normalizeWorkspaceTabsState(JSON.parse(stored));
+  } catch {
+    // Ignore corrupt tab state and start fresh.
+  }
+
+  const view = params.get('view');
+  const kind: WorkspaceTabKind = isDashboardView(view) ? view : 'home';
+  const tab = createWorkspaceTab(kind, {
+    playlistId: params.get('playlistId') || undefined,
+    playlistName: params.get('playlistName') || undefined,
+    settingsTab: params.get('tab') || undefined,
+  });
+  return { tabs: [tab], activeTabId: tab.id };
+};
+
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentUser, setCurrentUser] = useState<BackendUser | null>(null);
@@ -81,6 +187,7 @@ export default function App() {
       root.classList.remove('light', 'dark');
       root.classList.add(resolvedTheme);
       root.style.colorScheme = resolvedTheme;
+      void window.desktop?.setTitleBarTheme(resolvedTheme);
     };
 
     if (theme === 'system') {
@@ -133,25 +240,100 @@ export default function App() {
   const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
   const isNotificationsLoadedRef = useRef(false);
   const unreadCountRef = useRef(0);
+  const notificationAudioCtxRef = useRef<AudioContext | null>(null);
+  const lastNotificationSoundAtRef = useRef(0);
   const [hasActiveDownloads, setHasActiveDownloads] = useState(false);
   const authExpiredRef = useRef(false);
+
+  const clearStoredAuth = () => {
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('refresh_token');
+  };
 
   const handleAuthExpired = () => {
     if (authExpiredRef.current) return;
     authExpiredRef.current = true;
     setAuthExpired(true);
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
+    clearStoredAuth();
     setTimeout(() => {
       window.location.reload();
     }, 3000);
   };
 
-  const playNotificationSound = () => {
+  const refreshBackendAccessToken = async (): Promise<string | null> => {
+    const refreshToken = localStorage.getItem('refresh_token');
+    if (!refreshToken) return null;
+
     try {
-      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioContextClass) return;
-      const ctx = new AudioContextClass();
+      const res = await fetch('/auth/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          refresh_token: refreshToken,
+          remember_me: localStorage.getItem('remember_me') === 'true',
+        }),
+      });
+
+      if (!res.ok) {
+        if (res.status === 401 || res.status === 403) {
+          clearStoredAuth();
+        }
+        return null;
+      }
+
+      const data = await res.json();
+      if (typeof data.access_token !== 'string' || !data.access_token) return null;
+
+      localStorage.setItem('access_token', data.access_token);
+      return data.access_token;
+    } catch (err) {
+      console.error('Token refresh failed:', err);
+      return null;
+    }
+  };
+
+  const getNotificationAudioContext = () => {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContextClass) return null;
+
+    if (!notificationAudioCtxRef.current) {
+      notificationAudioCtxRef.current = new AudioContextClass();
+    }
+
+    return notificationAudioCtxRef.current;
+  };
+
+  useEffect(() => {
+    const unlockNotificationAudio = () => {
+      const ctx = getNotificationAudioContext();
+      if (ctx?.state === 'suspended') {
+        void ctx.resume().catch(() => {
+          // Chromium/Electron can reject until a real user gesture; the next gesture retries.
+        });
+      }
+    };
+
+    window.addEventListener('pointerdown', unlockNotificationAudio, { passive: true });
+    window.addEventListener('keydown', unlockNotificationAudio);
+
+    return () => {
+      window.removeEventListener('pointerdown', unlockNotificationAudio);
+      window.removeEventListener('keydown', unlockNotificationAudio);
+    };
+  }, []);
+
+  const playNotificationSound = async () => {
+    try {
+      const nowMs = Date.now();
+      if (nowMs - lastNotificationSoundAtRef.current < 1200) return;
+      lastNotificationSoundAtRef.current = nowMs;
+
+      const ctx = getNotificationAudioContext();
+      if (!ctx) return;
+
+      if (ctx.state === 'suspended') {
+        await ctx.resume();
+      }
 
       const playTone = (freq: number, startTime: number, duration: number) => {
         const osc = ctx.createOscillator();
@@ -175,21 +357,31 @@ export default function App() {
       playTone(523.25, now, 0.35);       // C5
       playTone(659.25, now + 0.08, 0.45); // E5
     } catch (e) {
-      console.error("Failed to play notification sound:", e);
+      console.warn("Notification sound could not play yet:", e);
     }
   };
 
   const [hasUnreadDownloads, setHasUnreadDownloads] = useState(false);
 
   const fetchUnreadNotificationsCount = async () => {
-    const token = localStorage.getItem('access_token');
+    let token = localStorage.getItem('access_token');
     if (!isAuthenticated) return;
-    if (!token) { handleAuthExpired(); return; }
+    if (!token) {
+      token = await refreshBackendAccessToken();
+      if (!token) { handleAuthExpired(); return; }
+    }
     try {
-      const response = await fetch('/notifications?tab=Inbox', {
+      let response = await fetch('/notifications?tab=Inbox', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      if (response.status === 401) { handleAuthExpired(); return; }
+      if (response.status === 401) {
+        token = await refreshBackendAccessToken();
+        if (!token) { handleAuthExpired(); return; }
+        response = await fetch('/notifications?tab=Inbox', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (response.status === 401) { handleAuthExpired(); return; }
+      }
       if (response.ok) {
         const data = await response.json();
         const unread = data.filter((n: any) => !n.is_read).length;
@@ -212,17 +404,27 @@ export default function App() {
   };
 
   const checkActiveDownloads = async () => {
-    const token = localStorage.getItem('access_token');
+    let token = localStorage.getItem('access_token');
     if (!isAuthenticated) {
       setHasActiveDownloads(false);
       return;
     }
-    if (!token) { handleAuthExpired(); return; }
+    if (!token) {
+      token = await refreshBackendAccessToken();
+      if (!token) { handleAuthExpired(); return; }
+    }
     try {
-      const response = await fetch('/tasks', {
+      let response = await fetch('/tasks', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      if (response.status === 401) { handleAuthExpired(); return; }
+      if (response.status === 401) {
+        token = await refreshBackendAccessToken();
+        if (!token) { handleAuthExpired(); return; }
+        response = await fetch('/tasks', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (response.status === 401) { handleAuthExpired(); return; }
+      }
       if (response.ok) {
         const data = await response.json();
         const active = data.some((t: any) => t.status === 'queued' || t.status === 'processing');
@@ -262,8 +464,9 @@ export default function App() {
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isNotificationPanelOpen, setIsNotificationPanelOpen] = useState(false);
   const [isActivityLogOpen, setIsActivityLogOpen] = useState(false);
+  const [isFileCarouselOpen, setIsFileCarouselOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [currentView, setCurrentView] = useState<'home' | 'library' | 'folder' | 'downloads' | 'notebooks' | 'concepts' | 'chat' | 'metrics' | 'settings' | 'document-intelligence' | 'rag-explorer'>(() => {
+  const [currentView, setCurrentView] = useState<DashboardView>(() => {
     const params = new URLSearchParams(window.location.search);
     const viewParam = params.get('view');
     if (viewParam === 'folder') return 'folder';
@@ -281,7 +484,8 @@ export default function App() {
     return params.get('playlistName') || '';
   });
   const [selectedDocumentIntelligenceResourceId, setSelectedDocumentIntelligenceResourceId] = useState<string | null>(null);
-  const [returnViewFromDocumentIntelligence, setReturnViewFromDocumentIntelligence] = useState<'home' | 'library' | 'folder' | 'downloads' | 'notebooks' | 'concepts' | 'chat' | 'metrics' | 'settings' | 'rag-explorer'>('library');
+  const [returnViewFromDocumentIntelligence, setReturnViewFromDocumentIntelligence] = useState<Exclude<DashboardView, 'document-intelligence'>>('library');
+  const [workspaceTabsState, setWorkspaceTabsState] = useState<WorkspaceTabsState>(() => readInitialWorkspaceTabsState());
   const [desktopUpdateState, setDesktopUpdateState] = useState<DesktopUpdateState | null>(null);
   const [installedUpdateInfo, setInstalledUpdateInfo] = useState<DesktopInstalledUpdateInfo | null>(null);
   const [dismissedAvailableVersion, setDismissedAvailableVersion] = useState<string | null>(null);
@@ -316,7 +520,7 @@ export default function App() {
     url.searchParams.set('view', 'settings');
     url.searchParams.set('tab', 'updates');
     window.history.replaceState({}, '', `${url.pathname}${url.search}`);
-    setCurrentView('settings');
+    navigateWorkspace('settings', { settingsTab: 'updates' }, 'Settings');
     window.setTimeout(() => {
       window.dispatchEvent(new CustomEvent('myai:open-settings-tab', { detail: 'updates' }));
     }, 0);
@@ -324,16 +528,155 @@ export default function App() {
 
   const updateBadgeVisible = !!desktopUpdateState && ['available', 'downloading', 'ready-to-install'].includes(desktopUpdateState.status);
   const availableUpdateVersion = updateBadgeVisible ? desktopUpdateState?.availableVersion : undefined;
+  const workspaceTabs = workspaceTabsState.tabs;
+  const activeWorkspaceTab = workspaceTabs.find((tab) => tab.id === workspaceTabsState.activeTabId) || workspaceTabs[0];
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(WORKSPACE_TABS_STORAGE_KEY, JSON.stringify(workspaceTabsState));
+    } catch {
+      // Losing tab restore is non-critical; never interrupt the app for it.
+    }
+  }, [workspaceTabsState]);
+
+  const applyWorkspaceTab = (tab: WorkspaceTab) => {
+    if (tab.kind === 'audio-player' || tab.kind === 'video-player') return;
+
+    if (tab.kind === 'folder') {
+      setSelectedPlaylistId(tab.params?.playlistId || null);
+      setSelectedPlaylistName(tab.params?.playlistName || tab.params?.folderName || 'Folder');
+    } else if (tab.kind !== 'document-intelligence') {
+      setSelectedPlaylistId(null);
+      setSelectedPlaylistName('');
+    }
+
+    if (tab.kind === 'document-intelligence') {
+      setSelectedDocumentIntelligenceResourceId(tab.params?.resourceId || null);
+      setReturnViewFromDocumentIntelligence(currentView === 'document-intelligence' ? 'library' : currentView);
+    }
+
+    setCurrentView(tab.kind as DashboardView);
+
+    if (tab.kind === 'settings' && tab.params?.settingsTab) {
+      window.setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('myai:open-settings-tab', { detail: tab.params?.settingsTab }));
+      }, 0);
+    }
+  };
+
+  const updateActiveWorkspaceTab = (kind: WorkspaceTabKind, params: WorkspaceTabParams = {}, title?: string) => {
+    setWorkspaceTabsState((prev) => {
+      const activeId = prev.activeTabId || prev.tabs[0]?.id;
+      const nextTabs = prev.tabs.map((tab) => (
+        tab.id === activeId
+          ? {
+              ...tab,
+              kind,
+              params,
+              title: title || getWorkspaceTabTitle(kind, params),
+              updatedAt: Date.now(),
+            }
+          : tab
+      ));
+      return normalizeWorkspaceTabsState({ tabs: nextTabs.length ? nextTabs : [createWorkspaceTab(kind, params, title)], activeTabId: activeId });
+    });
+  };
+
+  const navigateWorkspace = (kind: WorkspaceTabKind, params: WorkspaceTabParams = {}, title?: string) => {
+    updateActiveWorkspaceTab(kind, params, title);
+
+    if (kind === 'folder') {
+      setSelectedPlaylistId(params.playlistId || params.folderId || null);
+      setSelectedPlaylistName(params.playlistName || params.folderName || 'Folder');
+    } else if (kind !== 'audio-player' && kind !== 'video-player' && kind !== 'document-intelligence') {
+      setSelectedPlaylistId(null);
+      setSelectedPlaylistName('');
+    }
+
+    if (kind === 'document-intelligence') {
+      setReturnViewFromDocumentIntelligence(currentView === 'document-intelligence' ? 'library' : currentView);
+      setSelectedDocumentIntelligenceResourceId(params.resourceId || null);
+    }
+
+    if (kind !== 'audio-player' && kind !== 'video-player') {
+      setCurrentView(kind as DashboardView);
+    }
+  };
+
+  useEffect(() => {
+    if (!isAuthenticated || !activeWorkspaceTab) return;
+    if (activeWorkspaceTab.kind === 'audio-player' || activeWorkspaceTab.kind === 'video-player') return;
+    const params: WorkspaceTabParams =
+      currentView === 'folder'
+        ? { playlistId: selectedPlaylistId || undefined, playlistName: selectedPlaylistName || undefined }
+        : currentView === 'document-intelligence'
+          ? { resourceId: selectedDocumentIntelligenceResourceId || undefined }
+          : {};
+    updateActiveWorkspaceTab(currentView, params);
+  }, [currentView, selectedPlaylistId, selectedPlaylistName, selectedDocumentIntelligenceResourceId, isAuthenticated]);
+
+  const handleSelectWorkspaceTab = (tabId: string) => {
+    const tab = workspaceTabs.find((item) => item.id === tabId);
+    if (!tab) return;
+    setWorkspaceTabsState((prev) => ({ ...prev, activeTabId: tabId }));
+    applyWorkspaceTab(tab);
+  };
+
+  const handleNewWorkspaceTab = () => {
+    setWorkspaceTabsState((prev) => {
+      if (prev.tabs.length >= MAX_WORKSPACE_TABS) {
+        window.alert(`You can keep up to ${MAX_WORKSPACE_TABS} workspace tabs open.`);
+        return prev;
+      }
+      const tab = createWorkspaceTab('home');
+      return { tabs: [...prev.tabs, tab], activeTabId: tab.id };
+    });
+    setCurrentView('home');
+    setSelectedPlaylistId(null);
+    setSelectedPlaylistName('');
+  };
+
+  const handleCloseWorkspaceTab = (tabId: string) => {
+    setWorkspaceTabsState((prev) => {
+      const index = prev.tabs.findIndex((tab) => tab.id === tabId);
+      if (index === -1) return prev;
+      const nextTabs = prev.tabs.filter((tab) => tab.id !== tabId);
+      if (nextTabs.length === 0) {
+        const tab = createWorkspaceTab('home');
+        window.setTimeout(() => applyWorkspaceTab(tab), 0);
+        return { tabs: [tab], activeTabId: tab.id };
+      }
+      const nextActiveTab = tabId === prev.activeTabId ? nextTabs[Math.max(0, index - 1)] : nextTabs.find((tab) => tab.id === prev.activeTabId) || nextTabs[0];
+      window.setTimeout(() => applyWorkspaceTab(nextActiveTab), 0);
+      return { tabs: nextTabs, activeTabId: nextActiveTab.id };
+    });
+  };
 
   const handleNavigateToFolder = (id: string, name: string) => {
     setSelectedPlaylistId(id);
     setSelectedPlaylistName(name);
     setCurrentView('folder');
+    updateActiveWorkspaceTab('folder', { playlistId: id, playlistName: name }, name);
+  };
+
+  const handleOpenPlaylistInNewTab = (id: string, name: string) => {
+    if (workspaceTabs.length >= MAX_WORKSPACE_TABS) {
+      window.alert(`You can keep up to ${MAX_WORKSPACE_TABS} workspace tabs open.`);
+      return;
+    }
+    const title = name || 'Folder';
+    const tab = createWorkspaceTab('folder', { playlistId: id, playlistName: title }, title);
+    setWorkspaceTabsState((prev) => {
+      return { tabs: [...prev.tabs, tab], activeTabId: tab.id };
+    });
+    setSelectedPlaylistId(id);
+    setSelectedPlaylistName(title);
+    setCurrentView('folder');
   };
 
   const checkSession = async (delayTransition = false) => {
     const startTime = Date.now();
-    const token = localStorage.getItem('access_token');
+    let token = localStorage.getItem('access_token');
 
     const finishSessionCheck = () => {
       if (delayTransition) {
@@ -348,6 +691,10 @@ export default function App() {
     };
 
     if (!token) {
+      token = await refreshBackendAccessToken();
+    }
+
+    if (!token) {
       setCurrentUser(null);
       setIsAuthenticated(false);
       finishSessionCheck();
@@ -355,20 +702,29 @@ export default function App() {
     }
 
     try {
-      const response = await fetch('/me', {
+      let response = await fetch('/me', {
         headers: {
           'Authorization': `Bearer ${token}`
         }
       });
+
+      if (response.status === 401) {
+        token = await refreshBackendAccessToken();
+        if (token) {
+          response = await fetch('/me', {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+        }
+      }
 
       if (response.ok) {
         const profileData = await response.json();
         setCurrentUser(profileData);
         setIsAuthenticated(true);
       } else {
-        // Token might be expired
-        localStorage.removeItem('access_token');
-        localStorage.removeItem('refresh_token');
+        clearStoredAuth();
         setCurrentUser(null);
         setIsAuthenticated(false);
       }
@@ -423,7 +779,7 @@ export default function App() {
       checkSession(false);
       setSelectedPlaylistId(null);
       setSelectedPlaylistName('');
-      setCurrentView('library');
+      navigateWorkspace('library');
       // Nudge any already-mounted playlist/library views to refetch.
       window.dispatchEvent(new Event('refresh-playlists'));
     };
@@ -451,10 +807,23 @@ export default function App() {
 
   useEffect(() => {
     const handleOpenNotebookView = () => {
-      setCurrentView('notebooks');
+      navigateWorkspace('notebooks');
     };
     window.addEventListener('open-notebook-view', handleOpenNotebookView);
     return () => window.removeEventListener('open-notebook-view', handleOpenNotebookView);
+  }, [currentView]);
+
+  useEffect(() => {
+    const handleFileCarouselState = (event: Event) => {
+      const open = Boolean((event as CustomEvent<{ open?: boolean }>).detail?.open);
+      setIsFileCarouselOpen(open);
+      void window.desktop?.setWindowControlsHidden(open);
+    };
+    window.addEventListener('myai:file-carousel-state', handleFileCarouselState);
+    return () => {
+      window.removeEventListener('myai:file-carousel-state', handleFileCarouselState);
+      void window.desktop?.setWindowControlsHidden(false);
+    };
   }, []);
 
   useEffect(() => {
@@ -464,11 +833,15 @@ export default function App() {
       if (view === 'folder') {
         setSelectedPlaylistId(id);
         setSelectedPlaylistName(name || 'Folder');
-        setCurrentView('folder');
+        navigateWorkspace('folder', { playlistId: id, playlistName: name || 'Folder' }, name || 'Folder');
       } else if (view === 'document-intelligence') {
         setReturnViewFromDocumentIntelligence(currentView === 'document-intelligence' ? 'library' : currentView);
         setSelectedDocumentIntelligenceResourceId(resourceId || id || null);
-        setCurrentView('document-intelligence');
+        navigateWorkspace('document-intelligence', { resourceId: resourceId || id || undefined }, 'Document Intelligence');
+      } else if (view === 'audio-player' || view === 'video-player') {
+        navigateWorkspace(view, customEvent.detail.params || customEvent.detail, customEvent.detail.title);
+      } else if (isDashboardView(view)) {
+        navigateWorkspace(view);
       } else {
         setCurrentView(view);
       }
@@ -493,7 +866,7 @@ export default function App() {
 
       if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'l') {
         event.preventDefault();
-        setIsActivityLogOpen(prev => !prev);
+        void window.desktop?.openBackendLogTerminal();
         return;
       }
 
@@ -558,17 +931,9 @@ export default function App() {
     }
   };
 
-  const searchParams = new URLSearchParams(window.location.search);
-  const isAudioPlayerView = searchParams.has("audioUrl") && searchParams.has("resourceId");
-  const isVideoPlayerView = searchParams.has("videoUrl") && searchParams.has("resourceId");
-
   return (
     <AnimatePresence mode="wait">
-      {isAudioPlayerView ? (
-        <AudioPlayerApp key="audio-player" />
-      ) : isVideoPlayerView ? (
-        <VideoPlayerApp key="video-player" />
-      ) : loadingAuth ? (
+      {loadingAuth ? (
         <LogoLoading
           key="auth-loading"
           fullscreen
@@ -602,8 +967,61 @@ export default function App() {
         />
       ) : (
         <DashboardLayout key="dashboard-layout">
+          {!isFileCarouselOpen && (
+            <WorkspaceTitleBar
+              tabs={workspaceTabs}
+              activeTabId={workspaceTabsState.activeTabId}
+              maxTabs={MAX_WORKSPACE_TABS}
+              onSelectTab={handleSelectWorkspaceTab}
+              onNewTab={handleNewWorkspaceTab}
+              onCloseTab={handleCloseWorkspaceTab}
+            />
+          )}
+          <div className="relative flex min-h-0 flex-1 overflow-hidden">
           <AnimatePresence mode="wait">
-            {currentView === 'document-intelligence' ? (
+            {activeWorkspaceTab?.kind === 'audio-player' ? (
+              <motion.div
+                key={`audio-player-${activeWorkspaceTab.id}`}
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -12 }}
+                transition={{ duration: 0.22, ease: "easeOut" }}
+                className="h-full w-full min-w-0 overflow-hidden"
+              >
+                <AudioPlayerApp
+                  embedded
+                  mediaUrl={activeWorkspaceTab.params?.mediaUrl}
+                  resourceId={activeWorkspaceTab.params?.resourceId}
+                  initialTime={activeWorkspaceTab.params?.time}
+                  onTitleChange={(title) => updateActiveWorkspaceTab('audio-player', activeWorkspaceTab.params || {}, title)}
+                  onBack={() => navigateWorkspace(activeWorkspaceTab.params?.playlistId ? 'folder' : 'library', {
+                    playlistId: activeWorkspaceTab.params?.playlistId,
+                    playlistName: activeWorkspaceTab.params?.playlistName,
+                  })}
+                />
+              </motion.div>
+            ) : activeWorkspaceTab?.kind === 'video-player' ? (
+              <motion.div
+                key={`video-player-${activeWorkspaceTab.id}`}
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -12 }}
+                transition={{ duration: 0.22, ease: "easeOut" }}
+                className="h-full w-full min-w-0 overflow-hidden"
+              >
+                <VideoPlayerApp
+                  embedded
+                  mediaUrl={activeWorkspaceTab.params?.mediaUrl}
+                  resourceId={activeWorkspaceTab.params?.resourceId}
+                  initialTime={activeWorkspaceTab.params?.time}
+                  onTitleChange={(title) => updateActiveWorkspaceTab('video-player', activeWorkspaceTab.params || {}, title)}
+                  onBack={() => navigateWorkspace(activeWorkspaceTab.params?.playlistId ? 'folder' : 'library', {
+                    playlistId: activeWorkspaceTab.params?.playlistId,
+                    playlistName: activeWorkspaceTab.params?.playlistName,
+                  })}
+                />
+              </motion.div>
+            ) : currentView === 'document-intelligence' ? (
               <motion.div
                 key="document-intelligence-view"
                 initial={{ opacity: 0, scale: 0.96, y: 16 }}
@@ -615,12 +1033,12 @@ export default function App() {
                   stiffness: 280,
                   mass: 0.8
                 }}
-                className="fixed inset-0 z-[100]"
+                className="absolute inset-0 z-[100]"
               >
                 {selectedDocumentIntelligenceResourceId ? (
                   <DocumentIntelligencePage
                     resourceId={selectedDocumentIntelligenceResourceId}
-                    onBack={() => setCurrentView(returnViewFromDocumentIntelligence)}
+                    onBack={() => navigateWorkspace(returnViewFromDocumentIntelligence)}
                   />
                 ) : null}
               </motion.div>
@@ -642,11 +1060,8 @@ export default function App() {
                       tab === 'chat' ||
                       tab === 'settings' ||
                       tab === 'metrics' ||
-                      tab === 'rag-explorer' ||
-                      tab === 'teams' ||
-                      tab === 'shared'
+                      tab === 'rag-explorer'
                     ) {
-                      setCurrentView(tab as any);
                       window.dispatchEvent(new CustomEvent('app-navigate', { detail: { view: tab, name: tab } }));
                     }
                   }}
@@ -680,7 +1095,7 @@ export default function App() {
                         <DashboardHeader
                           onSearchClick={toggleSearchModal}
                           onNotificationClick={toggleNotificationPanel}
-                          onNavigate={(view) => setCurrentView(view as any)}
+                          onNavigate={(view) => navigateWorkspace(view as WorkspaceTabKind)}
                           user={currentUser}
                           theme={theme}
                           setTheme={setTheme}
@@ -699,7 +1114,8 @@ export default function App() {
                             isLoading={isLoading}
                             onNavigateToFolder={handleNavigateToFolder}
                             onCreatePlaylistClick={toggleCreatePlaylistModal}
-                            onSeeAllClick={() => setCurrentView('library')}
+                            onOpenPlaylistInNewTab={handleOpenPlaylistInNewTab}
+                            onSeeAllClick={() => navigateWorkspace('library')}
                             limit={3}
                           />
                         </div>
@@ -716,7 +1132,7 @@ export default function App() {
                         <DashboardHeader
                           onSearchClick={toggleSearchModal}
                           onNotificationClick={toggleNotificationPanel}
-                          onNavigate={(view) => setCurrentView(view as any)}
+                          onNavigate={(view) => navigateWorkspace(view as WorkspaceTabKind)}
                           user={currentUser}
                           theme={theme}
                           setTheme={setTheme}
@@ -806,7 +1222,7 @@ export default function App() {
                         <DashboardHeader
                           onSearchClick={toggleSearchModal}
                           onNotificationClick={toggleNotificationPanel}
-                          onNavigate={(view) => setCurrentView(view as any)}
+                          onNavigate={(view) => navigateWorkspace(view as WorkspaceTabKind)}
                           user={currentUser}
                           theme={theme}
                           setTheme={setTheme}
@@ -816,6 +1232,7 @@ export default function App() {
                         <LibraryView
                           onNavigateToFolder={handleNavigateToFolder}
                           onCreatePlaylistClick={toggleCreatePlaylistModal}
+                          onOpenPlaylistInNewTab={handleOpenPlaylistInNewTab}
                         />
                       </motion.div>
                     )}
@@ -834,7 +1251,7 @@ export default function App() {
                   stiffness: 300,
                   mass: 0.8
                 }}
-                className="fixed inset-0 z-[100]"
+                className="h-full w-full min-w-0 overflow-hidden"
               >
                 <FileExplorer
                   playlistId={selectedPlaylistId}
@@ -846,11 +1263,12 @@ export default function App() {
                     cleanUrl.search = '';
                     cleanUrl.searchParams.set('view', destination);
                     window.history.replaceState({}, '', `${cleanUrl.pathname}${cleanUrl.search}`);
-                    setCurrentView(destination);
+                    navigateWorkspace(destination);
                   }}
                   onNavigatePlaylist={(id, name) => {
                     setSelectedPlaylistId(id);
                     setSelectedPlaylistName(name);
+                    updateActiveWorkspaceTab('folder', { playlistId: id, playlistName: name }, name || 'Folder');
                   }}
                 />
               </motion.div>
@@ -861,7 +1279,7 @@ export default function App() {
           <ImportContentModal
             isOpen={isImportModalOpen}
             onClose={toggleImportModal}
-            onNavigateToDownloads={() => setCurrentView('downloads')}
+            onNavigateToDownloads={() => navigateWorkspace('downloads')}
           />
           <NotificationPanel
             isOpen={isNotificationPanelOpen}
@@ -870,6 +1288,7 @@ export default function App() {
           />
           <PipelineQueueDock />
           <ActivityLogPanel isOpen={isActivityLogOpen} onClose={toggleActivityLogPanel} />
+          </div>
         </DashboardLayout>
       )}
 
@@ -888,7 +1307,7 @@ export default function App() {
                 <Download className="h-5 w-5" />
               </div>
               <div className="min-w-0 flex-1">
-                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">My AI Library {availableUpdateVersion} is available</h3>
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">MyAiLibrary {availableUpdateVersion} is available</h3>
                 <p className="mt-1 text-sm leading-relaxed text-gray-500 dark:text-slate-400">
                   {desktopUpdateState?.status === 'downloading'
                     ? `Downloading securely — ${Math.round(desktopUpdateState.percent ?? 0)}%`
@@ -931,7 +1350,7 @@ export default function App() {
                 <CheckCircle2 className="h-5 w-5" />
               </div>
               <div className="min-w-0 flex-1">
-                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">My AI Library was updated to {installedUpdateInfo.currentVersion}</h3>
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">MyAiLibrary was updated to {installedUpdateInfo.currentVersion}</h3>
                 <p className="mt-1 text-sm leading-relaxed text-gray-500 dark:text-slate-400">The new version and local AI service started successfully.</p>
                 <div className="mt-4 flex items-center gap-3">
                   <button

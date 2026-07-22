@@ -48,7 +48,7 @@ function AppContent({ mainView }: { mainView: 'notebooks' | 'concepts' }) {
       {/* App Window Wrapper */}
       <div className="flex h-full w-full overflow-hidden transition-all dark:bg-[#191919]">
         {sidebarOpen && (
-          <Sidebar className="w-[280px] shrink-0 border-r border-[#EFEFED] bg-[#F7F7F5] dark:border-[#2A2A2A] dark:bg-[#1F1F1F] transition-all duration-300" />
+          <Sidebar className="notebook-sidebar-shell w-[280px] shrink-0 border-r-0 bg-[#F7F7F5] dark:bg-[#1F1F1F] transition-all duration-300" />
         )}
 
         <div className="flex min-w-0 flex-1 flex-col bg-white dark:bg-[#191919] relative max-h-screen">

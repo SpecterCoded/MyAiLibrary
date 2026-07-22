@@ -1,6 +1,7 @@
 import os
 import subprocess
 from core.paths import EXTRA_FILES_DIR
+from subprocess_utils import run_hidden
 
 
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -18,7 +19,7 @@ def generate_video_thumbnail(video_path: str, resource_id: str):
     if os.path.exists(thumbnail_path):
         return thumbnail_path
 
-    result = subprocess.run(
+    result = run_hidden(
         [
             "ffmpeg",
             "-ss",
@@ -51,7 +52,7 @@ def extract_audio_from_video(video_path: str, resource_id: str):
     video_name = os.path.splitext(os.path.basename(video_path))[0]
     audio_path = os.path.join(extraa_dir, f"{video_name}.wav")
 
-    result = subprocess.run(
+    result = run_hidden(
         [
             "ffmpeg",
             "-i",

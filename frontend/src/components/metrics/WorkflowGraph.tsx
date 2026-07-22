@@ -26,26 +26,26 @@ export function WorkflowGraph({
   compact?: boolean;
 }) {
   return (
-    <div className={`grid items-stretch gap-4 ${compact ? 'grid-cols-1 sm:grid-cols-2 2xl:grid-cols-4' : 'grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3'}`}>
+    <div className={`grid items-stretch gap-4 ${compact ? 'grid-cols-[repeat(auto-fit,minmax(132px,1fr))]' : 'grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3'}`}>
       {nodes.map((node, index) => (
         <div key={node.id} className="relative min-w-0">
           {index < nodes.length - 1 && !compact && (
             <div className="absolute left-1/2 top-full hidden h-4 w-px -translate-x-1/2 bg-slate-200/80 dark:bg-white/10 xl:block" />
           )}
-          <div className={`flex h-full min-h-[112px] min-w-[140px] flex-col overflow-hidden rounded-2xl border px-4 py-4 shadow-sm ${statusMap[node.status]}`}>
-            <div className="flex min-w-0 items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="whitespace-normal text-[11px] font-bold uppercase tracking-wider opacity-70 [overflow-wrap:normal] [word-break:normal]">{node.id}</div>
-                <div className="mt-2 whitespace-normal text-sm font-semibold leading-5 [overflow-wrap:normal] [word-break:normal]">{node.label}</div>
+          <div className={`flex h-full min-h-[112px] min-w-0 flex-col overflow-hidden rounded-2xl border px-4 py-4 shadow-sm ${statusMap[node.status]}`}>
+            <div className="flex min-w-0 flex-col gap-2">
+              <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
+                <div className="min-w-0 text-[11px] font-bold uppercase tracking-wider opacity-70 [overflow-wrap:anywhere]">{node.id}</div>
+                <span className={`inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded-full border px-2 py-1 text-[9px] font-bold uppercase tracking-wide ${badgeMap[node.status]}`}>
+                  {node.status}
+                </span>
               </div>
-              <span className={`inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded-full border px-2 py-1 text-[9px] font-bold uppercase tracking-wide ${badgeMap[node.status]}`}>
-                {node.status}
-              </span>
+              <div className="min-w-0 whitespace-normal text-sm font-semibold leading-5 [overflow-wrap:anywhere]">{node.label}</div>
             </div>
             {(node.durationMs != null || node.note) && (
               <div className="mt-auto space-y-1 pt-3 text-xs leading-5 opacity-80">
-                {node.durationMs != null && <div className="whitespace-normal [overflow-wrap:normal] [word-break:normal]">{Math.round(node.durationMs)} ms</div>}
-                {node.note && <div className="whitespace-normal [overflow-wrap:normal] [word-break:normal]">{node.note}</div>}
+                {node.durationMs != null && <div className="whitespace-normal [overflow-wrap:anywhere]">{Math.round(node.durationMs)} ms</div>}
+                {node.note && <div className="whitespace-normal [overflow-wrap:anywhere]">{node.note}</div>}
               </div>
             )}
           </div>

@@ -89,7 +89,7 @@ export default function SearchAndActions({ onCreatePlaylistClick, onImportClick,
           showCursor={true}
         />
         <GradientText className="home-title text-4xl lg:text-5xl font-black tracking-tight">
-          Welcome to MyAILibrary!
+          Welcome to MyAiLibrary!
         </GradientText>
       </section>
 

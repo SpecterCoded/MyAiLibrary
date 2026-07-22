@@ -282,7 +282,7 @@ function RightPaneContent({
 
       {/* Tab content rendering */}
       {activeTab === "Timeline" ? (
-        <div className="flex-1 overflow-y-auto px-1 pr-3 custom-scrollbar flex flex-col gap-4">
+        <div className="flex-1 overflow-y-auto px-1 pr-3 pt-2 pb-6 custom-scrollbar flex flex-col gap-4">
           {displayChapters.map((chapter) => {
             const isOpen = !!openChapters[chapter.id];
             const isActive = activeChapterId === chapter.id;

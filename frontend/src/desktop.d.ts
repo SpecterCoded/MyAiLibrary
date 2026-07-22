@@ -36,6 +36,23 @@ declare global {
     releaseNotes?: string
   }
 
+  interface DesktopAppInfo {
+    appName: string
+    appId: string
+    version: string
+    buildType: string
+    platform: string
+    osRelease: string
+    electronVersion: string
+    chromeVersion: string
+    nodeVersion: string
+    dataDir: string
+    logsDir: string
+    updateChannel: 'stable' | 'testing'
+    updateStatus: DesktopUpdateStatus
+    installationEnabled: boolean
+  }
+
   interface DesktopBridge {
     selectFile(): Promise<string | null>
     selectFolder(): Promise<string | null>
@@ -49,6 +66,10 @@ declare global {
     getInstalledUpdate(): Promise<DesktopInstalledUpdateInfo | null>
     setUpdatePreferences(preferences: Partial<DesktopUpdatePreferences>): Promise<DesktopUpdatePreferences | null>
     openUpdateLogs(): Promise<boolean>
+    getAppInfo(): Promise<DesktopAppInfo | null>
+    openBackendLogTerminal(): Promise<boolean>
+    setTitleBarTheme(theme: 'light' | 'dark'): Promise<boolean>
+    setWindowControlsHidden(hidden: boolean): Promise<boolean>
     onUpdateState(listener: (state: DesktopUpdateState) => void): () => void
     onUpdateInstalled(listener: (info: DesktopInstalledUpdateInfo) => void): () => void
     onBackendState(listener: (state: 'starting' | 'ready' | 'stopping' | 'stopped' | 'failed', detail?: string) => void): () => void

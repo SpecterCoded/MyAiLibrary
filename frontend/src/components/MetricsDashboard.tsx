@@ -533,10 +533,10 @@ export default function MetricsDashboard() {
                 {selectedRequest ? (
                   <div className="space-y-5">
                     <div className="rounded-[24px] border border-slate-200/80 bg-white/80 p-5 dark:border-white/10 dark:bg-slate-950/70">
-                      <div className="flex items-start justify-between gap-4">
-                        <div>
+                      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0">
                           <div className="text-[11px] font-bold uppercase tracking-[0.24em] text-slate-400">Current focus</div>
-                          <h3 className="mt-2 text-lg font-semibold text-slate-950 dark:text-white">{selectedRequest.query}</h3>
+                          <h3 className="mt-2 max-w-full text-lg font-semibold leading-7 text-slate-950 dark:text-white">{selectedRequest.query}</h3>
                           <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
                             {selectedRequest.retrievalStrategy || 'No retrieval strategy recorded'} • {formatDuration(selectedRequest.latencyMs)}
                           </p>
@@ -544,7 +544,7 @@ export default function MetricsDashboard() {
                         <button
                           type="button"
                           onClick={() => setSelectedRequestId(selectedRequest.id)}
-                          className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900 dark:border-white/10 dark:bg-slate-900 dark:text-slate-300 dark:hover:text-white"
+                          className="inline-flex shrink-0 items-center justify-center gap-1 self-start rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:text-slate-900 dark:border-white/10 dark:bg-slate-900 dark:text-slate-300 dark:hover:text-white"
                         >
                           Open
                           <ArrowUpRight size={13} />

@@ -89,6 +89,13 @@ export const FileExplorerContainer: React.FC<FileExplorerProps> = ({
     playlistNameRef.current = playlistName;
   }, [playlistName]);
 
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('myai:file-carousel-state', { detail: { open: previewItemId !== null } }));
+    return () => {
+      window.dispatchEvent(new CustomEvent('myai:file-carousel-state', { detail: { open: false } }));
+    };
+  }, [previewItemId]);
+
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; itemId: string | null } | null>(null);
   const [showDetails, setShowDetails] = useState(false);
   const [showConfirmEmptyRecycle, setShowConfirmEmptyRecycle] = useState(false);
@@ -231,13 +238,15 @@ export const FileExplorerContainer: React.FC<FileExplorerProps> = ({
   const handleCreatePlaylist = useCallback(async (name: string) => {
     try {
       const token = localStorage.getItem('access_token');
-      const res = await fetch('/playlists', {
+      const params = new URLSearchParams({
+        name,
+        icon_type: 'avvv-initials',
+      });
+      const res = await fetch(`/playlists?${params.toString()}`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ name }),
       });
       if (!res.ok) throw new Error("Failed to create playlist");
       await fetchPlaylists();
@@ -1383,7 +1392,7 @@ export const FileExplorerContainer: React.FC<FileExplorerProps> = ({
   };
 
   return (
-    <div className={`fixed inset-0 w-screen h-screen overflow-hidden flex bg-[#f7f8fc] ${isDragOver ? 'ring-4 ring-blue-400 ring-inset' : ''}`}>
+    <div className={`relative h-full w-full overflow-hidden flex bg-[#f7f8fc] dark:bg-[#25272b] ${isDragOver ? 'ring-4 ring-blue-400 ring-inset' : ''}`}>
       <style dangerouslySetInnerHTML={{
         __html: `
         .hide-scrollbar::-webkit-scrollbar { display: none; }
@@ -1800,7 +1809,7 @@ export const FileExplorerContainer: React.FC<FileExplorerProps> = ({
             left: contextMenu.x,
             zIndex: 999999,
           }}
-          className="w-56 bg-white/95 backdrop-blur-md border border-slate-200/80 rounded-xl shadow-2xl p-1.5 flex flex-col text-xs text-slate-700 animate-fadeIn"
+          className="w-56 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border border-slate-200/80 dark:border-slate-700/80 rounded-xl shadow-2xl shadow-slate-900/10 dark:shadow-black/45 p-1.5 flex flex-col text-xs text-slate-700 dark:text-slate-200 animate-fadeIn"
           role="menu"
           aria-label="Context menu"
         >
@@ -1812,10 +1821,10 @@ export const FileExplorerContainer: React.FC<FileExplorerProps> = ({
                     handleRestoreSelection();
                     setContextMenu(null);
                   }}
-                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-blue-50 text-blue-600 flex items-center gap-2.5 transition-colors cursor-pointer font-medium"
+                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-500/10 text-blue-600 dark:text-blue-300 flex items-center gap-2.5 transition-colors cursor-pointer font-medium"
                   role="menuitem"
                 >
-                  <RotateCcw className="w-3.5 h-3.5 text-blue-500" />
+                  <RotateCcw className="w-3.5 h-3.5 text-blue-500 dark:text-blue-300" />
                   <span>Restore</span>
                 </button>
                 <button
@@ -1823,10 +1832,10 @@ export const FileExplorerContainer: React.FC<FileExplorerProps> = ({
                     handleDeleteSelection();
                     setContextMenu(null);
                   }}
-                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-red-50 text-red-600 hover:text-red-700 flex items-center gap-2.5 transition-colors cursor-pointer font-medium"
+                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-500/10 text-red-600 dark:text-red-300 hover:text-red-700 dark:hover:text-red-200 flex items-center gap-2.5 transition-colors cursor-pointer font-medium"
                   role="menuitem"
                 >
-                  <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                  <Trash2 className="w-3.5 h-3.5 text-red-500 dark:text-red-300" />
                   <span>Delete Permanently</span>
                 </button>
               </>
@@ -1837,10 +1846,10 @@ export const FileExplorerContainer: React.FC<FileExplorerProps> = ({
                     handleEmptyRecycleBin();
                     setContextMenu(null);
                   }}
-                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-red-50 text-red-600 hover:text-red-700 flex items-center gap-2.5 transition-colors cursor-pointer font-medium"
+                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-500/10 text-red-600 dark:text-red-300 hover:text-red-700 dark:hover:text-red-200 flex items-center gap-2.5 transition-colors cursor-pointer font-medium"
                   role="menuitem"
                 >
-                  <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                  <Trash2 className="w-3.5 h-3.5 text-red-500 dark:text-red-300" />
                   <span>Empty Recycle Bin</span>
                 </button>
                 <button
@@ -1848,10 +1857,10 @@ export const FileExplorerContainer: React.FC<FileExplorerProps> = ({
                     handleRefresh();
                     setContextMenu(null);
                   }}
-                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 flex items-center gap-2.5 transition-colors cursor-pointer"
+                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/80 flex items-center gap-2.5 transition-colors cursor-pointer"
                   role="menuitem"
                 >
-                  <RotateCw className="w-3.5 h-3.5 text-slate-400" />
+                  <RotateCw className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500" />
                   <span>Refresh</span>
                 </button>
               </>
@@ -1864,72 +1873,72 @@ export const FileExplorerContainer: React.FC<FileExplorerProps> = ({
                   if (item) handleItemDoubleClick(item);
                   setContextMenu(null);
                 }}
-                className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 flex items-center gap-2.5 font-medium transition-colors cursor-pointer"
+                className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/80 flex items-center gap-2.5 font-medium transition-colors cursor-pointer"
                 role="menuitem"
               >
-                <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
+                <ExternalLink className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500" />
                 <span>Open</span>
               </button>
-              <div className="h-[1px] bg-slate-100 my-1" />
+              <div className="h-[1px] bg-slate-100 dark:bg-slate-800 my-1" />
               <button
                 onClick={() => {
                   handleCutSelection();
                   setContextMenu(null);
                 }}
-                className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 flex items-center gap-2.5 transition-colors cursor-pointer"
+                className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/80 flex items-center gap-2.5 transition-colors cursor-pointer"
                 role="menuitem"
               >
-                <Scissors className="w-3.5 h-3.5 text-slate-400" />
+                <Scissors className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500" />
                 <span className="flex-1">Cut</span>
-                <span className="text-slate-400 text-[10px]">Ctrl+X</span>
+                <span className="text-slate-400 dark:text-slate-500 text-[10px]">Ctrl+X</span>
               </button>
               <button
                 onClick={() => {
                   handleCopySelection();
                   setContextMenu(null);
                 }}
-                className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 flex items-center gap-2.5 transition-colors cursor-pointer"
+                className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/80 flex items-center gap-2.5 transition-colors cursor-pointer"
                 role="menuitem"
               >
-                <Copy className="w-3.5 h-3.5 text-slate-400" />
+                <Copy className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500" />
                 <span className="flex-1">Copy</span>
-                <span className="text-slate-400 text-[10px]">Ctrl+C</span>
+                <span className="text-slate-400 dark:text-slate-500 text-[10px]">Ctrl+C</span>
               </button>
               <button
                 onClick={() => {
                   setItems(prev => prev.map(item => item.id === contextMenu.itemId ? { ...item, isEditing: true } : item));
                   setContextMenu(null);
                 }}
-                className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 flex items-center gap-2.5 transition-colors cursor-pointer"
+                className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/80 flex items-center gap-2.5 transition-colors cursor-pointer"
                 role="menuitem"
               >
-                <PenLine className="w-3.5 h-3.5 text-slate-400" />
+                <PenLine className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500" />
                 <span className="flex-1">Rename</span>
-                <span className="text-slate-400 text-[10px]">F2</span>
+                <span className="text-slate-400 dark:text-slate-500 text-[10px]">F2</span>
               </button>
-              <div className="h-[1px] bg-slate-100 my-1" />
+              <div className="h-[1px] bg-slate-100 dark:bg-slate-800 my-1" />
               <button
                 onClick={() => {
                   handleDeleteSelection();
                   setContextMenu(null);
                 }}
-                className="w-full text-left px-3 py-2 rounded-lg hover:bg-red-50 text-red-600 hover:text-red-700 flex items-center gap-2.5 transition-colors cursor-pointer"
+                className="w-full text-left px-3 py-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-500/10 text-red-600 dark:text-red-300 hover:text-red-700 dark:hover:text-red-200 flex items-center gap-2.5 transition-colors cursor-pointer"
                 role="menuitem"
               >
-                <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                <Trash2 className="w-3.5 h-3.5 text-red-400 dark:text-red-300" />
                 <span className="flex-1 font-medium">Delete</span>
-                <span className="text-slate-400 text-[10px]">Del</span>
+                <span className="text-slate-400 dark:text-slate-500 text-[10px]">Del</span>
               </button>
-              <div className="h-[1px] bg-slate-100 my-1" />
+              <div className="h-[1px] bg-slate-100 dark:bg-slate-800 my-1" />
               <button
                 onClick={() => {
                   setShowDetails(true);
                   setContextMenu(null);
                 }}
-                className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 flex items-center gap-2.5 font-medium transition-colors cursor-pointer"
+                className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/80 flex items-center gap-2.5 font-medium transition-colors cursor-pointer"
                 role="menuitem"
               >
-                <Info className="w-3.5 h-3.5 text-blue-500" />
+                <Info className="w-3.5 h-3.5 text-blue-500 dark:text-blue-300" />
                 <span>Properties</span>
               </button>
             </>
@@ -1940,10 +1949,10 @@ export const FileExplorerContainer: React.FC<FileExplorerProps> = ({
                   handleCreateFolder();
                   setContextMenu(null);
                 }}
-                className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 flex items-center gap-2.5 transition-colors cursor-pointer"
+                className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/80 flex items-center gap-2.5 transition-colors cursor-pointer"
                 role="menuitem"
               >
-                <FolderPlus className="w-3.5 h-3.5 text-slate-400" />
+                <FolderPlus className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500" />
                 <span>New Folder</span>
               </button>
               <button
@@ -1951,35 +1960,35 @@ export const FileExplorerContainer: React.FC<FileExplorerProps> = ({
                   handleCreateFile();
                   setContextMenu(null);
                 }}
-                className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 flex items-center gap-2.5 transition-colors cursor-pointer"
+                className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/80 flex items-center gap-2.5 transition-colors cursor-pointer"
                 role="menuitem"
               >
-                <FilePlus className="w-3.5 h-3.5 text-slate-400" />
+                <FilePlus className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500" />
                 <span>New Markdown File</span>
               </button>
-              <div className="h-[1px] bg-slate-100 my-1" />
+              <div className="h-[1px] bg-slate-100 dark:bg-slate-800 my-1" />
               <button
                 onClick={() => {
                   handlePasteRef.current?.();
                   setContextMenu(null);
                 }}
                 disabled={!clipboard}
-                className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 flex items-center gap-2.5 disabled:opacity-30 disabled:hover:bg-transparent transition-colors cursor-pointer"
+                className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/80 flex items-center gap-2.5 disabled:opacity-30 disabled:hover:bg-transparent dark:disabled:hover:bg-transparent transition-colors cursor-pointer"
                 role="menuitem"
               >
-                <Clipboard className="w-3.5 h-3.5 text-slate-400" />
+                <Clipboard className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500" />
                 <span className="flex-1">Paste</span>
-                <span className="text-slate-400 text-[10px]">Ctrl+V</span>
+                <span className="text-slate-400 dark:text-slate-500 text-[10px]">Ctrl+V</span>
               </button>
               <button
                 onClick={() => {
                   handleRefresh();
                   setContextMenu(null);
                 }}
-                className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 flex items-center gap-2.5 transition-colors cursor-pointer"
+                className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/80 flex items-center gap-2.5 transition-colors cursor-pointer"
                 role="menuitem"
               >
-                <RotateCw className="w-3.5 h-3.5 text-slate-400" />
+                <RotateCw className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500" />
                 <span>Refresh</span>
               </button>
             </>

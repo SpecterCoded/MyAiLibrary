@@ -78,6 +78,11 @@ class DependencyFailure(Exception):
                 f"Configuration error: {self.service}",
                 f"{prefix} because {self.path_label or 'the configured model folder'} could not be loaded. Open {section}, choose a valid downloaded model folder, test it, then resume the pipeline.",
             )
+        if self.code == "tokenizer_missing":
+            return (
+                f"Configuration error: {self.service}",
+                f"{prefix} because the downloaded model is missing its local tokenizer files. Open {section}, download the model again, save settings, test it, then resume the pipeline.",
+            )
         if self.code == "model_not_found":
             return (
                 f"Configuration error: {self.service}",
@@ -101,7 +106,7 @@ class DependencyFailure(Exception):
         if self.code == "service_unreachable":
             return (
                 f"Connection failed: {self.service}",
-                f"{prefix} because MyAILibrary could not reach the configured {self.service} URL. Check the URL and network connection in Settings, test it, then resume the pipeline.",
+                f"{prefix} because MyAiLibrary could not reach the configured {self.service} URL. Check the URL and network connection in Settings, test it, then resume the pipeline.",
             )
         if self.code == "service_timeout":
             return (
