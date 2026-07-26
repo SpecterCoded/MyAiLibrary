@@ -283,10 +283,6 @@ class PlannerExecutor:
         from embedding_service import build_context
         return build_context(results)
 
-    @staticmethod
-    def _default_hierarchical_expander(query: str, results: list[dict], plan: RetrievalPlan) -> tuple[list[dict], dict]:
-        return enrich_with_hierarchy(results, query=query, plan=plan)
-
     def _default_hierarchical_expander(self, query: str, results: list[dict], plan: RetrievalPlan) -> tuple[list[dict], dict]:
         user_settings = getattr(self, '_user_rag_settings', {})
         enabled = user_settings.get("hierarchical", False)

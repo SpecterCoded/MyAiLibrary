@@ -5,11 +5,12 @@ def calculate_confidence(reranked_results: list[dict], hallucinations: list[dict
     """
     Dynamic confidence score based on retrieval and validation signals.
 
-    Base formula: 40% Rerank + 40% Hybrid + 20% Hallucination
+    Base formula (weights as implemented below):
+      35% Rerank + 30% Hybrid + 15% Hallucination + 10% Coverage + 10% Diversity
     Dynamic adjustments:
     - Tight rerank spread penalizes confidence (uncertain ranking)
     - Few retrieved chunks penalizes confidence (weak evidence)
-    - More hallucinations penalize faster than static bins
+    - Each hallucination reduces the hallucination component linearly (~30% each)
     """
     try:
         return _calculate_confidence_inner(reranked_results, hallucinations)
@@ -36,7 +37,7 @@ def _calculate_confidence_inner(reranked_results: list[dict], hallucinations: li
     if hall_count == 0:
         hall_score = 1.0
     else:
-        # Exponential decay: each hallucination reduces score by ~30%
+        # Linear decay: each hallucination reduces the component by ~30%
         hall_score = max(0.0, 1.0 - (hall_count * 0.3))
 
     # 4. Coverage Score (10%) — chunks with rich metadata indicate better retrieval

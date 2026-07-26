@@ -120,29 +120,12 @@ If there are no hallucinations and the answer is 100% supported, return an empty
             return []
             
     else:
-        # Local fallback using LettuceDetect
-        detector = get_detector()
-        if not detector:
-            logger.error("LettuceDetect is not initialized.")
-            return []
-
-        results = detector.predict(
-            context="\n\n".join(context_chunks),
-            question=question,
-            answer=answer,
-            output_format="spans"
+        # No supported provider selected for this call.
+        # (A LettuceDetect local fallback previously lived here, but its detector was
+        # never initialized, so this path always returned no findings. It is kept as an
+        # explicit, safe no-op to avoid confusion. To re-enable local detection, wire up
+        # a detector via get_detector() and restore span extraction here.)
+        logger.warning(
+            f"Hallucination check: unsupported provider '{provider}', returning no findings."
         )
-        
-        hallucinations = []
-        for span in results:
-            start = span["start"]
-            end = span["end"]
-            confidence = span["confidence"]
-            
-            hallucinations.append({
-                "text": answer[start:end],
-                "confidence": confidence
-            })
-            
-        logger.info(f"Detected {len(hallucinations)} hallucination spans via LettuceDetect")
-        return hallucinations
+        return []

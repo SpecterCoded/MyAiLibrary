@@ -702,86 +702,9 @@ Question:
 # =========================
 
 
-def generate_flashcards(content: str, user_id: str | None = None, resource_id: str | None = None, feature: str = "flashcards_generation"):
-    """Generate 10 study flashcards from the provided content."""
-
-    prompt = f"""
-Create 10 study flashcards from the content below.
-
-FORMATTING RULES:
-- Use **bold** for key terms in both questions and answers
-- Include timestamps [MM:SS] when referencing specific content
-- Use > [!TIP] for helpful tips in answers when appropriate
-- Answers should be detailed and educational
-
-Return ONLY in this format:
-
-Q: Question here (use **bold** for key terms)
-A: **Key Term** - Detailed answer with explanation. [timestamp if applicable]
-
-Q: Question here
-A: **Key Term** - Detailed answer here
-
-CONTENT:
-
-{content}
-"""
-
-    _client, _model = get_user_chat_client(user_id)
-    response = _client.chat.completions.create(
-        model=_model,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.3,
-    )
-    output = response.choices[0].message.content
-    _record_completion(response, user_id=user_id, resource_id=resource_id, feature=feature, operation="content_generation", prompt_text=prompt, model=_model, completion_text=output)
-    return output
-
-
-def generate_quiz(content: str, user_id: str | None = None, resource_id: str | None = None, feature: str = "quiz_generation"):
-    """Generate 10 multiple-choice quiz questions from the provided content."""
-
-    prompt = f"""
-Create 10 multiple-choice quiz questions from the content below.
-
-FORMATTING RULES:
-- Use **bold** for key terms in questions and answer explanations
-- Include timestamps [MM:SS] when referencing specific content
-- Provide detailed explanations after each answer
-- Make questions test understanding, not just recall
-
-Return ONLY in this exact format:
-
-QUESTION: Question text with **bold** key terms?
-A: Option A
-B: Option B
-C: Option C
-D: Option D
-ANSWER: A
-EXPLANATION: **Correct Term** - Detailed explanation of why this is correct. [timestamp]
-
-QUESTION: Next question...
-A: ...
-B: ...
-C: ...
-D: ...
-ANSWER: C
-EXPLANATION: Explanation here
-
-CONTENT:
-
-{content}
-"""
-
-    _client, _model = get_user_chat_client(user_id)
-    response = _client.chat.completions.create(
-        model=_model,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.3,
-    )
-    output = response.choices[0].message.content
-    _record_completion(response, user_id=user_id, resource_id=resource_id, feature=feature, operation="content_generation", prompt_text=prompt, model=_model, completion_text=output)
-    return output
+# NOTE: legacy markdown-format generate_flashcards / generate_quiz removed.
+# The transcript/JSON versions defined later in this file are the active ones
+# (Python only ever used those; these earlier copies were dead code).
 
 
 def generate_summary(content, user_id: str | None = None, resource_id: str | None = None, feature: str = "summary_generation", chapters=None):
