@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import './AskAIButton.css';
 import { GradientText } from './gradienttext';
@@ -15,6 +15,7 @@ interface SearchAndActionsProps {
 export default function SearchAndActions({ onCreatePlaylistClick, onImportClick, user }: SearchAndActionsProps) {
   const [query, setQuery] = useState('');
   const [activeQuery, setActiveQuery] = useState<string | null>(null);
+  const [submissionId, setSubmissionId] = useState(0);
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [validationError, setValidationError] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -42,20 +43,22 @@ export default function SearchAndActions({ onCreatePlaylistClick, onImportClick,
     }
     setValidationError('');
     setActiveQuery(trimmed);
+    setSubmissionId((current) => current + 1);
+    setQuery('');
+    setTimeout(() => inputRef.current?.focus(), 50);
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'Enter') handleAsk();
-    if (e.key === 'Escape') handleClose();
   }
 
-  function handleClose() {
+  const handleClose = useCallback(() => {
     setActiveQuery(null);
     setQuery('');
     setIsAiLoading(false);
-  }
+    setTimeout(() => inputRef.current?.focus(), 50);
+  }, []);
 
-  // Close response when input is fully cleared
   function handleInputChange(e: React.ChangeEvent<HTMLInputElement>) {
     const val = e.target.value;
     setQuery(val);
@@ -63,20 +66,6 @@ export default function SearchAndActions({ onCreatePlaylistClick, onImportClick,
       handleClose();
     }
   }
-
-  // Close response when clicking outside the search + result area
-  const containerRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        handleClose();
-      }
-    }
-    if (activeQuery) {
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
-    }
-  }, [activeQuery]);
 
   return (
     <div className="home-hero">
@@ -94,7 +83,7 @@ export default function SearchAndActions({ onCreatePlaylistClick, onImportClick,
       </section>
 
       {/* Smart Action Bar + AI Result Dropdown */}
-      <section ref={containerRef} className="home-actions relative w-full max-w-5xl mx-auto mb-12 mt-4 shrink-0">
+      <section className="home-actions relative w-full max-w-5xl mx-auto mb-12 mt-4 shrink-0">
         {/* Search row */}
         <div className="flex flex-col xl:flex-row items-center gap-4 w-full">
           {/* Input pill */}
@@ -176,6 +165,7 @@ export default function SearchAndActions({ onCreatePlaylistClick, onImportClick,
             >
               <AskAIResult
                 query={activeQuery}
+                submissionId={submissionId}
                 onClose={handleClose}
                 onLoadingChange={setIsAiLoading}
               />

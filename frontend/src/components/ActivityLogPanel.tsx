@@ -297,7 +297,7 @@ const ActivityLogPanel: React.FC<ActivityLogPanelProps> = ({ isOpen, onClose }) 
       <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-100 dark:border-[#2b2d31] flex-shrink-0">
         <div className="flex items-center gap-2">
           <h2 className="text-[18px] font-bold tracking-tight text-zinc-900 dark:text-[#f2f3f5]">Activity Log</h2>
-          <span className="text-[10px] font-medium text-zinc-400 dark:text-[#80848e] bg-zinc-100 dark:bg-[#2b2d31] px-2 py-0.5 rounded-full">Ctrl+Shift+L</span>
+          <span className="text-[10px] font-medium text-zinc-400 dark:text-[#80848e] bg-zinc-100 dark:bg-[#2b2d31] px-2 py-0.5 rounded-full">Ctrl+T</span>
         </div>
         <div className="flex items-center gap-1">
           {merged.length > 0 && (

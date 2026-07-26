@@ -8,7 +8,7 @@ from .hybrid_service import search_resource_hybrid
 from .reranker_service import rerank_results
 from .context_compression_service import compress_context
 from .parent_child_service import expand_parent_context
-from .llm_service import enforce_inline_chunk_citations
+from .llm_service import enforce_inline_chunk_citations, normalize_response_markup
 try:
     from core.metrics import log_parent_child_expansion, log_planner_execution, log_query, log_retrieval_stats
 except ImportError:
@@ -23,6 +23,34 @@ from .agent.retrieval_agent import RetrievalAgent
 from .agent.workflow_executor import WorkflowExecutor
 from .agent.workflow_models import RetrievalWorkflow
 from core.config import ENABLE_QUERY_ROUTING, ENABLE_CHUNK_OVERLAP, ENABLE_HYDE
+
+
+def _rerank_metric_values(results: list[dict], modules_executed: list[str]) -> tuple[bool, float | None, float | None]:
+    rerank_executed = "rerank" in modules_executed
+    scores = []
+    for result in results:
+        score = result.get("rerank_score")
+        if score is None:
+            continue
+        try:
+            scores.append(float(score))
+        except (TypeError, ValueError):
+            continue
+    if not rerank_executed or not scores:
+        return rerank_executed, None, None
+    return True, sum(scores) / len(scores), max(scores)
+
+
+def _hallucination_metric_values(check_enabled: bool, hallucinations: list[dict]) -> tuple[bool, str]:
+    if not check_enabled:
+        return False, "skipped"
+    return True, "issues_detected" if hallucinations else "passed"
+
+
+def _response_passed(confidence: float | None, hallucinations: list[dict], hallucination_checked: bool) -> bool:
+    confidence_passed = confidence is not None and confidence >= 0.5
+    hallucination_passed = not hallucination_checked or not hallucinations
+    return confidence_passed and hallucination_passed
 
 
 def get_user_rag_settings(user_id: str) -> dict:
@@ -398,6 +426,7 @@ def run_rag_pipeline(
     from services.pipeline_logger import PipelineLogger
     plog = PipelineLogger(user_id, question)
     plog.log("start", resource_id=resource_id, globe_on=globe_on)
+    pipeline_started = perf_counter()
 
     log_user_activity(db, user_id, 'ai_chat', 'RAG query', question[:100])
     # Globe mode: bypass the entire RAG pipeline — pure LLM, like ChatGPT
@@ -413,6 +442,22 @@ def run_rag_pipeline(
             resource_id=resource_id,
             feature="global_chat_answer",
         )
+        if log_query:
+            log_query(
+                query=question,
+                latency_ms=(perf_counter() - pipeline_started) * 1000,
+                cache_hit=False,
+                chunks_retrieved=0,
+                confidence_score=1.0,
+                confidence_label="globe",
+                complexity_level="globe",
+                resource_id=resource_id or "",
+                user_id=user_id or "",
+                response_passed=True,
+                hallucination_checked=False,
+                hallucination_check_status="skipped",
+                rerank_executed=False,
+            )
         return {
             "answer": answer,
             "context": "",
@@ -423,7 +468,6 @@ def run_rag_pipeline(
             "confidence_label": "globe"
         }
 
-    pipeline_started = perf_counter()
     # 0. Resolve the user's active workspace so retrieval is scoped to it.
     from models import Resource, User
     user = db.query(User).filter(User.id == user_id).first()
@@ -490,6 +534,22 @@ def run_rag_pipeline(
                 resource_id=resource_id,
                 feature="global_chat_answer",
             )
+            if log_query:
+                log_query(
+                    query=question,
+                    latency_ms=(perf_counter() - pipeline_started) * 1000,
+                    cache_hit=False,
+                    chunks_retrieved=0,
+                    confidence_score=1.0,
+                    confidence_label="routed",
+                    complexity_level=plan.query_classification.value,
+                    resource_id=resource_id or "",
+                    user_id=user_id or "",
+                    response_passed=True,
+                    hallucination_checked=False,
+                    hallucination_check_status="skipped",
+                    rerank_executed=False,
+                )
             return {
                 "answer": answer,
                 "context": "",
@@ -523,6 +583,10 @@ def run_rag_pipeline(
                     complexity_level=plan.query_classification.value,
                     resource_id=resource_id or "",
                     user_id=user_id or "",
+                    response_passed=_response_passed(cached_result["confidence"], [], False),
+                    hallucination_checked=False,
+                    hallucination_check_status="cached",
+                    rerank_executed=False,
                 )
             except Exception:
                 pass
@@ -662,6 +726,14 @@ def run_rag_pipeline(
 
     if log_query:
         try:
+            rerank_executed, avg_rerank_score, top_rerank_score = _rerank_metric_values(
+                reranked_results,
+                execution_report.modules_executed,
+            )
+            hallucination_checked, hallucination_check_status = _hallucination_metric_values(
+                plan.hallucination_check,
+                hallucinations,
+            )
             log_retrieval_stats(
                 query=question,
                 chunks_before_rerank=len(results) if "results" in dir() else 0,
@@ -677,14 +749,18 @@ def run_rag_pipeline(
                 latency_ms=(perf_counter() - pipeline_started) * 1000,
                 cache_hit=False,
                 chunks_retrieved=len(reranked_results),
-                avg_rerank_score=sum(r.get("rerank_score", 0) for r in reranked_results) / max(len(reranked_results), 1),
-                top_rerank_score=reranked_results[0].get("rerank_score", 0) if reranked_results else 0,
+                avg_rerank_score=avg_rerank_score,
+                top_rerank_score=top_rerank_score,
                 hallucination_count=len(hallucinations),
                 confidence_score=confidence,
                 confidence_label=confidence_label,
                 complexity_level=plan.query_classification.value,
                 resource_id=resource_id or "",
                 user_id=user_id or "",
+                response_passed=_response_passed(confidence, hallucinations, hallucination_checked),
+                hallucination_checked=hallucination_checked,
+                hallucination_check_status=hallucination_check_status,
+                rerank_executed=rerank_executed,
             )
         except Exception:
             pass
@@ -715,6 +791,7 @@ def run_rag_pipeline_stream(
     Includes cache-before-retrieval and complexity-based pipeline depth.
     """
     full_answer = ""
+    pipeline_started = perf_counter()
 
     # Globe mode: bypass the entire RAG pipeline — pure LLM streaming, like ChatGPT
     if globe_on:
@@ -737,6 +814,7 @@ def run_rag_pipeline_stream(
                 buffer = ""
         if buffer:
             yield {"type": "token", "content": buffer}
+        full_answer = normalize_response_markup(full_answer)
         yield {
             "type": "final",
             "answer": full_answer,
@@ -745,10 +823,25 @@ def run_rag_pipeline_stream(
             "confidence": 1.0,
             "confidence_label": "globe",
         }
+        if log_query:
+            log_query(
+                query=question,
+                latency_ms=(perf_counter() - pipeline_started) * 1000,
+                cache_hit=False,
+                chunks_retrieved=0,
+                confidence_score=1.0,
+                confidence_label="globe",
+                complexity_level="globe",
+                resource_id=resource_id or "",
+                user_id=user_id or "",
+                response_passed=True,
+                hallucination_checked=False,
+                hallucination_check_status="skipped",
+                rerank_executed=False,
+            )
         yield {"type": "done"}
         return
 
-    pipeline_started = perf_counter()
     try:
         from models import Resource, User
         from database import SessionLocal
@@ -835,14 +928,18 @@ def run_rag_pipeline_stream(
                             latency_ms=(perf_counter() - pipeline_started) * 1000,
                             cache_hit=True,
                             chunks_retrieved=len(cached.get("sources", []) if isinstance(cached, dict) else []),
-                            avg_rerank_score=0.0,
-                            top_rerank_score=0.0,
+                            avg_rerank_score=None,
+                            top_rerank_score=None,
                             hallucination_count=0,
                             confidence_score=cached.get("confidence", 0.0),
                             confidence_label="cached",
                             complexity_level=plan.query_classification.value,
                             resource_id=resource_id or "",
                             user_id=user_id or "",
+                            response_passed=_response_passed(cached.get("confidence"), [], False),
+                            hallucination_checked=False,
+                            hallucination_check_status="cached",
+                            rerank_executed=False,
                         )
                     except Exception:
                         pass
@@ -899,7 +996,9 @@ def run_rag_pipeline_stream(
 
         if buffer:
             yield {"type": "token", "content": buffer}
-        full_answer = enforce_inline_chunk_citations(full_answer, reranked_results)
+        full_answer = normalize_response_markup(
+            enforce_inline_chunk_citations(full_answer, reranked_results)
+        )
         agent_memory.tool_outputs["answer"] = full_answer
 
         provisional_sources = _build_provisional_sources(reranked_results)
@@ -1013,6 +1112,14 @@ def run_rag_pipeline_stream(
 
         if log_query:
             try:
+                rerank_executed, avg_rerank_score, top_rerank_score = _rerank_metric_values(
+                    reranked_results,
+                    execution_report.modules_executed,
+                )
+                hallucination_checked, hallucination_check_status = _hallucination_metric_values(
+                    plan.hallucination_check,
+                    hallucinations,
+                )
                 log_retrieval_stats(
                     query=question,
                     chunks_before_rerank=0,
@@ -1028,14 +1135,18 @@ def run_rag_pipeline_stream(
                     latency_ms=(perf_counter() - pipeline_started) * 1000,
                     cache_hit=False,
                     chunks_retrieved=len(reranked_results),
-                    avg_rerank_score=sum(r.get("rerank_score", 0) for r in reranked_results) / max(len(reranked_results), 1),
-                    top_rerank_score=reranked_results[0].get("rerank_score", 0) if reranked_results else 0,
+                    avg_rerank_score=avg_rerank_score,
+                    top_rerank_score=top_rerank_score,
                     hallucination_count=len(hallucinations),
                     confidence_score=confidence,
                     confidence_label=confidence_label,
                     complexity_level=plan.query_classification.value,
                     resource_id=resource_id or "",
                     user_id=user_id or "",
+                    response_passed=_response_passed(confidence, hallucinations, hallucination_checked),
+                    hallucination_checked=hallucination_checked,
+                    hallucination_check_status=hallucination_check_status,
+                    rerank_executed=rerank_executed,
                 )
             except Exception:
                 pass

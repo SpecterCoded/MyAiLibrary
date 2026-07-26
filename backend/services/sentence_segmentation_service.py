@@ -16,6 +16,7 @@ _WTP_STAGE = "chunking"
 _WTP_SECTION = "WTP Canine Sentence Model"
 _WTP_PATH_LABEL = "WTP Canine model folder"
 WTP_TOKENIZER_DIR_NAME = "tokenizer"
+WTP_MODEL_DIR_NAMES = ("sat-6l", "sat-3l", "sat-12l")
 
 
 def _is_tokenizer_dir(path: Path) -> bool:
@@ -23,6 +24,14 @@ def _is_tokenizer_dir(path: Path) -> bool:
         (path / "tokenizer.json").is_file()
         or (path / "sentencepiece.bpe.model").is_file()
         or (path / "tokenizer.model").is_file()
+    )
+
+
+def _is_wtp_model_dir(path: Path) -> bool:
+    return path.is_dir() and (path / "config.json").is_file() and (
+        (path / "model.onnx").is_file()
+        or (path / "model_optimized.onnx").is_file()
+        or (path / "pytorch_model.bin").is_file()
     )
 
 
@@ -46,6 +55,51 @@ def resolve_wtp_tokenizer_path(model_path: str | Path) -> Path | None:
     return None
 
 
+def resolve_wtp_model_path(model_path: str | Path | None) -> Path | None:
+    """Resolve a configured WTP/SaT path to the actual local model directory.
+
+    Older settings can point at a missing folder or the parent `models/wtp`
+    directory. In desktop mode, prefer any valid downloaded model under the
+    app data model cache instead of failing with a vague configuration error.
+    """
+    candidates: list[Path] = []
+
+    if model_path:
+        configured = Path(model_path).expanduser()
+        candidates.append(configured)
+        for model_dir_name in WTP_MODEL_DIR_NAMES:
+            candidates.append(configured / model_dir_name)
+        if configured.parent != configured:
+            for model_dir_name in WTP_MODEL_DIR_NAMES:
+                candidates.append(configured.parent / model_dir_name)
+
+    try:
+        from core.paths import MODELS_DIR
+
+        default_wtp_dir = MODELS_DIR / "wtp"
+        for model_dir_name in WTP_MODEL_DIR_NAMES:
+            candidates.append(default_wtp_dir / model_dir_name)
+    except Exception:
+        pass
+
+    local_app_data = os.getenv("LOCALAPPDATA")
+    if local_app_data:
+        desktop_wtp_dir = Path(local_app_data).expanduser() / "MyAILibrary" / "models" / "wtp"
+        for model_dir_name in WTP_MODEL_DIR_NAMES:
+            candidates.append(desktop_wtp_dir / model_dir_name)
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        if _is_wtp_model_dir(candidate) and resolve_wtp_tokenizer_path(candidate) is not None:
+            return candidate
+
+    return None
+
+
 def load_wtp_sat_model(model_path: str | Path):
     """Load a local SaT model with its local tokenizer.
 
@@ -55,7 +109,7 @@ def load_wtp_sat_model(model_path: str | Path):
     """
     from wtpsplit import SaT
 
-    path = Path(model_path).expanduser()
+    path = resolve_wtp_model_path(model_path) or Path(model_path).expanduser()
     tokenizer_path = resolve_wtp_tokenizer_path(path)
     if tokenizer_path is None:
         raise local_path_failure(
@@ -91,6 +145,9 @@ def configure_wtp_model_path(model_path: str | None) -> None:
 
 
 def _model_key() -> str | None:
+    resolved_path = resolve_wtp_model_path(_configured_wtp_model_path)
+    if resolved_path is not None:
+        return str(resolved_path)
     if not _configured_wtp_model_path:
         return None
     return str(Path(_configured_wtp_model_path).expanduser())
@@ -141,6 +198,18 @@ def _get_wtp_model():
             settings_section=_WTP_SECTION,
             path_label=_WTP_PATH_LABEL,
         ) from exc
+
+
+def warmup_wtp_model(model_path: str | Path | None = None) -> bool:
+    """Best-effort startup warmup so the first Ask AI request does not pay model-load cost."""
+    if model_path is not None:
+        configure_wtp_model_path(str(model_path))
+    try:
+        _get_wtp_model()
+        return True
+    except Exception as exc:
+        logger.warning(f"WTP Canine warmup skipped ({exc}).")
+        return False
 
 
 def split_into_sentences(text: str):

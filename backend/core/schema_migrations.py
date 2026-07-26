@@ -17,6 +17,7 @@ from sqlalchemy.engine import Engine
 
 
 LEGACY_SCHEMA_VERSION = "0001_legacy_schema"
+SEMANTIC_CACHE_OWNERSHIP_VERSION = "0002_semantic_cache_ownership"
 
 
 def _sha256(path: Path) -> str:
@@ -84,6 +85,53 @@ def prepare_schema_migration(engine: Engine, database_path: Path, version: str) 
             "version TEXT PRIMARY KEY, applied_at TEXT NOT NULL)"
         ))
     return True
+
+
+def apply_semantic_cache_ownership_migration(connection) -> None:
+    """Replace the disposable ownerless cache with a user-scoped table."""
+
+    has_cache = connection.execute(text(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'semantic_cache'"
+    )).scalar()
+    if not has_cache:
+        return
+
+    columns = {
+        row[1]
+        for row in connection.execute(text("PRAGMA table_info(semantic_cache)"))
+    }
+    if "user_id" not in columns:
+        connection.execute(text("DROP TABLE IF EXISTS semantic_cache_owned"))
+        connection.execute(text(
+            "CREATE TABLE semantic_cache_owned ("
+            "id VARCHAR NOT NULL PRIMARY KEY,"
+            "user_id VARCHAR NOT NULL,"
+            "resource_id VARCHAR,"
+            "rewritten_question TEXT NOT NULL,"
+            "embedding_vector TEXT NOT NULL,"
+            "answer TEXT NOT NULL,"
+            "sources TEXT NOT NULL,"
+            "confidence FLOAT,"
+            "created_at DATETIME,"
+            "FOREIGN KEY(user_id) REFERENCES users (id),"
+            "FOREIGN KEY(resource_id) REFERENCES resources (id)"
+            ")"
+        ))
+        connection.execute(text("DROP TABLE semantic_cache"))
+        connection.execute(text(
+            "ALTER TABLE semantic_cache_owned RENAME TO semantic_cache"
+        ))
+    else:
+        # Rows without an owner predate this migration and cannot be safely
+        # served to any authenticated user.
+        connection.execute(text(
+            "DELETE FROM semantic_cache WHERE user_id IS NULL OR user_id = ''"
+        ))
+
+    connection.execute(text(
+        "CREATE INDEX IF NOT EXISTS ix_semantic_cache_user_resource "
+        "ON semantic_cache(user_id, resource_id)"
+    ))
 
 
 class _ReadOnlyMigrationConnection:

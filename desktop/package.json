@@ -14,9 +14,13 @@
   },
   "scripts": {
     "clean": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/clean.ps1",
+    "clean:runtime": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cleanup-stale-runtime.ps1 -IncludeRendererPort",
     "build:branding": "..\\backend\\venv\\Scripts\\python.exe scripts\\generate-branding.py",
     "compile": "tsc -p tsconfig.json",
+    "predev": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cleanup-stale-runtime.ps1 -IncludeRendererPort",
+    "predev:renderer": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cleanup-stale-runtime.ps1 -IncludeRendererPort",
     "dev:renderer": "npm --prefix ../frontend run dev -- --host 127.0.0.1",
+    "predev:electron": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cleanup-stale-runtime.ps1",
     "dev:electron": "npm run compile && wait-on tcp:127.0.0.1:5173 && cross-env ELECTRON_RENDERER_URL=http://127.0.0.1:5173 electron .",
     "dev": "concurrently --kill-others-on-fail --names renderer,electron \"npm:dev:renderer\" \"npm:dev:electron\"",
     "build:ui": "npm --prefix ../frontend run build",

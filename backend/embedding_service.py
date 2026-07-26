@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from datetime import datetime, timezone
 
+from services.url_utils import strip_api_suffix
 from services.chunking_router import chunk_resource
 from services.parent_child_service import chunk_parent_metadata
 from services.llm_service import answer_question as llm_answer_question
@@ -126,7 +127,7 @@ def get_user_embedding_client(user_id: str | None):
         from openai import OpenAI
         user_client = OpenAI(
             api_key=settings.embedding_api_key,
-            base_url=settings.embedding_base_url,
+            base_url=strip_api_suffix(settings.embedding_base_url),
             timeout=30.0,
         )
         model = settings.embedding_model or "openai/text-embedding-3-large"

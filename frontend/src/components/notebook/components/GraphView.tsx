@@ -26,6 +26,16 @@ export function GraphView() {
   const [searchTerm, setSearchTerm] = useState('');
   const svgRef = useRef<SVGSVGElement>(null);
   const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null);
+  const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains('dark'));
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const syncTheme = () => setIsDark(root.classList.contains('dark'));
+    syncTheme();
+    const observer = new MutationObserver(syncTheme);
+    observer.observe(root, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
+  }, []);
 
   // Active notes for the graph
   const activeNotes = notes.filter(n => n.status === 'active');
@@ -89,11 +99,37 @@ export function GraphView() {
 
     const svg = d3.select(el).attr('viewBox', [0, 0, width, height]);
 
+    const graphColors = isDark
+      ? {
+          canvas: '#25272b',
+          playlist: '#1e1f22',
+          folder: '#3f4147',
+          note: '#313338',
+          folderStroke: '#5c5f66',
+          noteStroke: '#4e5058',
+          label: '#f2f3f5',
+          linkStrong: '#949ba4',
+          linkSoft: '#5c5f66',
+          labelHalo: 'rgba(37,39,43,0.92)',
+        }
+      : {
+          canvas: '#FCFCF9',
+          playlist: '#37352F',
+          folder: '#6E6C68',
+          note: '#FFFFFF',
+          folderStroke: '#EFEFED',
+          noteStroke: '#EFEFED',
+          label: '#37352F',
+          linkStrong: '#37352F',
+          linkSoft: '#9A9A97',
+          labelHalo: 'rgba(252,252,249,0.9)',
+        };
+
     // Background
     svg.append('rect')
       .attr('width', width)
       .attr('height', height)
-      .attr('fill', '#FCFCF9');
+      .attr('fill', graphColors.canvas);
 
     const g = svg.append('g');
 
@@ -108,19 +144,14 @@ export function GraphView() {
 
     // Color and fill by type
     const colorMap: Record<string, string> = {
-      playlist: '#37352F',
-      folder: '#6E6C68',
-      note: '#FFFFFF',
+      playlist: graphColors.playlist,
+      folder: graphColors.folder,
+      note: graphColors.note,
     };
     const strokeMap: Record<string, string> = {
-      playlist: '#37352F',
-      folder: '#EFEFED',
-      note: '#EFEFED',
-    };
-    const labelColorMap: Record<string, string> = {
-      playlist: '#FFFFFF',
-      folder: '#37352F',
-      note: '#37352F',
+      playlist: graphColors.playlist,
+      folder: graphColors.folderStroke,
+      note: graphColors.noteStroke,
     };
 
     // Simulation with clustering by playlist
@@ -150,9 +181,9 @@ export function GraphView() {
       .join('line')
       .attr('stroke', (l: any) => {
         const source = nodes.find(n => n.id === (typeof l.source === 'object' ? l.source.id : l.source));
-        if (source?.type === 'playlist') return '#37352F';
-        if (source?.type === 'folder') return '#9A9A97';
-        return '#EFEFED';
+        if (source?.type === 'playlist') return graphColors.linkStrong;
+        if (source?.type === 'folder') return graphColors.linkSoft;
+        return graphColors.noteStroke;
       })
       .attr('stroke-width', (l: any) => {
         const source = nodes.find(n => n.id === (typeof l.source === 'object' ? l.source.id : l.source));
@@ -224,13 +255,13 @@ export function GraphView() {
       .attr('font-family', 'Inter, sans-serif')
       .attr('font-size', d => d.type === 'playlist' ? '13px' : '12px')
       .attr('font-weight', d => d.type === 'playlist' ? '600' : '400')
-      .attr('fill', '#37352F')
+      .attr('fill', graphColors.label)
       .attr('class', 'graph-node-label')
       .text(d => d.label.length > 18 ? d.label.slice(0, 16) + '…' : d.label)
       // White halo behind label for readability
       .clone(true).lower()
       .attr('fill', 'none')
-      .attr('stroke', 'rgba(252,252,249,0.9)')
+      .attr('stroke', graphColors.labelHalo)
       .attr('stroke-width', 4)
       .attr('stroke-linejoin', 'round');
 
@@ -269,33 +300,57 @@ export function GraphView() {
     });
 
     return () => { simulation.stop(); };
-  }, [activeNotes.length, folders.length, searchTerm]);
+  }, [activeNotes.length, folders.length, searchTerm, isDark]);
 
   const { nodes: allNodes } = buildGraphData();
   const playlistCount = allNodes.filter(n => n.type === 'playlist').length;
   const folderCount = allNodes.filter(n => n.type === 'folder').length;
   const noteCount = allNodes.filter(n => n.type === 'note').length;
+  const themeColors = isDark
+    ? {
+        canvas: '#25272b',
+        panel: '#2b2d31',
+        elevated: '#313338',
+        input: '#1e1f22',
+        ink: '#f2f3f5',
+        muted: '#b5bac1',
+        faint: '#949ba4',
+        border: 'rgba(255,255,255,0.08)',
+        pill: '#3f4147',
+      }
+    : {
+        canvas: '#FCFCF9',
+        panel: '#FAFAF8',
+        elevated: '#FFFFFF',
+        input: '#F9F9F8',
+        ink: '#37352F',
+        muted: '#6E6C68',
+        faint: '#9A9A97',
+        border: '#EFEFED',
+        pill: '#EFEFED',
+      };
 
   return (
-    <div className="flex flex-col h-full bg-[#FCFCF9] relative">
+    <div className="flex flex-col h-full relative" style={{ backgroundColor: themeColors.canvas, color: themeColors.ink }}>
       {/* Header */}
-      <div className="flex items-center justify-between px-8 py-4 border-b border-[#EFEFED] bg-white z-10 shrink-0">
+      <div className="flex items-center justify-between px-8 py-4 border-b z-10 shrink-0" style={{ borderColor: themeColors.border, backgroundColor: themeColors.elevated }}>
         <div className="flex items-center gap-3">
-          <Network size={20} className="text-[#37352F]" />
-          <span className="text-[16px] font-semibold text-[#37352F]">Global View</span>
+          <Network size={20} style={{ color: themeColors.ink }} />
+          <span className="text-[16px] font-semibold" style={{ color: themeColors.ink }}>Global View</span>
           <div className="flex items-center gap-2 ml-4">
-            <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-[#37352F] text-white">{playlistCount} playlists</span>
-            <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-[#EFEFED] text-[#6E6C68]">{folderCount} folders</span>
-            <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-[#EFEFED] text-[#6E6C68]">{noteCount} notes</span>
+            <span className="text-[11px] font-medium px-2 py-0.5 rounded-full" style={{ backgroundColor: isDark ? '#1e1f22' : '#37352F', color: '#ffffff' }}>{playlistCount} playlists</span>
+            <span className="text-[11px] font-medium px-2 py-0.5 rounded-full" style={{ backgroundColor: themeColors.pill, color: themeColors.muted }}>{folderCount} folders</span>
+            <span className="text-[11px] font-medium px-2 py-0.5 rounded-full" style={{ backgroundColor: themeColors.pill, color: themeColors.muted }}>{noteCount} notes</span>
           </div>
         </div>
 
         <div className="relative">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9A9A97]" />
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: themeColors.faint }} />
           <input
             type="text"
             placeholder="Filter graph..."
-            className="pl-9 pr-4 py-1.5 w-64 bg-[#F9F9F8] border border-[#EFEFED] rounded-md text-[14px] outline-none focus:border-[#d9d9d6] transition-colors"
+            className="pl-9 pr-4 py-1.5 w-64 border rounded-md text-[14px] outline-none transition-colors"
+            style={{ backgroundColor: themeColors.input, borderColor: themeColors.border, color: themeColors.ink }}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
@@ -303,10 +358,10 @@ export function GraphView() {
       </div>
 
       {/* Legend */}
-      <div className="flex items-center gap-6 px-8 py-2 border-b border-[#EFEFED] bg-[#FAFAF8] text-[12px] text-[#9A9A97]">
-        <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-[#37352F] inline-block" /> Playlist</div>
-        <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-[#6E6C68] inline-block" /> Folder</div>
-        <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full border-2 border-[#EFEFED] bg-white inline-block" /> Note</div>
+      <div className="flex items-center gap-6 px-8 py-2 border-b text-[12px]" style={{ borderColor: themeColors.border, backgroundColor: themeColors.panel, color: themeColors.faint }}>
+        <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full inline-block" style={{ backgroundColor: isDark ? '#1e1f22' : '#37352F' }} /> Playlist</div>
+        <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full inline-block" style={{ backgroundColor: isDark ? '#3f4147' : '#6E6C68' }} /> Folder</div>
+        <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full border-2 inline-block" style={{ borderColor: themeColors.border, backgroundColor: themeColors.elevated }} /> Note</div>
         <div className="ml-auto text-[11px]">Click to open · Double-click background to reset zoom · Drag to pan</div>
       </div>
 
@@ -315,7 +370,7 @@ export function GraphView() {
         <svg ref={svgRef} className="w-full h-full block cursor-grab active:cursor-grabbing" />
 
         {allNodes.length === 0 && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center text-[#9A9A97]">
+          <div className="absolute inset-0 flex flex-col items-center justify-center" style={{ color: themeColors.faint }}>
             <Network size={48} className="mb-4 opacity-30" />
             <p className="text-[15px] font-medium">No items to display</p>
             <p className="text-[13px] mt-1">Create playlists, folders, and notes to see them here</p>

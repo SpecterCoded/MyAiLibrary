@@ -88,9 +88,39 @@ function FilterDropdown({ value, onChange, options, label }: FilterDropdownProps
 interface RagExplorerPageProps {
   theme?: 'light' | 'dark' | 'system';
   setTheme?: React.Dispatch<React.SetStateAction<'light' | 'dark' | 'system'>>;
+  isActive?: boolean;
 }
 
-export default function App({ theme, setTheme }: RagExplorerPageProps) {
+const CONTENT_REVEAL_DURATION = 0.85;
+
+function AnimatedNumber({ value, animationKey }: { value: number; animationKey: number }) {
+  const [displayValue, setDisplayValue] = useState(value);
+
+  useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      setDisplayValue(value);
+      return;
+    }
+
+    let frame = 0;
+    const startedAt = performance.now();
+    setDisplayValue(0);
+
+    const tick = (now: number) => {
+      const progress = Math.min((now - startedAt) / (CONTENT_REVEAL_DURATION * 1000), 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setDisplayValue(Math.round(value * eased));
+      if (progress < 1) frame = requestAnimationFrame(tick);
+    };
+
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [value, animationKey]);
+
+  return <>{displayValue.toLocaleString()}</>;
+}
+
+export default function App({ theme, setTheme, isActive = true }: RagExplorerPageProps) {
   const resolveDark = (t: string) => {
     if (t === 'dark') return true;
     if (t === 'light') return false;
@@ -119,6 +149,15 @@ export default function App({ theme, setTheme }: RagExplorerPageProps) {
   const [isActionLoading, setIsActionLoading] = useState(false);
   const [dockJobs, setDockJobs] = useState<{ id: string; title: string; status: string; detail?: string }[]>([]);
   const [confirmModal, setConfirmModal] = useState<{ message: string; onConfirm: () => void } | null>(null);
+  const [contentAnimationKey, setContentAnimationKey] = useState(0);
+  const wasActiveRef = useRef(false);
+
+  useEffect(() => {
+    if (isActive && !wasActiveRef.current) {
+      setContentAnimationKey((current) => current + 1);
+    }
+    wasActiveRef.current = isActive;
+  }, [isActive]);
 
   const normalizeType = (type: string) => {
     const value = String(type || '').toLowerCase();
@@ -386,15 +425,16 @@ export default function App({ theme, setTheme }: RagExplorerPageProps) {
     return () => clearInterval(interval);
   }, [dockJobs]);
 
-  const filteredResources = resources.filter((resource) => {
+  const embeddedResources = resources.filter((r) => r.is_embedded);
+
+  const filteredResources = embeddedResources.filter((resource) => {
     const query = searchQuery.trim().toLowerCase();
     const matchesSearch = !query || [resource.title, resource.folder_name || '', resource.playlist_name || '']
       .some((value) => value.toLowerCase().includes(query));
     const matchesType = typeFilter === 'all' || normalizeType(resource.type) === typeFilter;
     const matchesStatus = statusFilter === 'all'
       || (statusFilter === 'ready' && normalizeStatus(resource.rag_status) === 'ready')
-      || (statusFilter === 'failed' && isFailedStatus(resource))
-      || (statusFilter === 'not_embedded' && !resource.is_embedded);
+      || (statusFilter === 'failed' && isFailedStatus(resource));
     return matchesSearch && matchesType && matchesStatus;
   });
 
@@ -669,32 +709,38 @@ export default function App({ theme, setTheme }: RagExplorerPageProps) {
         ) : (
           <>
             {/* Dashboard Strip */}
-            <div className="ragx-stats-strip flex flex-col xl:flex-row border-b border-border flex-shrink-0">
+            <motion.div
+              key={`ragx-stats-${contentAnimationKey}`}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: CONTENT_REVEAL_DURATION, ease: [0.16, 1, 0.3, 1] }}
+              className="ragx-stats-strip flex flex-col xl:flex-row border-b border-border flex-shrink-0"
+            >
           <div className="ragx-stats-grid grid grid-cols-2 md:grid-cols-5 flex-1">
             <div className="p-6 md:p-8 border-r border-b xl:border-b-0 border-border relative overflow-hidden group">
               <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity"><Database size={64}/></div>
               <div className="text-sm text-ink-muted font-mono mb-2 uppercase tracking-wider">Total Resources</div>
-              <div className="text-4xl font-display">{stats.total}</div>
+              <div className="text-4xl font-display"><AnimatedNumber value={stats.total} animationKey={contentAnimationKey} /></div>
             </div>
             <div className="p-6 md:p-8 border-r border-b xl:border-b-0 border-border relative overflow-hidden group">
               <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity"><CheckCircle2 size={64}/></div>
               <div className="text-sm text-ink-muted font-mono mb-2 uppercase tracking-wider">Retrieval-Ready</div>
-              <div className="text-4xl font-display text-emerald-400">{stats.ready}</div>
+              <div className="text-4xl font-display text-emerald-400"><AnimatedNumber value={stats.ready} animationKey={contentAnimationKey} /></div>
             </div>
             <div className="p-6 md:p-8 border-r border-b md:border-b-0 border-border relative overflow-hidden group">
               <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity"><Layers size={64}/></div>
               <div className="text-sm text-ink-muted font-mono mb-2 uppercase tracking-wider">Total Chunks</div>
-              <div className="text-4xl font-display">{stats.chunks}</div>
+              <div className="text-4xl font-display"><AnimatedNumber value={stats.chunks} animationKey={contentAnimationKey} /></div>
             </div>
             <div className="p-6 md:p-8 border-r border-b md:border-b-0 border-border relative overflow-hidden group">
               <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity"><Layers size={64}/></div>
               <div className="text-sm text-ink-muted font-mono mb-2 uppercase tracking-wider">Total Vectors</div>
-              <div className="text-4xl font-display">{stats.vectors}</div>
+              <div className="text-4xl font-display"><AnimatedNumber value={stats.vectors} animationKey={contentAnimationKey} /></div>
             </div>
             <div className="p-6 md:p-8 border-r xl:border-r-0 border-border relative overflow-hidden group">
               <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity"><AlertTriangle size={64}/></div>
               <div className="text-sm text-ink-muted font-mono mb-2 uppercase tracking-wider">Failed Pipes</div>
-              <div className="text-4xl font-display text-rose-400">{stats.failed}</div>
+              <div className="text-4xl font-display text-rose-400"><AnimatedNumber value={stats.failed} animationKey={contentAnimationKey} /></div>
             </div>
           </div>
           
@@ -705,6 +751,7 @@ export default function App({ theme, setTheme }: RagExplorerPageProps) {
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
+                      key={`health-pie-${contentAnimationKey}-${healthData.map((entry) => entry.value).join('-')}`}
                       data={healthData}
                       cx="50%"
                       cy="50%"
@@ -713,6 +760,9 @@ export default function App({ theme, setTheme }: RagExplorerPageProps) {
                       paddingAngle={2}
                       dataKey="value"
                       stroke="none"
+                      isAnimationActive
+                      animationDuration={CONTENT_REVEAL_DURATION * 1000}
+                      animationEasing="ease-out"
                     >
                       {healthData.map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={entry.color} />
@@ -733,16 +783,22 @@ export default function App({ theme, setTheme }: RagExplorerPageProps) {
                       <div className="w-2 h-2 rounded-full" style={{ backgroundColor: data.color }} />
                       <span className="text-ink-muted">{data.name}</span>
                     </div>
-                    <span className="text-ink">{data.value}</span>
+                    <span className="text-ink"><AnimatedNumber value={data.value} animationKey={contentAnimationKey} /></span>
                   </div>
                 ))}
               </div>
             </div>
           </div>
-        </div>
+        </motion.div>
 
         {/* List Area */}
-        <div className="flex-1 flex flex-col min-h-0 bg-panel">
+        <motion.div
+          key={`ragx-list-${contentAnimationKey}`}
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: CONTENT_REVEAL_DURATION, ease: [0.16, 1, 0.3, 1] }}
+          className="flex-1 flex flex-col min-h-0 bg-panel"
+        >
           {/* Toolbar */}
           <div className="ragx-toolbar px-8 py-4 border-b border-border flex items-center justify-between gap-4 shrink-0">
             <div className="relative w-full max-w-md">
@@ -777,7 +833,6 @@ export default function App({ theme, setTheme }: RagExplorerPageProps) {
                   { value: 'all', label: 'All Statuses' },
                   { value: 'ready', label: 'Ready' },
                   { value: 'failed', label: 'Failed' },
-                  { value: 'not_embedded', label: 'Not Embedded' },
                 ]}
               />
             </div>
@@ -858,6 +913,7 @@ export default function App({ theme, setTheme }: RagExplorerPageProps) {
               <motion.div 
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: CONTENT_REVEAL_DURATION, ease: [0.16, 1, 0.3, 1] }}
                 className="ragx-empty-card max-w-lg w-full border border-border p-5 text-center bg-canvas shadow-2xl"
               >
                 <div className="w-10 h-10 bg-surface border border-border flex items-center justify-center mx-auto mb-3 text-ink-faint">
@@ -977,7 +1033,7 @@ export default function App({ theme, setTheme }: RagExplorerPageProps) {
             </table>
           </div>
           )}
-        </div>
+        </motion.div>
           </>
         )}
       </main>

@@ -554,6 +554,14 @@ def reconcile_pending_ai_usage(db, user_id: str | None = None, max_pages: int = 
     if user_id:
         query = query.filter(AiUsageEvent.user_id == user_id)
     rows = query.order_by(AiUsageEvent.created_at.desc()).limit(200).all()
+    pending_rows = []
+    for row in rows:
+        metadata = _load_metadata(row.metadata_json)
+        if metadata.get("pending_settlement") and row.request_id:
+            pending_rows.append((row, metadata))
+    if not pending_rows:
+        return 0
+
     recent_pages_cache = {page: _fetch_generation_page(page, user_id=user_id) for page in range(1, max_pages + 1)}
     recent_rows = {
         str(item.get("request_id") or ""): item
@@ -562,16 +570,8 @@ def reconcile_pending_ai_usage(db, user_id: str | None = None, max_pages: int = 
         if isinstance(item, dict) and item.get("request_id")
     }
     updated = 0
-    for row in rows:
-        try:
-            metadata = json.loads(row.metadata_json or "{}")
-        except Exception:
-            metadata = {}
-        if not metadata.get("pending_settlement"):
-            continue
+    for row, metadata in pending_rows:
         request_id = str(row.request_id or "")
-        if not request_id:
-            continue
         payload = _fetch_generation_detail(request_id, user_id=row.user_id) or recent_rows.get(request_id)
         if not payload:
             continue

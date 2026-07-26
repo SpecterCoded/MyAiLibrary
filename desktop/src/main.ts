@@ -1,8 +1,8 @@
 import { randomBytes } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
-import { app, autoUpdater as nativeAutoUpdater, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeTheme, session, shell } from 'electron'
+import { app, autoUpdater as nativeAutoUpdater, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, screen, session, shell, Tray } from 'electron'
 import { BackendRuntime, BackendState, startBackend, stopBackend } from './backend-process'
 import { createAndVerifyUpdateBackup } from './update-backup'
 import { DesktopUpdater } from './updater'
@@ -10,13 +10,49 @@ import type { UpdatePreferences } from './update-types'
 
 let mainWindow: BrowserWindow | null = null
 let splashWindow: BrowserWindow | null = null
+let tray: Tray | null = null
 let backend: BackendRuntime | null = null
 let updater: DesktopUpdater | null = null
 let quitting = false
 let allowedRendererOrigin = ''
+let currentRendererUrl = ''
 let currentTitleBarTheme: 'light' | 'dark' = nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
 let windowControlsHidden = false
 const appWindows = new Set<BrowserWindow>()
+let attachmentViewerWindow: BrowserWindow | null = null
+let attachmentViewerReady = false
+let pendingAttachmentViewerPayload: AttachmentViewerPayload | null = null
+const attachmentViewerFilePaths = new Map<string, string>()
+
+type AttachmentViewerKind = 'image' | 'video' | 'audio' | 'pdf'
+
+interface AttachmentViewerItem {
+  id: string
+  kind: AttachmentViewerKind
+  name: string
+  url: string
+  mimeType?: string
+  size?: number
+  pageCount?: number
+  sourcePath?: string
+}
+
+interface AttachmentViewerPayload {
+  attachments: AttachmentViewerItem[]
+  activeIndex: number
+}
+
+const ATTACHMENT_VIEWER_CHANNELS = {
+  payload: 'attachment-viewer:payload',
+  close: 'attachment-viewer:close',
+  minimize: 'attachment-viewer:minimize',
+  toggleMaximize: 'attachment-viewer:toggle-maximize',
+  isMaximized: 'attachment-viewer:is-maximized',
+  toggleAlwaysOnTop: 'attachment-viewer:toggle-always-on-top',
+  getAlwaysOnTop: 'attachment-viewer:get-always-on-top',
+  showInFolder: 'attachment-viewer:show-in-folder',
+  saveAs: 'attachment-viewer:save-as',
+} as const
 
 const desktopContentSecurityPolicy = [
   "default-src 'self'",
@@ -53,11 +89,194 @@ function sendBackendState(state: BackendState, detail?: string): void {
   }
 }
 
+function resolvedSystemTheme(): 'light' | 'dark' {
+  return nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
+}
+
+function sendSystemThemeChanged(): void {
+  const theme = resolvedSystemTheme()
+  splashWindow?.webContents.send('desktop:system-theme-changed', theme)
+  for (const window of appWindows) {
+    if (!window.isDestroyed()) window.webContents.send('desktop:system-theme-changed', theme)
+  }
+}
+
+function showMainWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+}
+
+function createTray(): void {
+  if (tray) return
+  const trayIconPath = path.join(__dirname, '..', 'assets', process.platform === 'win32' ? 'tray-icon.ico' : 'tray-icon.png')
+  const fallbackIconPath = path.join(__dirname, '..', 'assets', 'icon.png')
+  const iconPath = existsSync(trayIconPath) ? trayIconPath : fallbackIconPath
+  if (!existsSync(iconPath)) return
+
+  const trayIcon = nativeImage.createFromPath(iconPath)
+  tray = new Tray(trayIcon)
+  tray.setToolTip('MyAiLibrary')
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'Open', click: showMainWindow },
+    { type: 'separator' },
+    { label: 'Close', click: () => app.quit() },
+  ]))
+  tray.on('click', showMainWindow)
+}
+
 function senderIsTrusted(frameUrl: string): boolean {
   try {
     return new URL(frameUrl).origin === allowedRendererOrigin
   } catch {
     return false
+  }
+}
+
+function isValidAttachmentViewerItem(value: unknown): value is AttachmentViewerItem {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  const validKind = candidate.kind === 'image' || candidate.kind === 'video' || candidate.kind === 'audio' || candidate.kind === 'pdf'
+  const validUrl = typeof candidate.url === 'string' && (
+    candidate.url.startsWith('blob:') ||
+    candidate.url.startsWith('data:') ||
+    candidate.url.startsWith('app-media://') ||
+    candidate.url.startsWith('http://127.0.0.1:')
+  )
+  return (
+    typeof candidate.id === 'string' &&
+    typeof candidate.name === 'string' &&
+    validKind &&
+    validUrl &&
+    (candidate.mimeType === undefined || typeof candidate.mimeType === 'string') &&
+    (candidate.size === undefined || typeof candidate.size === 'number') &&
+    (candidate.pageCount === undefined || typeof candidate.pageCount === 'number') &&
+    (candidate.sourcePath === undefined || (typeof candidate.sourcePath === 'string' && candidate.sourcePath.length <= 32_768))
+  )
+}
+
+function isValidAttachmentViewerPayload(value: unknown): value is AttachmentViewerPayload {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  if (!Array.isArray(candidate.attachments) || candidate.attachments.length === 0) return false
+  if (candidate.attachments.length > 100) return false
+  if (typeof candidate.activeIndex !== 'number') return false
+  if (candidate.activeIndex < 0 || candidate.activeIndex >= candidate.attachments.length) return false
+  return candidate.attachments.every(isValidAttachmentViewerItem)
+}
+
+function prepareAttachmentViewerPayload(payload: AttachmentViewerPayload): AttachmentViewerPayload {
+  attachmentViewerFilePaths.clear()
+  return {
+    activeIndex: payload.activeIndex,
+    attachments: payload.attachments.map((attachment) => {
+      if (attachment.sourcePath) {
+        const resolvedPath = path.resolve(attachment.sourcePath)
+        if (existsSync(resolvedPath)) {
+          attachmentViewerFilePaths.set(attachment.id, resolvedPath)
+        }
+      }
+      const { sourcePath: _sourcePath, ...safeAttachment } = attachment
+      return safeAttachment
+    }),
+  }
+}
+
+function attachmentViewerUrl(): string {
+  if (!currentRendererUrl) return 'about:blank'
+  return new URL('/attachment-viewer.html', currentRendererUrl).toString()
+}
+
+function createAttachmentViewerWindow(): BrowserWindow {
+  const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize
+  const width = Math.min(1160, Math.max(960, Math.round(screenWidth * 0.68)))
+  const height = Math.min(820, Math.max(680, Math.round(screenHeight * 0.72)))
+  const viewer = new BrowserWindow({
+    width,
+    height,
+    minWidth: 720,
+    minHeight: 520,
+    x: Math.max(0, Math.round((screenWidth - width) / 2)),
+    y: Math.max(0, Math.round((screenHeight - height) / 2)),
+    frame: false,
+    resizable: true,
+    movable: true,
+    maximizable: true,
+    minimizable: true,
+    closable: true,
+    show: false,
+    alwaysOnTop: false,
+    skipTaskbar: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    title: 'MyAiLibrary Attachments',
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      webSecurity: true,
+    },
+  })
+
+  viewer.setMenu(null)
+  viewer.setMenuBarVisibility(false)
+  appWindows.add(viewer)
+
+  viewer.once('ready-to-show', () => viewer.show())
+  viewer.webContents.on('did-finish-load', () => {
+    attachmentViewerReady = true
+    if (pendingAttachmentViewerPayload) {
+      viewer.webContents.send(ATTACHMENT_VIEWER_CHANNELS.payload, pendingAttachmentViewerPayload)
+      pendingAttachmentViewerPayload = null
+    }
+  })
+  viewer.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  viewer.webContents.on('will-navigate', (event, url) => {
+    try {
+      const origin = new URL(url).origin
+      if (allowedRendererOrigin && origin === allowedRendererOrigin) return
+    } catch {
+      // file/about URLs are not used for this viewer in normal runtime.
+    }
+    event.preventDefault()
+  })
+  viewer.on('closed', () => {
+    appWindows.delete(viewer)
+    if (attachmentViewerWindow === viewer) attachmentViewerWindow = null
+    attachmentViewerReady = false
+    pendingAttachmentViewerPayload = null
+    attachmentViewerFilePaths.clear()
+  })
+
+  void viewer.loadURL(attachmentViewerUrl())
+  return viewer
+}
+
+function openAttachmentViewer(payload: AttachmentViewerPayload): void {
+  if (!isValidAttachmentViewerPayload(payload)) {
+    console.warn('[desktop] rejected invalid attachment viewer payload')
+    return
+  }
+  const viewerPayload = prepareAttachmentViewerPayload(payload)
+
+  if (!attachmentViewerWindow || attachmentViewerWindow.isDestroyed()) {
+    attachmentViewerReady = false
+    pendingAttachmentViewerPayload = viewerPayload
+    attachmentViewerWindow = createAttachmentViewerWindow()
+    return
+  }
+
+  if (attachmentViewerWindow.isMinimized()) attachmentViewerWindow.restore()
+  attachmentViewerWindow.show()
+  attachmentViewerWindow.focus()
+
+  if (attachmentViewerReady) {
+    attachmentViewerWindow.webContents.send(ATTACHMENT_VIEWER_CHANNELS.payload, viewerPayload)
+  } else {
+    pendingAttachmentViewerPayload = viewerPayload
   }
 }
 
@@ -84,6 +303,7 @@ function registerIpc(): void {
     return true
   })
   ipcMain.handle('desktop:get-version', (event) => senderIsTrusted(event.senderFrame?.url ?? '') ? app.getVersion() : '')
+  ipcMain.handle('desktop:get-system-theme', (event) => senderIsTrusted(event.senderFrame?.url ?? '') ? resolvedSystemTheme() : 'light')
   ipcMain.handle('desktop:get-update-state', (event) => senderIsTrusted(event.senderFrame?.url ?? '') ? updater?.getState() ?? null : null)
   ipcMain.handle('desktop:check-for-updates', (event) => senderIsTrusted(event.senderFrame?.url ?? '') ? updater?.checkForUpdates(true) ?? null : null)
   ipcMain.handle('desktop:download-update', (event) => senderIsTrusted(event.senderFrame?.url ?? '') ? updater?.downloadUpdate() ?? null : null)
@@ -135,11 +355,57 @@ function registerIpc(): void {
     setWindowControlsHidden(hidden)
     return true
   })
+  ipcMain.on('desktop-attachments:open-viewer', (event, payload: unknown) => {
+    if (!senderIsTrusted(event.senderFrame?.url ?? '')) return
+    openAttachmentViewer(payload as AttachmentViewerPayload)
+  })
+  ipcMain.on(ATTACHMENT_VIEWER_CHANNELS.close, (event) => {
+    if (event.sender !== attachmentViewerWindow?.webContents) return
+    attachmentViewerWindow?.close()
+  })
+  ipcMain.on(ATTACHMENT_VIEWER_CHANNELS.minimize, (event) => {
+    if (event.sender !== attachmentViewerWindow?.webContents) return
+    attachmentViewerWindow?.minimize()
+  })
+  ipcMain.on(ATTACHMENT_VIEWER_CHANNELS.toggleMaximize, (event) => {
+    if (event.sender !== attachmentViewerWindow?.webContents || !attachmentViewerWindow) return
+    if (attachmentViewerWindow.isMaximized()) attachmentViewerWindow.unmaximize()
+    else attachmentViewerWindow.maximize()
+  })
+  ipcMain.handle(ATTACHMENT_VIEWER_CHANNELS.isMaximized, (event) => {
+    if (event.sender !== attachmentViewerWindow?.webContents) return false
+    return attachmentViewerWindow?.isMaximized() ?? false
+  })
+  ipcMain.handle(ATTACHMENT_VIEWER_CHANNELS.toggleAlwaysOnTop, (event) => {
+    if (event.sender !== attachmentViewerWindow?.webContents || !attachmentViewerWindow) return false
+    const next = !attachmentViewerWindow.isAlwaysOnTop()
+    attachmentViewerWindow.setAlwaysOnTop(next)
+    return next
+  })
+  ipcMain.handle(ATTACHMENT_VIEWER_CHANNELS.getAlwaysOnTop, (event) => {
+    if (event.sender !== attachmentViewerWindow?.webContents) return false
+    return attachmentViewerWindow?.isAlwaysOnTop() ?? false
+  })
+  ipcMain.on(ATTACHMENT_VIEWER_CHANNELS.showInFolder, (event, attachmentId: unknown) => {
+    if (event.sender !== attachmentViewerWindow?.webContents || typeof attachmentId !== 'string') return
+    const targetPath = attachmentViewerFilePaths.get(attachmentId)
+    if (!targetPath || !existsSync(targetPath)) return
+    shell.showItemInFolder(targetPath)
+  })
+  ipcMain.on(ATTACHMENT_VIEWER_CHANNELS.saveAs, async (event, attachmentId: unknown) => {
+    if (event.sender !== attachmentViewerWindow?.webContents || typeof attachmentId !== 'string') return
+    const targetPath = attachmentViewerFilePaths.get(attachmentId)
+    if (!targetPath || !existsSync(targetPath)) return
+    const result = await dialog.showSaveDialog(attachmentViewerWindow, {
+      defaultPath: path.join(app.getPath('downloads'), path.basename(targetPath)),
+    })
+    if (result.canceled || !result.filePath) return
+    copyFileSync(targetPath, result.filePath)
+  })
 }
 
 function applyTitleBarTheme(theme: 'light' | 'dark'): void {
   currentTitleBarTheme = theme
-  nativeTheme.themeSource = theme
   if (windowControlsHidden) return
   for (const window of appWindows) {
     if (window.isDestroyed()) continue
@@ -195,16 +461,17 @@ function openBackendLogTerminal(): boolean {
     `  Read-Host 'Press Enter to close'`,
     `  exit`,
     `}`,
-    `Get-Content -LiteralPath '${escapedLogPath}' -Tail 200 -Wait`,
+    `Write-Host 'Watching new backend log lines from now...' -ForegroundColor DarkGray`,
+    `Write-Host ''`,
+    `Get-Content -LiteralPath '${escapedLogPath}' -Tail 0 -Wait`,
   ].join('\r\n')
   writeFileSync(scriptPath, script, 'utf8')
 
   const child = spawn('cmd.exe', [
     '/d',
-    '/s',
     '/c',
     'start',
-    '"MyAiLibrary Backend Log"',
+    '""',
     'powershell.exe',
     '-NoProfile',
     '-NoExit',
@@ -215,19 +482,35 @@ function openBackendLogTerminal(): boolean {
   ], {
     detached: true,
     stdio: 'ignore',
-    windowsHide: true,
+    windowsHide: false,
   })
   child.unref()
   return true
 }
 
+function isBackendLogInputShortcut(input: Electron.Input): boolean {
+  if (input.type !== 'keyDown') return false
+  if (!input.control && !input.meta) return false
+  if (input.alt) return false
+  const key = (input.key || '').toLowerCase()
+  const code = input.code || ''
+  const isT = key === 't' || code === 'KeyT'
+  const isLegacyLogShortcut = input.shift && (key === 'l' || code === 'KeyL')
+  return (!input.shift && isT) || isLegacyLogShortcut
+}
+
 function registerBackendLogShortcut(): void {
-  globalShortcut.unregister('CommandOrControl+Shift+L')
-  const registered = globalShortcut.register('CommandOrControl+Shift+L', () => {
-    openBackendLogTerminal()
-  })
+  const shortcuts = ['CommandOrControl+T', 'Control+T', 'CommandOrControl+Shift+L']
+  for (const shortcut of shortcuts) {
+    globalShortcut.unregister(shortcut)
+  }
+  const registered = shortcuts.some((shortcut) => (
+    globalShortcut.register(shortcut, () => {
+      openBackendLogTerminal()
+    })
+  ))
   if (!registered) {
-    console.warn('[desktop] failed to register Ctrl+Shift+L backend log shortcut')
+    console.warn('[desktop] failed to register backend log shortcut')
   }
 }
 
@@ -304,6 +587,11 @@ function createMainWindow(): BrowserWindow {
       event.preventDefault()
     }
   })
+  window.on('close', (event) => {
+    if (quitting) return
+    event.preventDefault()
+    window.hide()
+  })
   appWindows.add(window)
   window.on('closed', () => {
     appWindows.delete(window)
@@ -322,13 +610,7 @@ function createMainWindow(): BrowserWindow {
     }
   })
   window.webContents.on('before-input-event', (event, input) => {
-    if (
-      input.type === 'keyDown' &&
-      input.control &&
-      input.shift &&
-      !input.alt &&
-      input.key.toLowerCase() === 'l'
-    ) {
+    if (isBackendLogInputShortcut(input)) {
       event.preventDefault()
       openBackendLogTerminal()
     }
@@ -384,6 +666,7 @@ async function bootApplication(): Promise<void> {
   try {
     backend = await startBackend({ dataDir: dataRoot, token, onState: sendBackendState })
     const rendererUrl = app.isPackaged ? backend.origin : process.env.ELECTRON_RENDERER_URL || 'http://127.0.0.1:5173'
+    currentRendererUrl = rendererUrl
     allowedRendererOrigin = new URL(rendererUrl).origin
     configureBackendSession(backend.origin, token)
 
@@ -412,6 +695,8 @@ app.on('second-instance', () => {
 
 app.whenReady().then(async () => {
   if (!gotSingleInstanceLock) return
+  nativeTheme.themeSource = 'system'
+  nativeTheme.on('updated', sendSystemThemeChanged)
   Menu.setApplicationMenu(null)
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
   const dataRoot = desktopDataRoot()
@@ -425,6 +710,7 @@ app.whenReady().then(async () => {
       // The installer has not started, so restore normal app service before reporting the failure.
       backend = await startBackend({ dataDir: dataRoot, token: previousToken, onState: sendBackendState })
       const rendererUrl = app.isPackaged ? backend.origin : process.env.ELECTRON_RENDERER_URL || 'http://127.0.0.1:5173'
+      currentRendererUrl = rendererUrl
       allowedRendererOrigin = new URL(rendererUrl).origin
       configureBackendSession(backend.origin, previousToken)
       if (app.isPackaged && mainWindow && !mainWindow.isDestroyed()) await mainWindow.loadURL(rendererUrl)
@@ -434,14 +720,21 @@ app.whenReady().then(async () => {
   nativeAutoUpdater.on('before-quit-for-update', () => { quitting = true })
   registerIpc()
   registerBackendLogShortcut()
+  createTray()
   await bootApplication()
 })
 
 app.on('will-quit', () => {
   globalShortcut.unregister('CommandOrControl+Shift+L')
+  globalShortcut.unregister('CommandOrControl+T')
+  globalShortcut.unregister('Control+T')
+  tray?.destroy()
+  tray = null
 })
 
-app.on('window-all-closed', () => app.quit())
+app.on('window-all-closed', () => {
+  if (quitting) return
+})
 
 app.on('before-quit', (event) => {
   if (quitting) return

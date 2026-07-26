@@ -20,10 +20,45 @@ def _ensure_log_dir():
         pass
 
 
-def log_query(query, latency_ms, cache_hit, chunks_retrieved, avg_rerank_score=0.0, top_rerank_score=0.0, hallucination_count=0, confidence_score=0.0, confidence_label="", complexity_level="", resource_id="", user_id=""):
+def log_query(
+    query,
+    latency_ms,
+    cache_hit,
+    chunks_retrieved,
+    avg_rerank_score=None,
+    top_rerank_score=None,
+    hallucination_count=0,
+    confidence_score=0.0,
+    confidence_label="",
+    complexity_level="",
+    resource_id="",
+    user_id="",
+    response_passed=None,
+    hallucination_checked=False,
+    hallucination_check_status="skipped",
+    rerank_executed=False,
+):
     try:
         _ensure_log_dir()
-        entry = {"ts": datetime.now(timezone.utc).isoformat(), "query": query[:500], "latency_ms": round(latency_ms, 1), "cache_hit": cache_hit, "chunks": chunks_retrieved, "avg_rerank": round(avg_rerank_score, 4), "top_rerank": round(top_rerank_score, 4), "hallucinations": hallucination_count, "confidence": round(confidence_score, 4), "confidence_label": confidence_label, "complexity": complexity_level, "resource_id": resource_id or "", "user_id": user_id or ""}
+        entry = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "query": query[:500],
+            "latency_ms": round(latency_ms, 1),
+            "cache_hit": bool(cache_hit),
+            "chunks": chunks_retrieved,
+            "avg_rerank": round(avg_rerank_score, 4) if avg_rerank_score is not None else None,
+            "top_rerank": round(top_rerank_score, 4) if top_rerank_score is not None else None,
+            "rerank_executed": bool(rerank_executed),
+            "hallucinations": hallucination_count,
+            "hallucination_checked": bool(hallucination_checked),
+            "hallucination_check_status": hallucination_check_status,
+            "response_passed": response_passed if isinstance(response_passed, bool) else None,
+            "confidence": round(float(confidence_score or 0.0), 4),
+            "confidence_label": confidence_label,
+            "complexity": complexity_level,
+            "resource_id": resource_id or "",
+            "user_id": user_id or "",
+        }
         with open(LOG_FILE, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
     except Exception:

@@ -68,14 +68,39 @@ declare global {
     openUpdateLogs(): Promise<boolean>
     getAppInfo(): Promise<DesktopAppInfo | null>
     openBackendLogTerminal(): Promise<boolean>
+    getSystemTheme(): Promise<'light' | 'dark'>
     setTitleBarTheme(theme: 'light' | 'dark'): Promise<boolean>
     setWindowControlsHidden(hidden: boolean): Promise<boolean>
+    onSystemThemeChanged(listener: (theme: 'light' | 'dark') => void): () => void
     onUpdateState(listener: (state: DesktopUpdateState) => void): () => void
     onUpdateInstalled(listener: (info: DesktopInstalledUpdateInfo) => void): () => void
     onBackendState(listener: (state: 'starting' | 'ready' | 'stopping' | 'stopped' | 'failed', detail?: string) => void): () => void
   }
 
+  type DesktopAttachmentKind = 'image' | 'video' | 'audio' | 'pdf'
+
+  interface DesktopAttachmentViewerItem {
+    id: string
+    kind: DesktopAttachmentKind
+    name: string
+    url: string
+    mimeType?: string
+    size?: number
+    pageCount?: number
+    sourcePath?: string
+  }
+
+  interface DesktopAttachmentViewerPayload {
+    attachments: DesktopAttachmentViewerItem[]
+    activeIndex: number
+  }
+
+  interface DesktopAttachmentsBridge {
+    openViewer(payload: DesktopAttachmentViewerPayload): void
+  }
+
   interface Window {
     desktop?: DesktopBridge
+    desktopAttachments?: DesktopAttachmentsBridge
   }
 }

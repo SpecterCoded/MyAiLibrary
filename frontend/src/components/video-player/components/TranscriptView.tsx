@@ -736,7 +736,7 @@ export function TranscriptView({
   const transcriptContent = (
     <div className="flex flex-col h-full bg-white dark:bg-[#1e1f22] relative">
       <ToastContainer toasts={toasts} onDismiss={removeToast} />
-      <div className="px-6 pb-4 flex items-center gap-3">
+      <div className="px-6 pt-1 pb-4 flex items-center gap-3 overflow-visible">
         <div className="relative flex-1">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-slate-500" />
           <input
@@ -789,7 +789,7 @@ export function TranscriptView({
         </div>
       )}
 
-      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-6 pb-24 no-scrollbar flex flex-col gap-6 scroll-smooth">
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-6 pb-8 no-scrollbar flex flex-col gap-6 scroll-smooth">
         {groupedData.type === 'grouped' ? (
           groupedData.data.map(chapter => (
             <div key={chapter.id} className="space-y-4">

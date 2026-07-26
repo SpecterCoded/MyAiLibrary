@@ -426,7 +426,7 @@ def get_knowledge_model_configuration(db: Session, user_id: str) -> tuple[str, s
     from services.dependency_failure_service import missing_configuration
 
     settings = db.query(UserSetting).filter(UserSetting.user_id == user_id).first()
-    base_url = (getattr(settings, "knowledge_base_url", "") or "").strip().rstrip("/") if settings else ""
+    base_url = strip_api_suffix(getattr(settings, "knowledge_base_url", "") or "") if settings else ""
     api_key = (getattr(settings, "knowledge_api_key", "") or "").strip() if settings else ""
     model = (getattr(settings, "knowledge_model", "") or "").strip() if settings else ""
     missing = [
@@ -465,6 +465,7 @@ def _call_structured(
     resource_id: str,
     feature: str,
 ) -> dict[str, Any]:
+    from services.url_utils import strip_api_suffix
     from services.dependency_failure_service import (
         DependencyFailure, classify_provider_error,
     )

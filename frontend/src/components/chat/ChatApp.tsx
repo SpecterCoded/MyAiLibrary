@@ -101,6 +101,38 @@ function formatMessageTimestamp(value?: string | null): string {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+function formatMediaTimestamp(totalSeconds: number): string {
+  const safeSeconds = Math.max(0, Math.floor(totalSeconds));
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const seconds = safeSeconds % 60;
+  const mmss = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  return hours > 0 ? `${String(hours).padStart(2, '0')}:${mmss}` : mmss;
+}
+
+function findSourceForTimestamp(sources: Source[] | undefined, seconds: number): Source | null {
+  if (!sources?.length) return null;
+
+  const videoExtension = /\.(mp4|mov|avi|mkv|webm|m4v)(?:$|[?#\s])/i;
+  const candidates = sources.filter(source =>
+    source.resource_id &&
+    videoExtension.test(`${source.resource_title || ''} ${source.resource_path || ''}`),
+  );
+  if (candidates.length === 0) return null;
+
+  const timestampedCandidates = candidates.filter(
+    source => typeof source.timestamp === 'number' && Number.isFinite(source.timestamp),
+  );
+  if (timestampedCandidates.length === 0) return candidates[0];
+
+  return timestampedCandidates.reduce((closest, source) =>
+    Math.abs((source.timestamp as number) - seconds) <
+    Math.abs((closest.timestamp as number) - seconds)
+      ? source
+      : closest,
+  );
+}
+
 function detectSuggestionKind(resource: any): 'video' | 'audio' | 'doc' {
   const resourceType = String(resource?.type || resource?.resource_type || '').toLowerCase();
   const title = String(resource?.title || '').toLowerCase();
@@ -254,6 +286,7 @@ function ChatDrawerVideoPlayer({ resourceId, timestamp }: { resourceId: string, 
 
   useEffect(() => {
     let active = true;
+    let createdObjectUrl: string | null = null;
     const loadMedia = async () => {
       setLoading(true);
       try {
@@ -265,6 +298,7 @@ function ChatDrawerVideoPlayer({ resourceId, timestamp }: { resourceId: string, 
         const blob = await res.blob();
         if (active) {
           const url = URL.createObjectURL(blob);
+          createdObjectUrl = url;
           setObjectUrl(url);
         }
       } catch (err) {
@@ -276,7 +310,7 @@ function ChatDrawerVideoPlayer({ resourceId, timestamp }: { resourceId: string, 
     loadMedia();
     return () => {
       active = false;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      if (createdObjectUrl) URL.revokeObjectURL(createdObjectUrl);
     };
   }, [resourceId]);
 
@@ -2768,8 +2802,15 @@ export default function ChatApp({ user }: ChatAppProps) {
               </div>
 
               <div className="p-4 flex-grow flex flex-col gap-4 overflow-y-auto">
-                {activePlayerSource.resource_title?.toLowerCase().endsWith('.mp4') && activePlayerSource.resource_id ? (
-                  <ChatDrawerVideoPlayer resourceId={activePlayerSource.resource_id} timestamp={activePlayerSource.timestamp} />
+                {activePlayerSource.resource_id &&
+                /\.(mp4|mov|avi|mkv|webm|m4v)(?:$|[?#\s])/i.test(
+                  `${activePlayerSource.resource_title || ''} ${activePlayerSource.resource_path || ''}`,
+                ) ? (
+                  <ChatDrawerVideoPlayer
+                    key={`${activePlayerSource.resource_id}-${activePlayerSource.timestamp ?? 0}`}
+                    resourceId={activePlayerSource.resource_id}
+                    timestamp={activePlayerSource.timestamp}
+                  />
                 ) : (
                   <div className="rounded-xl p-6 shadow-sm border border-gray-200/50 bg-gray-50/50 flex flex-col items-center justify-center text-center">
                     <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm mb-3">
@@ -3288,9 +3329,27 @@ function ChatView({
     );
   }
 
-  const formatTextContent = (text: string, sources?: Source[]) => (
-    <InlineCitationContent text={text} sources={sources} onOpenSource={onOpenPlayer} theme={isDarkMode ? "dark" : "light"} />
-  );
+  const formatTextContent = (text: string, sources?: Source[]) => {
+    const hasTimestampTarget = Boolean(findSourceForTimestamp(sources, 0));
+
+    return (
+      <InlineCitationContent
+        text={text}
+        sources={sources}
+        onOpenSource={onOpenPlayer}
+        onSeek={hasTimestampTarget ? (seconds) => {
+          const source = findSourceForTimestamp(sources, seconds);
+          if (!source) return;
+          onOpenPlayer({
+            ...source,
+            timestamp: seconds,
+            timestamp_label: formatMediaTimestamp(seconds),
+          });
+        } : undefined}
+        theme={isDarkMode ? "dark" : "light"}
+      />
+    );
+  };
 
   return (
     <motion.div

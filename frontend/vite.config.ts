@@ -24,6 +24,8 @@ export default defineConfig({
       '@blocknote/mantine',
     ],
     alias: [
+      { find: /^attachment-viewer-design$/, replacement: path.resolve(__dirname, '../new/AttachmentViewer.tsx') },
+      { find: /^react-pdf$/, replacement: path.resolve(__dirname, 'node_modules/react-pdf/dist/index.js') },
       { find: /^react$/, replacement: path.resolve(__dirname, 'node_modules/react') },
       { find: /^react-dom$/, replacement: path.resolve(__dirname, 'node_modules/react-dom') },
       { find: /^yjs$/, replacement: path.resolve(__dirname, 'node_modules/yjs') },
@@ -36,6 +38,14 @@ export default defineConfig({
       { find: /^@blocknote\/react$/, replacement: path.resolve(__dirname, 'node_modules/@blocknote/react') },
       { find: /^@blocknote\/mantine$/, replacement: path.resolve(__dirname, 'node_modules/@blocknote/mantine') },
     ],
+  },
+  build: {
+    rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, 'index.html'),
+        attachmentViewer: path.resolve(__dirname, 'attachment-viewer.html'),
+      },
+    },
   },
   server: {
     proxy: {

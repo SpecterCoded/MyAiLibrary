@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { Mic, FileText, HelpCircle, BookOpen, Network, MessageCircle, AlertCircle, ExternalLink } from "lucide-react";
+import { Mic, FileText, HelpCircle, BookOpen, Network, MessageCircle, ExternalLink } from "lucide-react";
 import { ToastContainer, type ToastMessage } from "../FileExplorer/Toast";
 import TranscriptTab from "./TranscriptTab";
 import SummaryTab from "./SummaryTab";
@@ -21,6 +21,7 @@ interface AudioPlayerAppProps {
   initialTime?: number;
   onBack?: () => void;
   onTitleChange?: (title: string) => void;
+  isActive?: boolean;
 }
 
 function convertSrtToVtt(srtText: string): string {
@@ -39,11 +40,10 @@ function resolvePendingReindexState(value: unknown): boolean | string {
   return false;
 }
 
-export default function AudioPlayerApp({ embedded = false, mediaUrl, resourceId: propResourceId, initialTime, onBack, onTitleChange }: AudioPlayerAppProps = {}) {
+export default function AudioPlayerApp({ embedded = false, mediaUrl, resourceId: propResourceId, initialTime, onBack, onTitleChange, isActive = true }: AudioPlayerAppProps = {}) {
   const [activeTab, setActiveTab] = useState<"transcript" | "summary" | "quiz" | "flashcard" | "mindmap" | "notes" | "ask">("transcript");
   const [isRecording, setIsRecording] = useState<boolean>(false);
   const [timerSeconds, setTimerSeconds] = useState<number>(0);
-  const [showInfoBanner, setShowInfoBanner] = useState<boolean>(true);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [subtitlesVttUrl, setSubtitlesVttUrl] = useState<string | null>(null);
   const [activeCue, setActiveCue] = useState<ActiveTranscriptCue | null>(null);
@@ -254,6 +254,7 @@ export default function AudioPlayerApp({ embedded = false, mediaUrl, resourceId:
 
   // Poll for pipeline status when processing
   useEffect(() => {
+    if (!isActive) return;
     if (processingStatus === "ready" || !resourceId || !token) return;
 
     const intervalId = setInterval(() => {
@@ -278,7 +279,7 @@ export default function AudioPlayerApp({ embedded = false, mediaUrl, resourceId:
     }, 3000);
 
     return () => clearInterval(intervalId);
-  }, [processingStatus, resourceId, token]);
+  }, [isActive, processingStatus, resourceId, token]);
 
   // Sync Timer with Audio Current Time and Playback State
   useEffect(() => {
@@ -503,24 +504,6 @@ export default function AudioPlayerApp({ embedded = false, mediaUrl, resourceId:
 
         {/* Content area overlapping header like video player */}
         <div className="flex-1 flex flex-col overflow-hidden relative z-10 -mt-4 bg-white dark:bg-[#1e1f22] rounded-t-[20px] shadow-sm">
-
-        {/* Floating Developer Instruction Banner */}
-        {showInfoBanner && (
-          <div className="bg-neutral-50 px-8 py-4 border-b border-neutral-100 flex items-center justify-between animate-fade-in shrink-0">
-            <div className="flex items-center space-x-2.5">
-              <AlertCircle className="w-5 h-5 text-neutral-600 animate-pulse-slow font-medium shrink-0" />
-              <p className="text-xs md:text-sm font-semibold text-neutral-650 leading-relaxed">
-                Study tools interactive sync. Click tabs for <strong>Executive Summary</strong>, <strong>AI Chat assistant</strong>, <strong>Flipping flashcards</strong>, <strong>Mind maps</strong>, and <strong>Interactive Quizzes</strong>!
-              </p>
-            </div>
-            <button
-              onClick={() => setShowInfoBanner(false)}
-              className="text-xs font-bold text-neutral-400 hover:text-neutral-800 cursor-pointer select-none whitespace-nowrap ml-4"
-            >
-              Dismiss
-            </button>
-          </div>
-        )}
 
         {/* Tab Selection Area inside the white body */}
         <div className="px-8 pt-7 pb-2 flex justify-center shrink-0">

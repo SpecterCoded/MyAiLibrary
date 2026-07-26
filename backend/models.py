@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, Float
+from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, Text, Float
 
 from database import Base
 
@@ -477,8 +477,12 @@ class UserSession(Base):
 
 class SemanticCache(Base):
     __tablename__ = "semantic_cache"
+    __table_args__ = (
+        Index("ix_semantic_cache_user_resource", "user_id", "resource_id"),
+    )
 
     id = Column(String, primary_key=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False)
     resource_id = Column(String, ForeignKey("resources.id"), nullable=True)
     rewritten_question = Column(Text, nullable=False)
     embedding_vector = Column(Text, nullable=False)

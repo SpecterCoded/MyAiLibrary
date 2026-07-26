@@ -23,6 +23,7 @@ interface VideoPlayerAppProps {
   initialTime?: number;
   onBack?: () => void;
   onTitleChange?: (title: string) => void;
+  isActive?: boolean;
 }
 
 function convertSrtToVtt(srtText: string): string {
@@ -41,7 +42,7 @@ function resolvePendingReindexState(value: unknown): boolean | string {
   return false;
 }
 
-export default function VideoPlayerApp({ embedded = false, mediaUrl, resourceId: propResourceId, initialTime, onBack, onTitleChange }: VideoPlayerAppProps = {}) {
+export default function VideoPlayerApp({ embedded = false, mediaUrl, resourceId: propResourceId, initialTime, onBack, onTitleChange, isActive = true }: VideoPlayerAppProps = {}) {
   const [activeTab, setActiveTab] = useState('Transcript');
   const [isAiOpen, setIsAiOpen] = useState(false);
   const [pendingAiQuery, setPendingAiQuery] = useState('');
@@ -217,6 +218,7 @@ export default function VideoPlayerApp({ embedded = false, mediaUrl, resourceId:
 
   // Poll for pipeline status when processing
   useEffect(() => {
+    if (!isActive) return;
     if (processingStatus === "ready" || !resourceId || !token) return;
 
     const intervalId = setInterval(() => {
@@ -246,7 +248,7 @@ export default function VideoPlayerApp({ embedded = false, mediaUrl, resourceId:
     }, 3000);
 
     return () => clearInterval(intervalId);
-  }, [processingStatus, resourceId, token]);
+  }, [isActive, processingStatus, resourceId, token]);
 
   const startResizing = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -528,6 +530,8 @@ export default function VideoPlayerApp({ embedded = false, mediaUrl, resourceId:
             onSeekComplete={() => setSeekTime(null)}
             starredLines={starredLines}
             onToggleStar={toggleStar}
+            resourceId={resourceId}
+            token={token}
           />
 
         </div>

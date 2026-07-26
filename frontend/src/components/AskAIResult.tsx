@@ -1,5 +1,8 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import type { Components } from 'react-markdown';
 
 // ---------- Types ----------
 interface CitationSource {
@@ -14,6 +17,7 @@ interface CitationSource {
 
 interface AskAIResultProps {
   query: string;
+  submissionId: number;
   onClose: () => void;
   onLoadingChange?: (loading: boolean) => void;
 }
@@ -60,99 +64,225 @@ const FILE_ICONS: Record<string, React.ReactNode> = {
   ),
 };
 
+function stripHomeCitations(text: string): string {
+  return text
+    .replace(/\s*\(\s*(?:\[\d+(?:\s*,\s*\d+)*\]|(?:chunk|source|doc(?:ument)?)\s+\d+)\s*\)/gi, '')
+    .replace(/\s*\[(?:\d+(?:\s*,\s*\d+)*|(?:chunk|source|doc(?:ument)?)\s+\d+)\]/gi, '')
+    .replace(/(?:^|\n)\s*(?:sources?|citations?)\s*:\s*(?:\n\s*[-*]?\s*.+)+$/gi, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+const HOME_MARKDOWN_COMPONENTS: Components = {
+  p: ({ children }) => (
+    <p className="mb-3 last:mb-0 text-[13.5px] font-medium leading-7 text-slate-600 dark:text-slate-200">
+      {children}
+    </p>
+  ),
+  strong: ({ children }) => (
+    <strong className="font-extrabold text-slate-900 dark:text-white">{children}</strong>
+  ),
+  em: ({ children }) => (
+    <em className="italic text-slate-700 dark:text-slate-200">{children}</em>
+  ),
+  ul: ({ children }) => (
+    <ul className="my-3 ml-5 list-disc space-y-1.5 text-[13.5px] leading-7 text-slate-600 dark:text-slate-200">
+      {children}
+    </ul>
+  ),
+  ol: ({ children }) => (
+    <ol className="my-3 ml-5 list-decimal space-y-1.5 text-[13.5px] leading-7 text-slate-600 dark:text-slate-200">
+      {children}
+    </ol>
+  ),
+  li: ({ children }) => <li className="pl-1">{children}</li>,
+  blockquote: ({ children }) => (
+    <blockquote className="my-3 border-l-4 border-blue-500/70 bg-blue-50/70 px-4 py-2.5 text-slate-700 dark:border-indigo-400/70 dark:bg-white/5 dark:text-slate-200">
+      {children}
+    </blockquote>
+  ),
+  code: ({ children }) => (
+    <code className="rounded-md border border-slate-200/80 bg-slate-100 px-1.5 py-0.5 text-[12px] font-semibold text-slate-800 dark:border-white/10 dark:bg-slate-950/60 dark:text-indigo-100">
+      {children}
+    </code>
+  ),
+  a: ({ children, href }) => (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className="font-bold text-blue-600 underline-offset-2 hover:underline dark:text-indigo-300"
+    >
+      {children}
+    </a>
+  ),
+};
+
 // ---------- Typewriter hook ----------
+// Returns `rendered` (for ReactMarkdown, updates ~every 150ms) and `done`.
+// Internally advances characters at `speed` ms but only flushes to `rendered`
+// when either enough chars accumulated or a natural pause (newline / punctuation)
+// is hit — this keeps markdown re-parsing infrequent and avoids the "I" flicker.
 function useTypewriter(text: string, speed: number = 14) {
-  const [displayed, setDisplayed] = useState('');
+  const [rendered, setRendered] = useState('');
   const [done, setDone] = useState(false);
+  const textRef = useRef(text);
+  const bufferRef = useRef('');
 
   useEffect(() => {
-    setDisplayed('');
+    if (textRef.current === text && rendered) return;
+    textRef.current = text;
+    setRendered('');
     setDone(false);
+    bufferRef.current = '';
     if (!text) return;
 
     let i = 0;
+    const FLUSH_INTERVAL = 150; // ms between ReactMarkdown re-parses
+    let lastFlush = Date.now();
+
     const interval = setInterval(() => {
-      setDisplayed(text.slice(0, i + 1));
       i++;
+      bufferRef.current = text.slice(0, i);
+
+      const now = Date.now();
+      const char = text[i - 1] || '';
+      const isPause = /[\n\r.!?;:,]/.test(char);
+      const enoughTime = now - lastFlush >= FLUSH_INTERVAL;
+
+      if (isPause || enoughTime || i >= text.length) {
+        setRendered(bufferRef.current);
+        lastFlush = now;
+      }
+
       if (i >= text.length) {
         clearInterval(interval);
+        setRendered(text); // final flush — guaranteed up-to-date
         setDone(true);
       }
     }, speed);
 
     return () => clearInterval(interval);
-  }, [text, speed]);
+  }, [text, speed]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { displayed, done };
+  return { displayed: rendered, done };
 }
 
 // ---------- Main component ----------
-export default function AskAIResult({ query, onClose, onLoadingChange }: AskAIResultProps) {
+export default function AskAIResult({ query, submissionId, onClose, onLoadingChange }: AskAIResultProps) {
   const [answer, setAnswer] = useState('');
   const [sources, setSources] = useState<CitationSource[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const latestRequestIdRef = useRef(0);
+  const onLoadingChangeRef = useRef(onLoadingChange);
+  onLoadingChangeRef.current = onLoadingChange;
 
-  const { displayed: typedAnswer, done: typingDone } = useTypewriter(answer, 14);
+  const cleanAnswer = stripHomeCitations(answer);
+  const { displayed: typedAnswer, done: typingDone } = useTypewriter(cleanAnswer, 14);
 
-  // Deduplicate by resource_id + chunk_index so every unique chunk shows separately
-  const uniqueSources = sources.reduce<CitationSource[]>((acc, src) => {
-    const key = `${src.resource_id ?? ''}_${src.chunk_index}`;
-    if (!acc.find(s => `${s.resource_id ?? ''}_${s.chunk_index}` === key)) {
-      acc.push(src);
-    }
-    return acc;
-  }, []);
+  useEffect(() => {
+    const trimmedQuery = query.trim();
+    if (!trimmedQuery) return;
 
-  const fetchAnswer = useCallback(async () => {
-    if (!query.trim()) return;
+    const controller = new AbortController();
+    const requestId = latestRequestIdRef.current + 1;
+    latestRequestIdRef.current = requestId;
 
     setLoading(true);
-    onLoadingChange?.(true);
+    onLoadingChangeRef.current?.(true);
     setError(null);
     setAnswer('');
     setSources([]);
 
-    try {
-      const token = localStorage.getItem('access_token');
-      const res = await fetch('/library/ask', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ question: query, concise: true }),
-      });
+    const fetchAnswer = async () => {
+      try {
+        const token = localStorage.getItem('access_token');
+        const res = await fetch('/library/ask', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ question: trimmedQuery, concise: true }),
+          signal: controller.signal,
+        });
 
-      if (!res.ok) {
-        const errBody = await res.json().catch(() => ({}));
-        throw new Error(errBody?.detail ?? `Error ${res.status}`);
+        if (!res.ok) {
+          const errBody = await res.json().catch(() => ({}));
+          throw new Error(errBody?.detail ?? `Error ${res.status}`);
+        }
+
+        const data = await res.json();
+        if (controller.signal.aborted || latestRequestIdRef.current !== requestId) return;
+
+        setAnswer(data.answer ?? '');
+        setSources(data.sources ?? []);
+      } catch (e: unknown) {
+        if (controller.signal.aborted || latestRequestIdRef.current !== requestId) return;
+
+        const msg = e instanceof Error ? e.message : 'Something went wrong.';
+        setError(msg);
+      } finally {
+        if (!controller.signal.aborted && latestRequestIdRef.current === requestId) {
+          setLoading(false);
+          onLoadingChangeRef.current?.(false);
+        }
       }
+    };
 
-      const data = await res.json();
-      setAnswer(data.answer ?? '');
-      setSources(data.sources ?? []);
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Something went wrong.';
-      setError(msg);
-    } finally {
-      setLoading(false);
-      onLoadingChange?.(false);
-    }
-  }, [query]);
-
-  useEffect(() => {
-    fetchAnswer();
-  }, [fetchAnswer]);
+    void fetchAnswer();
+    return () => controller.abort();
+  }, [query, submissionId]);
 
   // Copy answer
   const [copied, setCopied] = useState(false);
   function copyAnswer() {
-    if (!answer) return;
-    navigator.clipboard.writeText(answer);
+    if (!cleanAnswer) return;
+    navigator.clipboard.writeText(cleanAnswer);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  }
+
+  function openSource(src: CitationSource) {
+    if (!src.resource_id) return;
+    const iconType = getFileIcon(src.resource_path || src.resource_title);
+    const title = src.resource_title ?? src.resource_path?.split(/[/\\]/).pop() ?? 'Source';
+    const fileUrl = `${window.location.origin}/resources/${src.resource_id}/file`;
+
+    if (iconType === 'video' || iconType === 'audio') {
+      window.dispatchEvent(new CustomEvent('app-navigate', {
+        detail: {
+          view: iconType === 'audio' ? 'audio-player' : 'video-player',
+          title,
+          openInNewTab: true,
+          params: {
+            mediaUrl: fileUrl,
+            resourceId: src.resource_id,
+            playlistName: title,
+          },
+        },
+      }));
+      return;
+    }
+
+    if (iconType === 'pdf' && window.desktopAttachments) {
+      window.desktopAttachments.openViewer({
+        attachments: [{
+          id: src.resource_id,
+          kind: 'pdf',
+          name: title,
+          url: fileUrl,
+          mimeType: 'application/pdf',
+        }],
+        activeIndex: 0,
+      });
+      return;
+    }
+
+    window.open(fileUrl, '_blank');
   }
 
   return (
@@ -258,28 +388,24 @@ export default function AskAIResult({ query, onClose, onLoadingChange }: AskAIRe
                     initial={{ opacity: 0, y: 6 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.15, duration: 0.25 }}
-                    className="bg-white border border-slate-200/50 rounded-xl p-3 flex items-start gap-3.5 shadow-sm"
+                    className="bg-white border border-slate-200/50 rounded-2xl p-4 flex items-start gap-3.5 shadow-sm dark:border-white/10 dark:bg-white/[0.06]"
                   >
-                    <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                    <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0 dark:bg-indigo-500/15 dark:text-indigo-300">
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.286L13 21l-2.286-6.857L5 12l5.714-2.286L13 3z" />
                       </svg>
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="text-[13px] font-medium text-slate-600 leading-relaxed whitespace-pre-wrap">
-                        {typedAnswer}
-                        {!typingDone && (
-                          <span
-                            className="inline-block w-0.5 h-4 bg-blue-500 ml-0.5 align-middle"
-                            style={{ animation: 'blink 0.8s step-end infinite' }}
-                          />
-                        )}
-                      </p>
+                      <div className="home-ask-ai-markdown">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={HOME_MARKDOWN_COMPONENTS}>
+                          {typedAnswer}
+                        </ReactMarkdown>
+                      </div>
                     </div>
                   </motion.div>
 
                   {/* Chunk excerpt cards — appear after answer finishes typing */}
-                  {typingDone && uniqueSources.map((src, i) => {
+                  {false && typingDone && sources.map((src, i) => {
                     return (
                       <div
                         key={`chunk-${src.resource_id}-${src.chunk_index}`}
@@ -313,8 +439,8 @@ export default function AskAIResult({ query, onClose, onLoadingChange }: AskAIRe
                 return acc;
               }, []);
               return (
-                <div className="space-y-3.5 lg:border-l lg:border-slate-200/60 lg:pl-6 min-w-0 select-none flex flex-col">
-                  <h4 className="text-[13px] font-bold text-slate-700">
+                <div className="space-y-3.5 lg:border-l lg:border-slate-200/60 lg:pl-6 min-w-0 select-none flex flex-col dark:lg:border-white/10">
+                  <h4 className="text-[13px] font-bold text-slate-700 dark:text-slate-200">
                     Sources from your library
                     {uniqueFiles.length > 0 && (
                       <span className="ml-1.5 text-slate-400 font-medium">({uniqueFiles.length})</span>
@@ -343,47 +469,41 @@ export default function AskAIResult({ query, onClose, onLoadingChange }: AskAIRe
                       </div>
                     ) : (
                       uniqueFiles.map((src, i) => {
-                        const iconType = getFileIcon(src.resource_path);
+                        const iconType = getFileIcon(src.resource_path || src.resource_title);
                         const title = src.resource_title ?? src.resource_path?.split(/[/\\]/).pop() ?? `Source ${i + 1}`;
                         const subtitle = src.resource_path
                           ? src.resource_path.split(/[/\\]/).pop()
                           : title;
                         return (
-                          <motion.button
+                          <motion.div
                             key={`file-${src.resource_id}`}
                             initial={{ opacity: 0, x: 8 }}
                             animate={{ opacity: 1, x: 0 }}
                             transition={{ delay: 0.2 + i * 0.06, duration: 0.2 }}
-                            onClick={() => {
-                              const fileUrl = `${window.location.origin}/resources/${src.resource_id}/file`;
-                              const isVideo = iconType === 'video';
-                              const isAudio = iconType === 'audio';
-
-                              if (isVideo || isAudio) {
-                                window.dispatchEvent(new CustomEvent('app-navigate', {
-                                  detail: {
-                                    view: isAudio ? 'audio-player' : 'video-player',
-                                    title,
-                                    params: {
-                                      mediaUrl: fileUrl,
-                                      resourceId: src.resource_id,
-                                    },
-                                  },
-                                }));
-                              } else {
-                                window.open(fileUrl, '_blank');
-                              }
-                            }}
-                            className="w-full text-left bg-white border border-slate-200/50 rounded-xl p-3 flex items-center gap-3 shadow-xs hover:border-slate-300 hover:bg-slate-50 transition-colors cursor-pointer"
+                            className="w-full text-left bg-white border border-slate-200/50 rounded-xl p-3 flex items-center gap-3 shadow-xs dark:border-white/10 dark:bg-white/[0.06]"
                           >
                             <div className="w-8 h-8 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center shrink-0 border border-blue-100/10">
                               {FILE_ICONS[iconType]}
                             </div>
                             <div className="truncate flex-1">
-                              <h5 className="text-xs font-bold text-slate-800 truncate leading-tight">{title}</h5>
-                              <p className="text-[9.5px] text-slate-400 font-medium mt-0.5 truncate">{subtitle}</p>
+                              <h5 className="text-xs font-bold text-slate-800 truncate leading-tight dark:text-slate-100">{title}</h5>
+                              <p className="text-[9.5px] text-slate-400 font-medium mt-0.5 truncate dark:text-slate-500">{subtitle}</p>
                             </div>
-                          </motion.button>
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                openSource(src);
+                              }}
+                              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200/70 bg-slate-50 text-slate-500 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600 dark:border-white/10 dark:bg-slate-900/50 dark:text-slate-300 dark:hover:border-indigo-400/40 dark:hover:bg-indigo-500/15 dark:hover:text-indigo-200"
+                              title={`Open ${title}`}
+                              aria-label={`Open ${title}`}
+                            >
+                              <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M7 17L17 7M10 7h7v7" />
+                              </svg>
+                            </button>
+                          </motion.div>
                         );
                       })
                     )}
@@ -404,7 +524,6 @@ export default function AskAIResult({ query, onClose, onLoadingChange }: AskAIRe
       </div>
 
       <style>{`
-        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
         @keyframes chunkFadeIn {
           from { opacity: 0; transform: translateY(6px); }
           to   { opacity: 1; transform: translateY(0); }

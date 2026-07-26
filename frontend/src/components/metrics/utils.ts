@@ -262,6 +262,10 @@ export function buildRequestRecords(entries: MetricEntry[]): RequestRecord[] {
         latencyMs: entry.latency_ms || 0,
         avgRerank: isNumber(entry.avg_rerank) ? entry.avg_rerank : null,
         topRerank: isNumber(entry.top_rerank) ? entry.top_rerank : null,
+        rerankExecuted: entry.rerank_executed === true,
+        hallucinationChecked: entry.hallucination_checked === true,
+        hallucinationCheckStatus: entry.hallucination_check_status || null,
+        responsePassed: typeof entry.response_passed === 'boolean' ? entry.response_passed : null,
         complexity: entry.complexity || null,
         parentExpansionUsed: parentUsed,
         hierarchicalUsed: hierarchyUsed,
@@ -290,9 +294,17 @@ export function buildSummary(
   entries: MetricEntry[],
   aiUsageEntries: AiUsageEntry[] = [],
 ): DashboardSummary {
-  const successRate = requests.length
-    ? (requests.filter((request) => request.errorCount === 0 && (request.confidence ?? 0) >= 0.5).length / requests.length) * 100
-    : 0;
+  const responseAssessedRequests = requests.filter((request) => request.responsePassed != null);
+  const successRate = responseAssessedRequests.length
+    ? (responseAssessedRequests.filter((request) => request.responsePassed).length / responseAssessedRequests.length) * 100
+    : null;
+  const hallucinationAssessedRequests = requests.filter(
+    (request) => request.hallucinationChecked
+      && ['passed', 'issues_detected'].includes(request.hallucinationCheckStatus || ''),
+  );
+  const rerankAssessedRequests = requests.filter(
+    (request) => request.rerankExecuted && request.avgRerank != null,
+  );
 
   const strategyMap = new Map<string, number>();
   for (const request of requests) {
@@ -342,7 +354,7 @@ export function buildSummary(
 
   return {
     totalRequests: requests.length,
-    successRate: round(successRate, 1) || 0,
+    successRate: round(successRate, 1),
     averageConfidence: round(average(requests.map((request) => request.confidence)), 2) || 0,
     averageResponseTime: round(average(requests.map((request) => request.latencyMs)), 1) || 0,
     cacheHitRate: round(
@@ -350,10 +362,15 @@ export function buildSummary(
       1,
     ) || 0,
     hallucinationRate: round(
-      requests.length ? (requests.filter((request) => request.hallucinations > 0).length / requests.length) * 100 : 0,
+      hallucinationAssessedRequests.length
+        ? (hallucinationAssessedRequests.filter((request) => request.hallucinations > 0).length / hallucinationAssessedRequests.length) * 100
+        : null,
       1,
-    ) || 0,
-    averageRetrievalQuality: round(average(requests.map((request) => request.avgRerank != null ? request.avgRerank * 100 : null)), 1),
+    ),
+    averageRetrievalQuality: round(
+      average(rerankAssessedRequests.map((request) => (request.avgRerank as number) * 100)),
+      1,
+    ),
     tokenUsage: totalTokens || null,
     promptTokens: promptTokens || null,
     completionTokens: completionTokens || null,
@@ -435,14 +452,18 @@ export function formatCompactNumber(value: number | null | undefined, suffix = '
   return `${Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(value)}${suffix}`;
 }
 
-export function formatCurrency(value: number | null | undefined): string {
+export function formatCurrency(value: number | null | undefined, currency = 'USD'): string {
   if (!isNumber(value)) return 'n/a';
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: value < 1 ? 4 : 2,
-    maximumFractionDigits: value < 1 ? 4 : 2,
-  }).format(value);
+  try {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency,
+      minimumFractionDigits: value < 1 ? 4 : 2,
+      maximumFractionDigits: value < 1 ? 4 : 2,
+    }).format(value);
+  } catch {
+    return `${currency} ${value.toFixed(value < 1 ? 4 : 2)}`;
+  }
 }
 
 export function formatPercent(value: number | null | undefined): string {

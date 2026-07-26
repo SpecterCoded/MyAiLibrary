@@ -108,6 +108,7 @@ from services.processing_service import (
     save_quiz,
 )
 from services.transcription_service import transcribe_audio
+from services.url_utils import strip_api_suffix
 from embedding_service import (
     answer_question,
     build_context,
@@ -183,6 +184,8 @@ from sqlalchemy.orm import Session
 from database import DATABASE_PATH, SessionLocal, engine
 from core.schema_migrations import (
     LEGACY_SCHEMA_VERSION,
+    SEMANTIC_CACHE_OWNERSHIP_VERSION,
+    apply_semantic_cache_ownership_migration,
     complete_schema_migration,
     prepare_schema_migration,
     schema_migration_connection,
@@ -539,6 +542,25 @@ with schema_migration_connection(engine, migration_required) as conn:
 
 if migration_required:
     complete_schema_migration(engine, DATABASE_PATH, LEGACY_SCHEMA_VERSION)
+
+# Semantic cache rows originally had no owner. Resource-backed rows could be
+# inferred through resources, but global rows cannot be attributed safely, so
+# discard the disposable legacy cache and recreate it with required ownership.
+semantic_cache_migration_required = prepare_schema_migration(
+    engine,
+    DATABASE_PATH,
+    SEMANTIC_CACHE_OWNERSHIP_VERSION,
+)
+if semantic_cache_migration_required:
+    with schema_migration_connection(engine, True) as conn:
+        apply_semantic_cache_ownership_migration(conn)
+        conn.commit()
+
+    complete_schema_migration(
+        engine,
+        DATABASE_PATH,
+        SEMANTIC_CACHE_OWNERSHIP_VERSION,
+    )
 
 app = FastAPI()
 
@@ -2109,6 +2131,38 @@ def startup_queue_worker():
     QueueWorker.start()
     DownloaderWorker.start()
     start_periodic_sync()
+    start_wtp_model_warmup()
+
+
+def start_wtp_model_warmup():
+    """Warm the configured local WTP model once at backend startup.
+
+    This is intentionally best-effort and backgrounded: a missing/broken model
+    should still be reported by the normal Settings test / Ask AI error path,
+    but a valid model will already be resident by the time the user asks.
+    """
+    def worker():
+        model_path = None
+        try:
+            db = SessionLocal()
+            try:
+                settings = (
+                    db.query(UserSetting)
+                    .filter(UserSetting.wtp_model_path.isnot(None), UserSetting.wtp_model_path != "")
+                    .first()
+                )
+                model_path = getattr(settings, "wtp_model_path", None) if settings else None
+            finally:
+                db.close()
+
+            from services.sentence_segmentation_service import warmup_wtp_model
+
+            if warmup_wtp_model(model_path):
+                sys_logger.info("WTP Canine model warmed up successfully.")
+        except Exception as exc:
+            sys_logger.warning(f"WTP Canine startup warmup skipped: {exc}")
+
+    threading.Thread(target=worker, name="wtp-canine-warmup", daemon=True).start()
 
 
 # ==================================================
@@ -5075,6 +5129,98 @@ def get_resource_attachments(
         }
 
     return [serialize(a) for a in items]
+
+
+def _resolve_attachment_file_path(attachment: Attachment) -> str | None:
+    if not attachment.file_path:
+        return None
+
+    candidate_paths = [
+        attachment.file_path,
+        os.path.join(_BACKEND_DIR, attachment.file_path),
+        os.path.join(os.path.dirname(_BACKEND_DIR), attachment.file_path),
+    ]
+    resolved_path = next((path for path in candidate_paths if os.path.exists(path)), None)
+    return os.path.abspath(resolved_path) if resolved_path else None
+
+
+@app.get("/attachments/{attachment_id}/file")
+def get_attachment_file(
+    attachment_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    attachment = db.query(Attachment).filter(Attachment.id == attachment_id).first()
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+
+    resource = _get_owned_resource(db, attachment.resource_id, current_user.id)
+    if not resource:
+        raise HTTPException(status_code=404, detail="Resource not found")
+
+    resolved_path = _resolve_attachment_file_path(attachment)
+    if not resolved_path:
+        raise HTTPException(status_code=404, detail="Attachment file not found")
+
+    return FileResponse(resolved_path)
+
+
+@app.get("/attachments/{attachment_id}/local-path")
+def get_attachment_local_path(
+    attachment_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    attachment = db.query(Attachment).filter(Attachment.id == attachment_id).first()
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+
+    resource = _get_owned_resource(db, attachment.resource_id, current_user.id)
+    if not resource:
+        raise HTTPException(status_code=404, detail="Resource not found")
+
+    resolved_path = _resolve_attachment_file_path(attachment)
+    if not resolved_path:
+        raise HTTPException(status_code=404, detail="Attachment file not found")
+
+    return {"path": resolved_path}
+
+
+@app.delete("/attachments/{attachment_id}")
+def delete_attachment(
+    attachment_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    attachment = db.query(Attachment).filter(Attachment.id == attachment_id).first()
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+
+    # Verify ownership via the resource
+    resource = _get_owned_resource(db, attachment.resource_id, current_user.id)
+    if not resource:
+        raise HTTPException(status_code=404, detail="Resource not found")
+
+    db.delete(attachment)
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/playlists/{playlist_id}/resources-folder")
+def get_resources_folder(
+    playlist_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    folder = db.query(Folder).filter(
+        Folder.name == "Resources",
+        Folder.playlist_id == playlist_id,
+        Folder.user_id == current_user.id,
+        or_(Folder.parent_id.is_(None), Folder.parent_id == "")
+    ).first()
+    if not folder:
+        raise HTTPException(status_code=404, detail="Resources folder not found")
+    return {"folder_id": folder.id, "name": folder.name}
 
 
 # ==================================================
@@ -9305,26 +9451,23 @@ async def test_ai_connection_main(
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
     try:
+        payload, extra_headers = {}, {}
         if service_type in {"chat", "knowledge"}:
-            resp = http_requests.post(
-                f"{base_url}/chat/completions",
-                json={"model": model, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1},
-                headers=headers, timeout=15,
-            )
+            payload = {"model": model, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1}
+            extra_headers = {}
         elif service_type == "embedding":
-            resp = http_requests.post(
-                f"{base_url}/embeddings",
-                json={"model": model, "input": "test"},
-                headers=headers, timeout=15,
-            )
+            payload = {"model": model, "input": "test"}
+            extra_headers = {}
         elif service_type == "reranker":
-            resp = http_requests.post(
-                base_url,
-                json={"model": model, "query": "test", "documents": ["test document"], "top_n": 1},
-                headers={**headers, "Accept": "application/json"}, timeout=15,
-            )
+            payload = {"model": model, "query": "test", "documents": ["test document"], "top_n": 1}
+            extra_headers = {"Accept": "application/json"}
         else:
             raise HTTPException(status_code=400, detail=f"Unknown connection type: {service_type}")
+        resp = http_requests.post(
+            base_url,
+            json=payload,
+            headers={**headers, **extra_headers}, timeout=15,
+        )
 
         if resp.status_code == 200:
             resp_data = {}
@@ -9413,17 +9556,18 @@ async def test_local_dependency(request: Request, user_id: str = Depends(get_cur
         if missing_fields:
             raise missing_configuration(service=service, stage=stage, settings_section=section, fields=missing_fields)
         if dependency == "wtp":
-            if not os.path.isdir(model_path):
+            from services.sentence_segmentation_service import load_wtp_sat_model, resolve_wtp_model_path
+            resolved_model_path = resolve_wtp_model_path(model_path)
+            if resolved_model_path is None:
                 raise local_path_failure(code="path_not_found", service=service, stage=stage, settings_section=section, path_label="WTP Canine model folder")
             try:
-                from services.sentence_segmentation_service import load_wtp_sat_model
                 with open(os.devnull, "w") as devnull:
                     with contextlib.redirect_stderr(devnull), contextlib.redirect_stdout(devnull):
-                        model = load_wtp_sat_model(model_path)
+                        model = load_wtp_sat_model(resolved_model_path)
                         model.split("This is a test. This is another sentence.")
             except Exception:
                 raise local_path_failure(code="path_not_loadable", service=service, stage=stage, settings_section=section, path_label="WTP Canine model folder")
-            return {"success": True, "message": f"{service} configuration is ready."}
+            return {"success": True, "message": f"{service} configuration is ready.", "normalized_path": str(resolved_model_path)}
         if not os.path.isfile(executable):
             raise local_path_failure(code="path_not_found", service=service, stage=stage, settings_section=section, path_label=f"{service} executable path")
         if model_path and not os.path.isfile(model_path):
@@ -9564,25 +9708,23 @@ def clear_user_cache(
     db: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
 ):
-    """Clear all semantic cache entries for the current user's resources."""
-    from models import SemanticCache, Resource
+    """Clear every semantic cache entry owned by the current user."""
+    from models import SemanticCache
 
-    # Find all resource IDs owned by this user
-    user_resource_ids = [
-        row[0]
-        for row in db.query(Resource.id).filter(Resource.user_id == user_id).all()
-    ]
-
-    if not user_resource_ids:
-        return {"message": "Cache cleared", "deleted": 0}
-
-    # Delete cache entries for those resources
     deleted = (
         db.query(SemanticCache)
-        .filter(SemanticCache.resource_id.in_(user_resource_ids))
+        .filter(SemanticCache.user_id == user_id)
         .delete(synchronize_session=False)
     )
     db.commit()
+
+    try:
+        from services.unified_search_service import _search_cache
+        keys_to_remove = [k for k in _search_cache if k.startswith(user_id)]
+        for k in keys_to_remove:
+            _search_cache.pop(k, None)
+    except Exception:
+        pass
 
     log_user_activity(db, user_id, 'settings', 'Cleared RAG cache', f'Deleted {deleted} entries')
     return {"message": "Cache cleared", "deleted": deleted}
@@ -9612,7 +9754,7 @@ async def test_cost_connection(
 
     # Step 1: Send a minimal chat request to get a request ID
     try:
-        client = OpenAI(base_url=settings.chat_base_url, api_key=settings.chat_api_key, timeout=30.0)
+        client = OpenAI(base_url=strip_api_suffix(settings.chat_base_url), api_key=settings.chat_api_key, timeout=30.0)
         chat_response = client.chat.completions.create(
             model=settings.chat_model or "deepseek/deepseek-v4-flash",
             messages=[{"role": "user", "content": "hi"}],
@@ -9805,7 +9947,7 @@ def fetch_provider_costs(
 
     # Step 1: Send a minimal chat request to get a request ID
     try:
-        client = OpenAI(base_url=settings.chat_base_url, api_key=settings.chat_api_key, timeout=30.0)
+        client = OpenAI(base_url=strip_api_suffix(settings.chat_base_url), api_key=settings.chat_api_key, timeout=30.0)
         chat_response = client.chat.completions.create(
             model=settings.chat_model or "deepseek/deepseek-v4-flash",
             messages=[{"role": "user", "content": "hi"}],
@@ -10246,17 +10388,18 @@ def download_whisper_model(model: str, dest_path: str = ""):
     MAX_RETRIES = 5
 
     def generate():
-        if not dest_path and os.getenv("MYAI_DESKTOP_MODE", "0").lower() in ("1", "true", "yes"):
+        target_dest_path = dest_path
+        if not target_dest_path and os.getenv("MYAI_DESKTOP_MODE", "0").lower() in ("1", "true", "yes"):
             from core.paths import MODELS_DIR
-            dest_path = str(MODELS_DIR / "whisper")
-            os.makedirs(dest_path, exist_ok=True)
-        if not dest_path:
+            target_dest_path = str(MODELS_DIR / "whisper")
+            os.makedirs(target_dest_path, exist_ok=True)
+        if not target_dest_path:
             yield f"data: {json.dumps({'error': 'Destination folder is required.'})}\n\n"
             return
-        if os.path.isdir(dest_path):
-            final_path = os.path.join(dest_path, model)
+        if os.path.isdir(target_dest_path):
+            final_path = os.path.join(target_dest_path, model)
         else:
-            final_path = dest_path
+            final_path = target_dest_path
 
         last_percent = -1
         for attempt in range(1, MAX_RETRIES + 1):
@@ -10355,18 +10498,19 @@ def download_wtp_model(model: str = "sat-3l", dest_path: str = ""):
         if not repo_id:
             yield f"data: {json.dumps({"error": "Unknown WTP Canine model."})}\n\n"
             return
-        if not dest_path and os.getenv("MYAI_DESKTOP_MODE", "0").lower() in ("1", "true", "yes"):
+        target_dest_path = dest_path
+        if not target_dest_path and os.getenv("MYAI_DESKTOP_MODE", "0").lower() in ("1", "true", "yes"):
             from core.paths import MODELS_DIR
-            dest_path = str(MODELS_DIR / "wtp")
-        if not dest_path:
+            target_dest_path = str(MODELS_DIR / "wtp")
+        if not target_dest_path:
             yield f"data: {json.dumps({'error': 'Destination folder is required.'})}\n\n"
             return
 
         try:
             from huggingface_hub import snapshot_download
 
-            os.makedirs(dest_path, exist_ok=True)
-            local_dir = os.path.join(dest_path, model)
+            os.makedirs(target_dest_path, exist_ok=True)
+            local_dir = os.path.join(target_dest_path, model)
             tokenizer_dir = os.path.join(local_dir, "tokenizer")
 
             result = {"path": None, "error": None}

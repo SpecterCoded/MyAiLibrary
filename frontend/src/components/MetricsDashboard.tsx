@@ -283,7 +283,13 @@ export default function MetricsDashboard() {
   };
 
   const tabs: DashboardTab[] = evaluationModeEnabled ? ['overview', 'diagnostics', 'evaluation'] : ['overview', 'diagnostics'];
-  const latestHealth = summary.successRate >= 80 ? 'Healthy' : summary.successRate >= 55 ? 'Watch' : 'Needs attention';
+  const latestHealth = summary.successRate == null
+    ? 'Awaiting data'
+    : summary.successRate >= 80
+      ? 'Healthy'
+      : summary.successRate >= 55
+        ? 'Watch'
+        : 'Needs attention';
   const machineTimeZone = getMachineTimeZone();
 
   return (
@@ -303,10 +309,10 @@ export default function MetricsDashboard() {
             
             <div className="flex items-center justify-between rounded-xl bg-[#2b4c3b] px-5 py-4 text-white shadow-sm">
               <div className="flex items-center gap-3 text-sm">
-                <span className={`h-2.5 w-2.5 rounded-full ${latestHealth === 'Healthy' ? 'bg-emerald-400' : 'bg-amber-400'} animate-pulse`} />
-                <span className="font-semibold">{latestHealth === 'Healthy' ? 'All systems operational' : 'System needs attention'}</span>
+                <span className={`h-2.5 w-2.5 rounded-full ${latestHealth === 'Healthy' ? 'bg-emerald-400' : latestHealth === 'Awaiting data' ? 'bg-slate-300' : 'bg-amber-400'} animate-pulse`} />
+                <span className="font-semibold">{latestHealth === 'Healthy' ? 'All systems operational' : latestHealth === 'Awaiting data' ? 'Awaiting assessed responses' : 'System needs attention'}</span>
                 <span className="text-white/60">•</span>
-                <span className="text-white/80">Your services are being monitored. {latestHealth === 'Healthy' ? 'No current disruptions detected.' : 'Please review the diagnostics.'}</span>
+                <span className="text-white/80">Your services are being monitored. {latestHealth === 'Healthy' ? 'No current disruptions detected.' : latestHealth === 'Awaiting data' ? 'New telemetry will appear after the next response.' : 'Please review the diagnostics.'}</span>
               </div>
               <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/60">Live update</div>
             </div>
@@ -406,14 +412,14 @@ export default function MetricsDashboard() {
           <div className="space-y-6">
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
               <KpiCard title="Total requests" value={formatCompactNumber(summary.totalRequests)} subtitle="All requests in the selected window" sparkline={performanceSeries} />
-              <KpiCard title="Response pass rate" value={formatPercent(summary.successRate)} subtitle="Heuristic: no errors and confidence >= 0.5" tone={summary.successRate >= 80 ? 'success' : summary.successRate >= 55 ? 'warning' : 'danger'} status={latestHealth} sparkline={confidenceSeries} />
+              <KpiCard title="Response pass rate" value={formatPercent(summary.successRate)} subtitle="Backend-assessed completed responses" tone={summary.successRate == null ? 'default' : summary.successRate >= 80 ? 'success' : summary.successRate >= 55 ? 'warning' : 'danger'} status={latestHealth} sparkline={confidenceSeries} />
               <KpiCard title="Average confidence" value={formatPercent(summary.averageConfidence * 100)} subtitle="Confidence score returned by the existing backend" tone="default" sparkline={confidenceSeries} />
               <KpiCard title="Average response time" value={formatDuration(summary.averageResponseTime)} subtitle="End-to-end request latency" tone="warning" sparkline={performanceSeries} />
               <KpiCard title="Cache hit rate" value={formatPercent(summary.cacheHitRate)} subtitle="Semantic cache effectiveness" tone="success" />
-              <KpiCard title="Hallucination rate" value={formatPercent(summary.hallucinationRate)} subtitle="Requests with at least one detected issue" tone={summary.hallucinationRate < 15 ? 'success' : 'danger'} />
+              <KpiCard title="Hallucination rate" value={formatPercent(summary.hallucinationRate)} subtitle="Checked requests with at least one detected issue" tone={summary.hallucinationRate == null ? 'default' : summary.hallucinationRate < 15 ? 'success' : 'danger'} />
               <KpiCard title="Avg rerank score" value={summary.averageRetrievalQuality != null ? `${summary.averageRetrievalQuality.toFixed(1)}%` : 'n/a'} subtitle="Average rerank score from recorded requests" />
               <KpiCard title="User token usage" value={usageSummary ? formatCompactNumber(usageSummary.used_tokens) : 'n/a'} subtitle="User-visible settled AI usage only" tone="default" />
-              <KpiCard title="Provider wallet" value={walletBalance?.available ? formatCurrency(walletBalance.amount) : 'n/a'} subtitle={walletBalance?.configured ? (walletBalance.message || `${walletBalance.currency || 'USD'} balance from configured provider`) : 'Wallet balance not configured'} tone={walletBalance?.available ? 'success' : 'warning'} />
+              <KpiCard title="Provider wallet" value={walletBalance?.available ? formatCurrency(walletBalance.amount, walletBalance.currency || 'USD') : 'n/a'} subtitle={walletBalance?.configured ? (walletBalance.message || `${walletBalance.currency || 'USD'} balance from configured provider`) : 'Wallet balance not configured'} tone={walletBalance?.available ? 'success' : 'warning'} />
             </div>
 
             <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
@@ -422,7 +428,7 @@ export default function MetricsDashboard() {
                   <InlineStat label="User used tokens" value={usageSummary ? formatCompactNumber(usageSummary.used_tokens) : 'n/a'} />
                   <InlineStat label="Provider tokens" value={usageSummary ? formatCompactNumber(usageSummary.provider_total_tokens) : 'n/a'} />
                   <InlineStat label="Provider cost" value={usageSummary ? formatCurrency(usageSummary.provider_total_cost_usd || 0) : 'n/a'} />
-                  <InlineStat label="Wallet balance" value={walletBalance?.available ? formatCurrency(walletBalance.amount) : 'n/a'} />
+                  <InlineStat label="Wallet balance" value={walletBalance?.available ? formatCurrency(walletBalance.amount, walletBalance.currency || 'USD') : 'n/a'} />
                 </div>
                 <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                   <InlineStat label="25k units burned" value={usageSummary ? usageSummary.units_burned.toFixed(2) : 'n/a'} />

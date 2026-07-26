@@ -1066,6 +1066,9 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
       });
       const data = await res.json();
       if (data.success) {
+        if (dependency === 'wtp' && data.normalized_path) {
+          setWtpModelPath(data.normalized_path);
+        }
         setSuccessMessage(data.message || `${dependency} configuration is ready.`);
       } else {
         setErrorMessage(data.message || data.detail || `${dependency} configuration failed.`);
@@ -1169,10 +1172,10 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
 
   const handleDownloadModel = async (modelFileName: string, displayName?: string) => {
     try {
-      const folderData = window.desktop ? { path: '' } : await selectFolder();
-      if (!window.desktop && !folderData.path) return;
+      const folderData = await selectFolder();
+      if (!folderData.path) return;
 
-      const destPath = folderData.path || '';
+      const destPath = folderData.path;
       const trackName = displayName || modelFileName;
       setDownloadingModel(trackName);
       setDownloadProgress(0);
@@ -1799,10 +1802,10 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
 
                   {/* AI Model Configuration Cards - Accordion */}
                   {[
-                    { label: 'Chat Model', service: 'chat' as const, baseUrl: chatBaseUrl, setBaseUrl: setChatBaseUrl, apiKey: chatApiKey, setApiKey: setChatApiKey, model: chatModel, setModel: setChatModel, defaultUrl: 'https://api.chatqt.com/api/v1', defaultModel: 'deepseek/deepseek-v4-flash', hint: 'Base URL only. The app auto-appends /chat/completions.' },
-                    { label: 'Embedding Model', service: 'embedding' as const, baseUrl: embeddingBaseUrl, setBaseUrl: setEmbeddingBaseUrl, apiKey: embeddingApiKey, setApiKey: setEmbeddingApiKey, model: embeddingModel, setModel: setEmbeddingModel, defaultUrl: 'https://api.chatqt.com/api/v1', defaultModel: 'openai/text-embedding-3-large', hint: 'Base URL only. The app auto-appends /embeddings.' },
+                    { label: 'Chat Model', service: 'chat' as const, baseUrl: chatBaseUrl, setBaseUrl: setChatBaseUrl, apiKey: chatApiKey, setApiKey: setChatApiKey, model: chatModel, setModel: setChatModel, defaultUrl: 'https://api.chatqt.com/api/v1', defaultModel: 'deepseek/deepseek-v4-flash', hint: 'Complete URL — used exactly as entered (e.g., https://api.openai.com/v1/chat/completions).' },
+                    { label: 'Embedding Model', service: 'embedding' as const, baseUrl: embeddingBaseUrl, setBaseUrl: setEmbeddingBaseUrl, apiKey: embeddingApiKey, setApiKey: setEmbeddingApiKey, model: embeddingModel, setModel: setEmbeddingModel, defaultUrl: 'https://api.chatqt.com/api/v1', defaultModel: 'openai/text-embedding-3-large', hint: 'Complete URL — used exactly as entered (e.g., https://api.openai.com/v1/embeddings).' },
                     { label: 'Reranker Model', service: 'reranker' as const, baseUrl: rerankerBaseUrl, setBaseUrl: setRerankerBaseUrl, apiKey: rerankerApiKey, setApiKey: setRerankerApiKey, model: rerankerModel, setModel: setRerankerModel, defaultUrl: 'https://api.cohere.com/v2/rerank', defaultModel: 'rerank-v4.0-fast', hint: 'Complete URL — used exactly as entered.' },
-                    { label: 'Knowledge Model', service: 'knowledge' as const, baseUrl: knowledgeBaseUrl, setBaseUrl: setKnowledgeBaseUrl, apiKey: knowledgeApiKey, setApiKey: setKnowledgeApiKey, model: knowledgeModel, setModel: setKnowledgeModel, defaultUrl: 'https://api.example.com/v1', defaultModel: 'provider/model-name', hint: 'Dedicated chat-completions model used only for global knowledge extraction. All three fields are required.' },
+                    { label: 'Knowledge Model', service: 'knowledge' as const, baseUrl: knowledgeBaseUrl, setBaseUrl: setKnowledgeBaseUrl, apiKey: knowledgeApiKey, setApiKey: setKnowledgeApiKey, model: knowledgeModel, setModel: setKnowledgeModel, defaultUrl: 'https://api.example.com/v1', defaultModel: 'provider/model-name', hint: 'Complete URL — used exactly as entered (e.g., https://api.openai.com/v1/chat/completions). All three fields are required.' },
                   ].map((svc) => {
                     const isOpen = openAiAccordion === svc.service;
                     return (

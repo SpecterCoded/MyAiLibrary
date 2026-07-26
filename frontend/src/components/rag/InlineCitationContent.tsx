@@ -46,6 +46,54 @@ export function hasInlineCitationMarkers(text: string): boolean {
   return /\(\s*(?:\[(\d+)\]|([Cc]hunk)\s+(\d+))\s*\)|\[(\d+)\]|\b([Cc]hunk)\s+(\d+)\b/.test(text);
 }
 
+/**
+ * Normalize timestamp syntax occasionally improvised by an LLM into the
+ * small, documented set understood by the rich-text renderer.
+ *
+ * Examples:
+ *   [| 00:10-00:18]       -> [00:10-00:18]
+ *   [00:10 | 00:18]       -> [00:10-00:18]
+ *   [timestamp: 00:10 |]  -> [00:10]
+ *   (0:15)                 -> [0:15]
+ *   (0:24-0:25)            -> [0:24-0:25]
+ *
+ * Keep this at the renderer boundary so previously saved responses benefit
+ * from the fix as well as newly generated responses.
+ */
+export function normalizeTimestampMarkup(text: string): string {
+  const timestamp = String.raw`\d{1,2}:\d{2}(?::\d{2})?`;
+
+  return text
+    .replace(
+      new RegExp(
+        String.raw`\[\s*(?:\|\s*)?(?:timestamps?\s*:?\s*)?(${timestamp})\s*(?:-->|->|[\u2013\u2014\-|])\s*(${timestamp})\s*(?:\|\s*)?\]`,
+        'gi',
+      ),
+      '[$1-$2]',
+    )
+    .replace(
+      new RegExp(
+        String.raw`\[\s*(?:\|\s*)?(?:timestamps?\s*:?\s*)?(${timestamp})\s*(?:\|\s*)?\]`,
+        'gi',
+      ),
+      '[$1]',
+    )
+    .replace(
+      new RegExp(
+        String.raw`\(\s*(?:timestamps?\s*:?\s*)?(${timestamp})\s*(?:-->|->|[\u2013\u2014\-|])\s*(${timestamp})\s*\)`,
+        'gi',
+      ),
+      '[$1-$2]',
+    )
+    .replace(
+      new RegExp(
+        String.raw`\(\s*(?:timestamps?\s*:?\s*)?(${timestamp})\s*\)`,
+        'gi',
+      ),
+      '[$1]',
+    );
+}
+
 // ── Extract plain text from ReactMarkdown children (may be string, array, or React element) ──
 function extractText(children: any): string {
   if (typeof children === 'string') return children;
@@ -975,7 +1023,7 @@ export default function InlineCitationContent({
               <span className="flex-1">{dataTitle}</span>
             </summary>
             <div className="mx-4 mb-4 rounded-2xl border border-slate-100 bg-white/90 px-5 py-4 text-[15px] leading-8 text-slate-700 shadow-inner dark:border-white/10 dark:bg-slate-950/30 dark:text-slate-200 [&_strong]:font-extrabold [&_strong]:text-slate-950 dark:[&_strong]:text-white [&_p:last-child]:mb-0">
-              {children}
+              {processChildren(children, sources, onOpenSource, onSeek, theme, timestampClassName, 'reveal', isDark)}
             </div>
           </details>
         );
@@ -1086,7 +1134,7 @@ export default function InlineCitationContent({
   // before remarkGfm parses the table. This prevents the pipe-delimited content
   // like "| Chunk 57 |" from ever being tokenized into visible table cell text.
   function preSanitizeMarkdown(rawText: string): string {
-    return rawText
+    return normalizeTimestampMarkup(rawText)
       .split('\n')
       .map(line => {
         // Only process lines that look like GFM table rows (contain |)

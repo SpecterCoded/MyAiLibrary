@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import DashboardLayout from './components/Dashboard';
 import Sidebar from './components/Sidebar';
 import DashboardHeader, { type BackendUser } from './components/DashboardHeader';
@@ -192,13 +192,35 @@ export default function App() {
 
     if (theme === 'system') {
       const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-      applyTheme(mediaQuery.matches);
+      let isMounted = true;
+
+      if (window.desktop?.getSystemTheme) {
+        window.desktop.getSystemTheme()
+          .then((systemTheme) => {
+            if (isMounted) applyTheme(systemTheme === 'dark');
+          })
+          .catch(() => {
+            if (isMounted) applyTheme(mediaQuery.matches);
+          });
+      } else {
+        applyTheme(mediaQuery.matches);
+      }
       
       const handleChange = (e: MediaQueryListEvent) => applyTheme(e.matches);
-      mediaQuery.addEventListener('change', handleChange);
+      const removeDesktopThemeListener = window.desktop?.onSystemThemeChanged?.((systemTheme) => {
+        applyTheme(systemTheme === 'dark');
+      });
+
+      if (!window.desktop?.onSystemThemeChanged) {
+        mediaQuery.addEventListener('change', handleChange);
+      }
       localStorage.setItem('app_theme', 'system');
       
-      return () => mediaQuery.removeEventListener('change', handleChange);
+      return () => {
+        isMounted = false;
+        removeDesktopThemeListener?.();
+        mediaQuery.removeEventListener('change', handleChange);
+      };
     } else {
       applyTheme(theme === 'dark');
       localStorage.setItem('app_theme', theme);
@@ -529,6 +551,13 @@ export default function App() {
   const availableUpdateVersion = updateBadgeVisible ? desktopUpdateState?.availableVersion : undefined;
   const workspaceTabs = workspaceTabsState.tabs;
   const activeWorkspaceTab = workspaceTabs.find((tab) => tab.id === workspaceTabsState.activeTabId) || workspaceTabs[0];
+  // Keep mounted page subtrees in a stable DOM order. The titlebar may be
+  // reordered freely, but moving a live <video>, <audio>, or stateful page
+  // subtree in the DOM can make Chromium reload it.
+  const workspacePanelTabs = [...workspaceTabs].sort((left, right) => {
+    const createdDelta = (left.createdAt || 0) - (right.createdAt || 0);
+    return createdDelta || left.id.localeCompare(right.id);
+  });
 
   useEffect(() => {
     try {
@@ -580,6 +609,23 @@ export default function App() {
       return normalizeWorkspaceTabsState({ tabs: nextTabs.length ? nextTabs : [createWorkspaceTab(kind, params, title)], activeTabId: activeId });
     });
   };
+
+  const updateWorkspaceTabById = useCallback((tabId: string, kind: WorkspaceTabKind, params: WorkspaceTabParams = {}, title?: string) => {
+    setWorkspaceTabsState((prev) => {
+      const nextTabs = prev.tabs.map((tab) => (
+        tab.id === tabId
+          ? {
+              ...tab,
+              kind,
+              params,
+              title: title || getWorkspaceTabTitle(kind, params),
+              updatedAt: Date.now(),
+            }
+          : tab
+      ));
+      return normalizeWorkspaceTabsState({ ...prev, tabs: nextTabs });
+    });
+  }, []);
 
   const navigateWorkspace = (kind: WorkspaceTabKind, params: WorkspaceTabParams = {}, title?: string) => {
     updateActiveWorkspaceTab(kind, params, title);
@@ -651,6 +697,19 @@ export default function App() {
     });
   };
 
+  const handleReorderWorkspaceTabs = (tabIds: string[]) => {
+    setWorkspaceTabsState((prev) => {
+      const tabsById = new Map(prev.tabs.map((tab) => [tab.id, tab]));
+      const reorderedTabs = tabIds
+        .map((tabId) => tabsById.get(tabId))
+        .filter((tab): tab is WorkspaceTab => Boolean(tab));
+
+      if (reorderedTabs.length !== prev.tabs.length) return prev;
+      if (reorderedTabs.every((tab, index) => tab.id === prev.tabs[index]?.id)) return prev;
+      return { ...prev, tabs: reorderedTabs };
+    });
+  };
+
   const handleNavigateToFolder = (id: string, name: string) => {
     setSelectedPlaylistId(id);
     setSelectedPlaylistName(name);
@@ -671,6 +730,27 @@ export default function App() {
     setSelectedPlaylistId(id);
     setSelectedPlaylistName(title);
     setCurrentView('folder');
+  };
+
+  const openWorkspaceInNewTab = (kind: WorkspaceTabKind, params: WorkspaceTabParams = {}, title?: string) => {
+    if (workspaceTabs.length >= MAX_WORKSPACE_TABS) {
+      window.alert(`You can keep up to ${MAX_WORKSPACE_TABS} workspace tabs open.`);
+      return;
+    }
+    const tab = createWorkspaceTab(kind, params, title);
+    setWorkspaceTabsState((prev) => ({ tabs: [...prev.tabs, tab], activeTabId: tab.id }));
+
+    if (kind === 'folder') {
+      setSelectedPlaylistId(params.playlistId || params.folderId || null);
+      setSelectedPlaylistName(params.playlistName || params.folderName || 'Folder');
+    } else if (kind !== 'audio-player' && kind !== 'video-player' && kind !== 'document-intelligence') {
+      setSelectedPlaylistId(null);
+      setSelectedPlaylistName('');
+    }
+
+    if (kind !== 'audio-player' && kind !== 'video-player') {
+      setCurrentView(kind as DashboardView);
+    }
   };
 
   const checkSession = async (delayTransition = false) => {
@@ -815,7 +895,11 @@ export default function App() {
   useEffect(() => {
     const handleAppNavigate = (e: Event) => {
       const customEvent = e as CustomEvent;
-      const { view, id, name, resourceId } = customEvent.detail;
+      const { view, id, name, resourceId, openInNewTab } = customEvent.detail;
+      if (openInNewTab && (view === 'audio-player' || view === 'video-player' || view === 'folder')) {
+        openWorkspaceInNewTab(view, customEvent.detail.params || customEvent.detail, customEvent.detail.title || name);
+        return;
+      }
       if (view === 'folder') {
         setSelectedPlaylistId(id);
         setSelectedPlaylistName(name || 'Folder');
@@ -850,13 +934,21 @@ export default function App() {
         target instanceof HTMLTextAreaElement ||
         !!target?.closest('[contenteditable="true"]');
 
-      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'l') {
+      const key = event.key.toLowerCase();
+      const isBackendLogShortcut =
+        (event.ctrlKey || event.metaKey) &&
+        !event.altKey &&
+        ((!event.shiftKey && (key === 't' || event.code === 'KeyT')) ||
+          (event.shiftKey && (key === 'l' || event.code === 'KeyL')));
+
+      if (isBackendLogShortcut) {
         event.preventDefault();
+        event.stopPropagation();
         void window.desktop?.openBackendLogTerminal();
         return;
       }
 
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+      if ((event.ctrlKey || event.metaKey) && key === 'k') {
         event.preventDefault();
         setIsSearchModalOpen(true);
         return;
@@ -865,8 +957,8 @@ export default function App() {
       if (isTypingContext) return;
     };
 
-    window.addEventListener('keydown', handleGlobalSearchShortcut);
-    return () => window.removeEventListener('keydown', handleGlobalSearchShortcut);
+    window.addEventListener('keydown', handleGlobalSearchShortcut, { capture: true });
+    return () => window.removeEventListener('keydown', handleGlobalSearchShortcut, { capture: true });
   }, []);
 
   // Initialize activity logger on mount, cleanup on unmount
@@ -907,6 +999,324 @@ export default function App() {
       description: "Teddy's meeting was all about reaching out the latest updates to our design system and figuring what's next in the team. We talked about keeping components consistent for both light and dark modes, tweaking the typography Hierarchy and ma..."
     }
   ];
+
+  const renderWorkspaceTabPanel = (tab: WorkspaceTab) => {
+    const isActive = tab.id === workspaceTabsState.activeTabId;
+    const panelClassName = `absolute inset-0 min-h-0 min-w-0 flex ${
+      isActive ? 'z-10' : 'pointer-events-none z-0'
+    }`;
+    const panelMotion = {
+      opacity: isActive ? 1 : 0,
+      y: isActive ? 0 : 12,
+      scale: isActive ? 1 : 0.985,
+      filter: isActive ? 'blur(0px)' : 'blur(2px)',
+    };
+    const tabView = tab.kind as DashboardView;
+
+    if (tab.kind === 'audio-player') {
+      return (
+        <motion.div
+          key={tab.id}
+          className={panelClassName}
+          aria-hidden={!isActive}
+          initial={false}
+          animate={panelMotion}
+          transition={{ duration: 0.22, ease: 'easeOut' }}
+        >
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={`${tab.id}-${tab.kind}`}
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300, mass: 0.8 }}
+              className="h-full w-full min-w-0 overflow-hidden"
+            >
+              <AudioPlayerApp
+                embedded
+                isActive={isActive}
+                mediaUrl={tab.params?.mediaUrl}
+                resourceId={tab.params?.resourceId}
+                initialTime={tab.params?.time}
+                onTitleChange={(title) => updateWorkspaceTabById(tab.id, 'audio-player', tab.params || {}, title)}
+                onBack={() => navigateWorkspace(tab.params?.playlistId ? 'folder' : 'library', {
+                  playlistId: tab.params?.playlistId,
+                  playlistName: tab.params?.playlistName,
+                })}
+              />
+            </motion.div>
+          </AnimatePresence>
+        </motion.div>
+      );
+    }
+
+    if (tab.kind === 'video-player') {
+      return (
+        <motion.div
+          key={tab.id}
+          className={panelClassName}
+          aria-hidden={!isActive}
+          initial={false}
+          animate={panelMotion}
+          transition={{ duration: 0.22, ease: 'easeOut' }}
+        >
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={`${tab.id}-${tab.kind}`}
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300, mass: 0.8 }}
+              className="h-full w-full min-w-0 overflow-hidden"
+            >
+              <VideoPlayerApp
+                embedded
+                isActive={isActive}
+                mediaUrl={tab.params?.mediaUrl}
+                resourceId={tab.params?.resourceId}
+                initialTime={tab.params?.time}
+                onTitleChange={(title) => updateWorkspaceTabById(tab.id, 'video-player', tab.params || {}, title)}
+                onBack={() => navigateWorkspace(tab.params?.playlistId ? 'folder' : 'library', {
+                  playlistId: tab.params?.playlistId,
+                  playlistName: tab.params?.playlistName,
+                })}
+              />
+            </motion.div>
+          </AnimatePresence>
+        </motion.div>
+      );
+    }
+
+    if (tab.kind === 'folder') {
+      const playlistId = tab.params?.playlistId || tab.params?.folderId || null;
+      const playlistName = tab.params?.playlistName || tab.params?.folderName || 'Folder';
+      return (
+        <motion.div
+          key={tab.id}
+          className={panelClassName}
+          aria-hidden={!isActive}
+          initial={false}
+          animate={panelMotion}
+          transition={{ duration: 0.22, ease: 'easeOut' }}
+        >
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={`${tab.id}-${tab.kind}`}
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300, mass: 0.8 }}
+              className="h-full w-full min-w-0 overflow-hidden"
+            >
+              <FileExplorer
+                playlistId={playlistId}
+                playlistName={playlistName}
+                onBack={async () => {
+                  const destination = playlistId ? 'library' : 'home';
+                  const cleanUrl = new URL(window.location.href);
+                  cleanUrl.search = '';
+                  cleanUrl.searchParams.set('view', destination);
+                  window.history.replaceState({}, '', `${cleanUrl.pathname}${cleanUrl.search}`);
+                  navigateWorkspace(destination);
+                }}
+                onNavigatePlaylist={(id, name) => {
+                  setSelectedPlaylistId(id);
+                  setSelectedPlaylistName(name);
+                  updateActiveWorkspaceTab('folder', { playlistId: id, playlistName: name }, name || 'Folder');
+                }}
+              />
+            </motion.div>
+          </AnimatePresence>
+        </motion.div>
+      );
+    }
+
+    if (tab.kind === 'document-intelligence') {
+      return (
+        <motion.div
+          key={tab.id}
+          className={panelClassName}
+          aria-hidden={!isActive}
+          initial={false}
+          animate={panelMotion}
+          transition={{ duration: 0.22, ease: 'easeOut' }}
+        >
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={`${tab.id}-${tab.kind}`}
+              initial={{ opacity: 0, scale: 0.96, y: 16 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 16 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 280, mass: 0.8 }}
+              className="absolute inset-0 z-[100]"
+            >
+              {tab.params?.resourceId ? (
+                <DocumentIntelligencePage
+                  resourceId={tab.params.resourceId}
+                  onBack={() => navigateWorkspace(returnViewFromDocumentIntelligence)}
+                />
+              ) : null}
+            </motion.div>
+          </AnimatePresence>
+        </motion.div>
+      );
+    }
+
+    return (
+      <motion.div
+        key={tab.id}
+        className={panelClassName}
+        aria-hidden={!isActive}
+        initial={false}
+        animate={panelMotion}
+        transition={{ duration: 0.3, ease: 'easeOut' }}
+      >
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={`${tab.id}-dashboard`}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            transition={{ duration: 0.3, ease: 'easeOut' }}
+            className="flex h-full w-full min-h-0 min-w-0"
+          >
+            <Sidebar
+              user={currentUser}
+              activeTab={tabView}
+              hasActiveDownloads={hasActiveDownloads}
+              hasUpdateAvailable={updateBadgeVisible}
+              onTabChange={(nextTab) => {
+                if (
+                  nextTab === 'home' ||
+                  nextTab === 'library' ||
+                  nextTab === 'downloads' ||
+                  nextTab === 'notebooks' ||
+                  nextTab === 'concepts' ||
+                  nextTab === 'chat' ||
+                  nextTab === 'settings' ||
+                  nextTab === 'metrics' ||
+                  nextTab === 'rag-explorer'
+                ) {
+                  window.dispatchEvent(new CustomEvent('app-navigate', { detail: { view: nextTab, name: nextTab } }));
+                }
+              }}
+            />
+
+            <main
+              className={`app-main-panel flex-1 flex flex-col relative z-0 p-0 overflow-x-hidden no-scrollbar min-w-0 min-h-0 ${
+                tabView === 'home' || tabView === 'rag-explorer' ? 'overflow-hidden' : 'overflow-y-auto'
+              } ${
+                tabView === 'concepts'
+                  ? 'h-[calc(100%-48px)] my-6 mx-6 rounded-[32px] bg-[#FCFBF9] dark:bg-[#25272b] border border-slate-200/60 dark:border-white/10 shadow-none backdrop-blur-none'
+                  : 'h-[calc(100%-48px)] my-6 mx-6 rounded-[32px] bg-white/40 dark:bg-slate-900/30 backdrop-blur-2xl border border-white/60 dark:border-slate-800/40 shadow-sm dark:shadow-[0_24px_50px_-12px_rgba(0,0,0,0.4)]'
+              }`}
+            >
+              <AnimatePresence mode="wait" initial={false}>
+                <motion.div
+                  key={`${tab.id}-${tabView}`}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -12 }}
+                  transition={{ duration: 0.22, ease: 'easeOut' }}
+                  className="flex min-h-0 w-full flex-1"
+                >
+          {tabView === 'home' ? (
+            <div className="home-view flex flex-col flex-1 p-8 overflow-y-auto no-scrollbar h-full w-full relative min-h-0">
+              <GridBackground />
+              <DashboardHeader
+                onSearchClick={toggleSearchModal}
+                onNotificationClick={toggleNotificationPanel}
+                onNavigate={(view) => navigateWorkspace(view as WorkspaceTabKind)}
+                user={currentUser}
+                theme={theme}
+                setTheme={setTheme}
+                unreadCount={unreadNotificationsCount}
+              />
+              <div className="home-layout flex-1 min-h-0">
+                <SearchAndActions
+                  onCreatePlaylistClick={toggleCreatePlaylistModal}
+                  onImportClick={toggleImportModal}
+                  user={currentUser}
+                />
+                <PlaylistGrid
+                  isLoading={isLoading}
+                  onNavigateToFolder={handleNavigateToFolder}
+                  onCreatePlaylistClick={toggleCreatePlaylistModal}
+                  onOpenPlaylistInNewTab={handleOpenPlaylistInNewTab}
+                  onSeeAllClick={() => navigateWorkspace('library')}
+                  limit={3}
+                />
+              </div>
+            </div>
+          ) : tabView === 'downloads' ? (
+            <div className="flex flex-col flex-1 p-8 overflow-y-auto no-scrollbar h-full w-full">
+              <DashboardHeader
+                onSearchClick={toggleSearchModal}
+                onNotificationClick={toggleNotificationPanel}
+                onNavigate={(view) => navigateWorkspace(view as WorkspaceTabKind)}
+                user={currentUser}
+                theme={theme}
+                setTheme={setTheme}
+                unreadCount={unreadNotificationsCount}
+              />
+              <div className="h-6" />
+              <DownloadsView onAddMore={toggleImportModal} />
+            </div>
+          ) : tabView === 'notebooks' ? (
+            <div className="flex flex-col flex-1 h-full w-full overflow-y-auto overflow-x-hidden no-scrollbar p-0 min-w-0">
+              <NotebookApp mainView={tabView} />
+            </div>
+          ) : tabView === 'concepts' ? (
+            <div className="flex flex-col flex-1 h-full w-full overflow-y-auto overflow-x-hidden no-scrollbar p-0 min-w-0">
+              <ConceptsApp />
+            </div>
+          ) : tabView === 'chat' ? (
+            <div className="flex flex-col flex-1 h-full w-full overflow-y-auto overflow-x-hidden no-scrollbar p-0 min-w-0">
+              <ChatApp user={currentUser} />
+            </div>
+          ) : tabView === 'metrics' ? (
+            <div className="flex flex-col flex-1 h-full w-full overflow-y-auto overflow-x-hidden no-scrollbar p-0 min-w-0">
+              <MetricsDashboard />
+            </div>
+          ) : tabView === 'rag-explorer' ? (
+            <div className="flex flex-col flex-1 h-full w-full overflow-y-auto overflow-x-hidden no-scrollbar p-0 min-w-0">
+              <RagExplorerPage
+                theme={theme}
+                setTheme={setTheme}
+                isActive={isActive}
+              />
+            </div>
+          ) : tabView === 'settings' ? (
+            <div className="flex flex-col flex-1 h-full w-full overflow-y-auto overflow-x-hidden no-scrollbar p-0 min-w-0">
+              <SettingsView user={currentUser} onUserUpdate={checkSession} theme={theme} setTheme={setTheme} />
+            </div>
+          ) : (
+            <div className="flex flex-col flex-1 p-8 overflow-y-auto no-scrollbar h-full w-full">
+              <DashboardHeader
+                onSearchClick={toggleSearchModal}
+                onNotificationClick={toggleNotificationPanel}
+                onNavigate={(view) => navigateWorkspace(view as WorkspaceTabKind)}
+                user={currentUser}
+                theme={theme}
+                setTheme={setTheme}
+                unreadCount={unreadNotificationsCount}
+              />
+              <div className="h-6" />
+              <LibraryView
+                onNavigateToFolder={handleNavigateToFolder}
+                onCreatePlaylistClick={toggleCreatePlaylistModal}
+                onOpenPlaylistInNewTab={handleOpenPlaylistInNewTab}
+              />
+            </div>
+          )}
+                </motion.div>
+              </AnimatePresence>
+            </main>
+          </motion.div>
+        </AnimatePresence>
+      </motion.div>
+    );
+  };
 
   const handleSetupComplete = (newStorageRoot: string) => {
     if (currentUser) {
@@ -960,304 +1370,10 @@ export default function App() {
             onSelectTab={handleSelectWorkspaceTab}
             onNewTab={handleNewWorkspaceTab}
             onCloseTab={handleCloseWorkspaceTab}
+            onReorderTabs={handleReorderWorkspaceTabs}
           />
-          <div className="relative flex min-h-0 flex-1 overflow-hidden">
-          <AnimatePresence mode="wait">
-            {activeWorkspaceTab?.kind === 'audio-player' ? (
-              <motion.div
-                key={`audio-player-${activeWorkspaceTab.id}`}
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -12 }}
-                transition={{ duration: 0.22, ease: "easeOut" }}
-                className="h-full w-full min-w-0 overflow-hidden"
-              >
-                <AudioPlayerApp
-                  embedded
-                  mediaUrl={activeWorkspaceTab.params?.mediaUrl}
-                  resourceId={activeWorkspaceTab.params?.resourceId}
-                  initialTime={activeWorkspaceTab.params?.time}
-                  onTitleChange={(title) => updateActiveWorkspaceTab('audio-player', activeWorkspaceTab.params || {}, title)}
-                  onBack={() => navigateWorkspace(activeWorkspaceTab.params?.playlistId ? 'folder' : 'library', {
-                    playlistId: activeWorkspaceTab.params?.playlistId,
-                    playlistName: activeWorkspaceTab.params?.playlistName,
-                  })}
-                />
-              </motion.div>
-            ) : activeWorkspaceTab?.kind === 'video-player' ? (
-              <motion.div
-                key={`video-player-${activeWorkspaceTab.id}`}
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -12 }}
-                transition={{ duration: 0.22, ease: "easeOut" }}
-                className="h-full w-full min-w-0 overflow-hidden"
-              >
-                <VideoPlayerApp
-                  embedded
-                  mediaUrl={activeWorkspaceTab.params?.mediaUrl}
-                  resourceId={activeWorkspaceTab.params?.resourceId}
-                  initialTime={activeWorkspaceTab.params?.time}
-                  onTitleChange={(title) => updateActiveWorkspaceTab('video-player', activeWorkspaceTab.params || {}, title)}
-                  onBack={() => navigateWorkspace(activeWorkspaceTab.params?.playlistId ? 'folder' : 'library', {
-                    playlistId: activeWorkspaceTab.params?.playlistId,
-                    playlistName: activeWorkspaceTab.params?.playlistName,
-                  })}
-                />
-              </motion.div>
-            ) : currentView === 'document-intelligence' ? (
-              <motion.div
-                key="document-intelligence-view"
-                initial={{ opacity: 0, scale: 0.96, y: 16 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.96, y: 16 }}
-                transition={{
-                  type: "spring",
-                  damping: 25,
-                  stiffness: 280,
-                  mass: 0.8
-                }}
-                className="absolute inset-0 z-[100]"
-              >
-                {selectedDocumentIntelligenceResourceId ? (
-                  <DocumentIntelligencePage
-                    resourceId={selectedDocumentIntelligenceResourceId}
-                    onBack={() => navigateWorkspace(returnViewFromDocumentIntelligence)}
-                  />
-                ) : null}
-              </motion.div>
-            ) : currentView !== 'folder' ? (
-              <React.Fragment key="dashboard-view">
-                {/* Side Navigation panel */}
-                <Sidebar
-                  user={currentUser}
-                  activeTab={currentView}
-                  hasActiveDownloads={hasActiveDownloads}
-                  hasUpdateAvailable={updateBadgeVisible}
-                  onTabChange={(tab) => {
-                    if (
-                      tab === 'home' ||
-                      tab === 'library' ||
-                      tab === 'downloads' ||
-                      tab === 'notebooks' ||
-                      tab === 'concepts' ||
-                      tab === 'chat' ||
-                      tab === 'settings' ||
-                      tab === 'metrics' ||
-                      tab === 'rag-explorer'
-                    ) {
-                      window.dispatchEvent(new CustomEvent('app-navigate', { detail: { view: tab, name: tab } }));
-                    }
-                  }}
-                />
-
-                {/* Main Panel Content Feed View */}
-                <motion.main
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.95 }}
-                  transition={{ duration: 0.3, ease: "easeOut" }}
-                  className={`app-main-panel flex-1 flex flex-col relative z-0 p-0 overflow-x-hidden no-scrollbar min-w-0 min-h-0 ${
-                    currentView === 'home' || currentView === 'rag-explorer' ? 'overflow-hidden' : 'overflow-y-auto'
-                  } ${
-                    currentView === 'concepts'
-                      ? 'h-[calc(100%-48px)] my-6 mx-6 rounded-[32px] bg-[#FCFBF9] dark:bg-[#25272b] border border-slate-200/60 dark:border-white/10 shadow-none backdrop-blur-none'
-                      : 'h-[calc(100%-48px)] my-6 mx-6 rounded-[32px] bg-white/40 dark:bg-slate-900/30 backdrop-blur-2xl border border-white/60 dark:border-slate-800/40 shadow-sm dark:shadow-[0_24px_50px_-12px_rgba(0,0,0,0.4)]'
-                  }`}
-                >
-                  <AnimatePresence mode="wait">
-                    {currentView === 'home' ? (
-                      <motion.div
-                        key="home-tab"
-                        initial={{ opacity: 0, y: 12 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -12 }}
-                        transition={{ duration: 0.22, ease: "easeOut" }}
-                        className="home-view flex flex-col flex-1 p-8 overflow-y-auto no-scrollbar h-full w-full relative min-h-0"
-                      >
-                        <GridBackground />
-                        <DashboardHeader
-                          onSearchClick={toggleSearchModal}
-                          onNotificationClick={toggleNotificationPanel}
-                          onNavigate={(view) => navigateWorkspace(view as WorkspaceTabKind)}
-                          user={currentUser}
-                          theme={theme}
-                          setTheme={setTheme}
-                          unreadCount={unreadNotificationsCount}
-                        />
-                        <div className="home-layout flex-1 min-h-0">
-                          {/* Dynamic Context Greeting & Search Pills */}
-                          <SearchAndActions
-                            onCreatePlaylistClick={toggleCreatePlaylistModal}
-                            onImportClick={toggleImportModal}
-                            user={currentUser}
-                          />
-
-                          {/* Content Dynamic Matrix Grid Layout */}
-                          <PlaylistGrid
-                            isLoading={isLoading}
-                            onNavigateToFolder={handleNavigateToFolder}
-                            onCreatePlaylistClick={toggleCreatePlaylistModal}
-                            onOpenPlaylistInNewTab={handleOpenPlaylistInNewTab}
-                            onSeeAllClick={() => navigateWorkspace('library')}
-                            limit={3}
-                          />
-                        </div>
-                      </motion.div>
-                    ) : currentView === 'downloads' ? (
-                      <motion.div
-                        key="downloads-tab"
-                        initial={{ opacity: 0, y: 12 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -12 }}
-                        transition={{ duration: 0.22, ease: "easeOut" }}
-                        className="flex flex-col flex-1 p-8 overflow-y-auto no-scrollbar h-full w-full"
-                      >
-                        <DashboardHeader
-                          onSearchClick={toggleSearchModal}
-                          onNotificationClick={toggleNotificationPanel}
-                          onNavigate={(view) => navigateWorkspace(view as WorkspaceTabKind)}
-                          user={currentUser}
-                          theme={theme}
-                          setTheme={setTheme}
-                          unreadCount={unreadNotificationsCount}
-                        />
-                        <div className="h-6" />
-                        <DownloadsView onAddMore={toggleImportModal} />
-                      </motion.div>
-                    ) : currentView === 'notebooks' ? (
-                      <motion.div
-                        key="notebooks-tab"
-                        initial={{ opacity: 0, y: 12 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -12 }}
-                        transition={{ duration: 0.22, ease: "easeOut" }}
-                        className="flex flex-col flex-1 h-full w-full overflow-y-auto overflow-x-hidden no-scrollbar p-0 min-w-0"
-                      >
-                        <NotebookApp mainView={currentView} />
-                      </motion.div>
-                    ) : currentView === 'concepts' ? (
-                      <motion.div
-                        key="concepts-tab"
-                        initial={{ opacity: 0, y: 12 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -12 }}
-                        transition={{ duration: 0.22, ease: "easeOut" }}
-                        className="flex flex-col flex-1 h-full w-full overflow-y-auto overflow-x-hidden no-scrollbar p-0 min-w-0"
-                      >
-                        <ConceptsApp />
-                      </motion.div>
-                    ) : currentView === 'chat' ? (
-                      <motion.div
-                        key="chat-tab"
-                        initial={{ opacity: 0, y: 12 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -12 }}
-                        transition={{ duration: 0.22, ease: "easeOut" }}
-                        className="flex flex-col flex-1 h-full w-full overflow-y-auto overflow-x-hidden no-scrollbar p-0 min-w-0"
-                      >
-                        <ChatApp user={currentUser} />
-                      </motion.div>
-                    ) : currentView === 'metrics' ? (
-                      <motion.div
-                        key="metrics-tab"
-                        initial={{ opacity: 0, y: 12 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -12 }}
-                        transition={{ duration: 0.22, ease: "easeOut" }}
-                        className="flex flex-col flex-1 h-full w-full overflow-y-auto overflow-x-hidden no-scrollbar p-0 min-w-0"
-                      >
-                        <MetricsDashboard />
-                      </motion.div>
-                    ) : currentView === 'rag-explorer' ? (
-                      <motion.div
-                        key="rag-explorer-tab"
-                        initial={{ opacity: 0, y: 12 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -12 }}
-                        transition={{ duration: 0.22, ease: "easeOut" }}
-                        className="flex flex-col flex-1 h-full w-full overflow-y-auto overflow-x-hidden no-scrollbar p-0 min-w-0"
-                      >
-                        <RagExplorerPage
-                          theme={theme}
-                          setTheme={setTheme}
-                        />
-                      </motion.div>
-                    ) : currentView === 'settings' ? (
-                      <motion.div
-                        key="settings-tab"
-                        initial={{ opacity: 0, y: 12 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -12 }}
-                        transition={{ duration: 0.22, ease: "easeOut" }}
-                        className="flex flex-col flex-1 h-full w-full overflow-y-auto overflow-x-hidden no-scrollbar p-0 min-w-0"
-                      >
-                        <SettingsView user={currentUser} onUserUpdate={checkSession} theme={theme} setTheme={setTheme} />
-                      </motion.div>
-                    ) : (
-                      <motion.div
-                        key="library-tab"
-                        initial={{ opacity: 0, y: 12 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -12 }}
-                        transition={{ duration: 0.22, ease: "easeOut" }}
-                        className="flex flex-col flex-1 p-8 overflow-y-auto no-scrollbar h-full w-full"
-                      >
-                        <DashboardHeader
-                          onSearchClick={toggleSearchModal}
-                          onNotificationClick={toggleNotificationPanel}
-                          onNavigate={(view) => navigateWorkspace(view as WorkspaceTabKind)}
-                          user={currentUser}
-                          theme={theme}
-                          setTheme={setTheme}
-                          unreadCount={unreadNotificationsCount}
-                        />
-                        <div className="h-6" />
-                        <LibraryView
-                          onNavigateToFolder={handleNavigateToFolder}
-                          onCreatePlaylistClick={toggleCreatePlaylistModal}
-                          onOpenPlaylistInNewTab={handleOpenPlaylistInNewTab}
-                        />
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </motion.main>
-              </React.Fragment>
-            ) : (
-              <motion.div
-                key="explorer-view"
-                initial={{ opacity: 0, scale: 0.9, y: 20 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.9, y: 20 }}
-                transition={{
-                  type: "spring",
-                  damping: 25,
-                  stiffness: 300,
-                  mass: 0.8
-                }}
-                className="h-full w-full min-w-0 overflow-hidden"
-              >
-                <FileExplorer
-                  playlistId={selectedPlaylistId}
-                  playlistName={selectedPlaylistName}
-                  onBack={async () => {
-                    // If they came from library or home, go back appropriately
-                    const destination = selectedPlaylistId ? 'library' : 'home';
-                    const cleanUrl = new URL(window.location.href);
-                    cleanUrl.search = '';
-                    cleanUrl.searchParams.set('view', destination);
-                    window.history.replaceState({}, '', `${cleanUrl.pathname}${cleanUrl.search}`);
-                    navigateWorkspace(destination);
-                  }}
-                  onNavigatePlaylist={(id, name) => {
-                    setSelectedPlaylistId(id);
-                    setSelectedPlaylistName(name);
-                    updateActiveWorkspaceTab('folder', { playlistId: id, playlistName: name }, name || 'Folder');
-                  }}
-                />
-              </motion.div>
-            )}
-          </AnimatePresence>
+          <div id="myai-workspace-content" className="relative flex min-h-0 flex-1 overflow-hidden">
+            {workspacePanelTabs.map(renderWorkspaceTabPanel)}
           <CommandSearchModal isOpen={isSearchModalOpen} onClose={toggleSearchModal} />
           <CreatePlaylistModal isOpen={isCreatePlaylistModalOpen} onClose={toggleCreatePlaylistModal} />
           <ImportContentModal

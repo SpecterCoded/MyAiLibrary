@@ -1,4 +1,4 @@
-import { ChildProcessByStdio, spawn } from 'node:child_process'
+import { ChildProcessByStdio, execFile, spawn } from 'node:child_process'
 import { createWriteStream, existsSync, mkdirSync } from 'node:fs'
 import { createServer } from 'node:net'
 import path from 'node:path'
@@ -34,6 +34,103 @@ function reservePort(preferred?: number): Promise<number> {
   })
 }
 
+function runWindowsCommand(command: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, { windowsHide: true }, (error, stdout, stderr) => {
+      if (error) {
+        reject(error)
+        return
+      }
+      resolve({ stdout: String(stdout), stderr: String(stderr) })
+    })
+  })
+}
+
+async function findListeningPids(port: number): Promise<number[]> {
+  if (process.platform !== 'win32') return []
+
+  try {
+    const { stdout } = await runWindowsCommand('netstat.exe', ['-ano', '-p', 'tcp'])
+    const pids = new Set<number>()
+
+    for (const line of stdout.split(/\r?\n/)) {
+      if (!line.includes('LISTENING')) continue
+      const columns = line.trim().split(/\s+/)
+      if (columns.length < 5) continue
+
+      const localAddress = columns[1] ?? ''
+      const pid = Number(columns[4])
+      if (!Number.isFinite(pid) || pid <= 0 || pid === process.pid) continue
+
+      if (
+        localAddress === `127.0.0.1:${port}` ||
+        localAddress === `0.0.0.0:${port}` ||
+        localAddress === `[::]:${port}` ||
+        localAddress.endsWith(`:${port}`)
+      ) {
+        pids.add(pid)
+      }
+    }
+
+    return [...pids]
+  } catch {
+    return []
+  }
+}
+
+async function stopWindowsProcessTree(pid: number): Promise<void> {
+  if (process.platform !== 'win32' || pid <= 0 || pid === process.pid) return
+
+  await new Promise<void>((resolve) => {
+    const killer = spawn('taskkill.exe', ['/PID', String(pid), '/T', '/F'], {
+      windowsHide: true,
+      stdio: 'ignore',
+    })
+    const timer = setTimeout(resolve, 5_000)
+    killer.once('error', () => {
+      clearTimeout(timer)
+      resolve()
+    })
+    killer.once('exit', () => {
+      clearTimeout(timer)
+      resolve()
+    })
+  })
+}
+
+async function stopPackagedBackendOrphans(): Promise<void> {
+  if (process.platform !== 'win32') return
+
+  await new Promise<void>((resolve) => {
+    const killer = spawn('taskkill.exe', ['/IM', 'myailibrary-backend.exe', '/T', '/F'], {
+      windowsHide: true,
+      stdio: 'ignore',
+    })
+    const timer = setTimeout(resolve, 5_000)
+    killer.once('error', () => {
+      clearTimeout(timer)
+      resolve()
+    })
+    killer.once('exit', () => {
+      clearTimeout(timer)
+      resolve()
+    })
+  })
+}
+
+async function cleanupStaleBackendBeforeStart(): Promise<void> {
+  if (process.platform !== 'win32') return
+
+  if (app.isPackaged) {
+    await stopPackagedBackendOrphans()
+    return
+  }
+
+  for (const pid of await findListeningPids(8000)) {
+    await stopWindowsProcessTree(pid)
+  }
+}
+
 async function waitForHealth(origin: string, token: string, child: BackendChild): Promise<void> {
   const deadline = Date.now() + 120_000
   let lastError = 'Backend did not answer its health check.'
@@ -64,6 +161,7 @@ export async function startBackend(options: BackendStartOptions): Promise<Backen
   mkdirSync(logDir, { recursive: true })
   const logPath = path.join(logDir, 'backend.log')
   const logStream = createWriteStream(logPath, { flags: 'a' })
+  await cleanupStaleBackendBeforeStart()
   const port = await reservePort(app.isPackaged ? undefined : 8000)
   const origin = `http://127.0.0.1:${port}`
 

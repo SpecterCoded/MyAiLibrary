@@ -1,8 +1,9 @@
 import React, { useState } from "react";
-import { ChevronDown, ChevronRight, BookOpen, Clock, Star } from "lucide-react";
+import { ChevronDown, ChevronRight, BookOpen, Clock, Star, Paperclip } from "lucide-react";
 import { createPlayer } from "@videojs/react";
 import { MinimalVideoSkin, Video, videoFeatures } from "@videojs/react/video";
 import "@videojs/react/video/minimal-skin.css";
+import { AttachmentView } from "./AttachmentView";
 
 const Player = createPlayer({ features: videoFeatures });
 
@@ -31,55 +32,63 @@ interface RightPaneProps {
   onSeekComplete?: () => void;
   starredLines?: any[];
   onToggleStar?: (msg: any) => void;
+  resourceId?: string | null;
+  token?: string | null;
 }
 
-export function RightPane({ 
-  videoUrl, 
+export function RightPane({
+  videoUrl,
   subtitlesVttUrl,
-  chapters = [], 
-  subchapters = [], 
-  transcript = [], 
+  chapters = [],
+  subchapters = [],
+  transcript = [],
   onActiveChapterChange,
   onTimeUpdate,
   onSubtitleChange,
   seekTime,
   onSeekComplete,
   starredLines = [],
-  onToggleStar
+  onToggleStar,
+  resourceId,
+  token
 }: RightPaneProps) {
   return (
     <Player.Provider>
-      <RightPaneContent 
-        videoUrl={videoUrl} 
+      <RightPaneContent
+        videoUrl={videoUrl}
         subtitlesVttUrl={subtitlesVttUrl}
-        chapters={chapters} 
-        subchapters={subchapters} 
-        transcript={transcript} 
-        onActiveChapterChange={onActiveChapterChange} 
+        chapters={chapters}
+        subchapters={subchapters}
+        transcript={transcript}
+        onActiveChapterChange={onActiveChapterChange}
         onTimeUpdate={onTimeUpdate}
         onSubtitleChange={onSubtitleChange}
         seekTime={seekTime}
         onSeekComplete={onSeekComplete}
         starredLines={starredLines}
         onToggleStar={onToggleStar}
+        resourceId={resourceId}
+        token={token}
       />
     </Player.Provider>
   );
 }
 
-function RightPaneContent({ 
-  videoUrl, 
+function RightPaneContent({
+  videoUrl,
   subtitlesVttUrl,
-  chapters = [], 
-  subchapters = [], 
-  transcript = [], 
+  chapters = [],
+  subchapters = [],
+  transcript = [],
   onActiveChapterChange,
   onTimeUpdate,
   onSubtitleChange,
   seekTime,
   onSeekComplete,
   starredLines = [],
-  onToggleStar
+  onToggleStar,
+  resourceId,
+  token
 }: RightPaneProps) {
   const media = Player.useMedia();
   
@@ -262,7 +271,7 @@ function RightPaneContent({
 
       {/* Sub tabs */}
       <div className="flex items-center gap-4 mb-4 px-1">
-        {["Timeline", "Starred", "Clips", "Metrics"].map((tab) => {
+        {["Timeline", "Starred", "Attachment", "Metrics"].map((tab) => {
           const isActive = activeTab === tab;
           return (
             <button 
@@ -282,7 +291,7 @@ function RightPaneContent({
 
       {/* Tab content rendering */}
       {activeTab === "Timeline" ? (
-        <div className="flex-1 overflow-y-auto px-1 pr-3 pt-2 pb-6 custom-scrollbar flex flex-col gap-4">
+        <div className="flex-1 overflow-y-auto px-1 pr-3 pt-2 pb-6 no-scrollbar flex flex-col gap-4">
           {displayChapters.map((chapter) => {
             const isOpen = !!openChapters[chapter.id];
             const isActive = activeChapterId === chapter.id;
@@ -445,6 +454,10 @@ function RightPaneContent({
               <span>No starred transcripts yet.</span>
             </div>
           )}
+        </div>
+      ) : activeTab === "Attachment" ? (
+        <div className="flex-1 overflow-hidden flex flex-col">
+          <AttachmentView resourceId={resourceId ?? null} token={token ?? null} />
         </div>
       ) : (
         <div className="text-center py-16 text-slate-450 text-xs font-semibold">

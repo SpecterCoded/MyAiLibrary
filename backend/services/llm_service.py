@@ -8,6 +8,7 @@ import os
 import time as _time
 
 from openai import OpenAI
+from services.url_utils import strip_api_suffix
 from services.ai_cost_service import (
     record_chat_completion_usage,
     record_stream_completion_usage,
@@ -64,7 +65,7 @@ def get_user_chat_client(user_id: str | None) -> tuple[OpenAI, str]:
         settings = db.query(UserSetting).filter(UserSetting.user_id == user_id).first()
         if not settings or not settings.chat_base_url or not settings.chat_api_key or not settings.chat_model:
             raise ValueError("Chat Base URL, API Key, and model are not configured. Please set them in Settings > Chat.")
-        base_url = settings.chat_base_url
+        base_url = strip_api_suffix(settings.chat_base_url)
         api_key = settings.chat_api_key
         model = settings.chat_model
 
@@ -338,7 +339,11 @@ Response format:
 - Use numbered lists for ordered sequences, bullet lists for unordered points.
 - Use tables when comparing items or presenting structured data.
 - Use `inline code` for technical terms, commands, or file names.
-- Include timestamps [MM:SS] or [HH:MM:SS] when referencing specific content sections.
+- Include timestamps when referencing specific media sections.
+- For one timestamp use exactly `[MM:SS]` or `[HH:MM:SS]`.
+- For a timestamp range use exactly `[MM:SS-MM:SS]` or `[HH:MM:SS-HH:MM:SS]`.
+- Never add pipes, labels, or extra wrapper characters inside timestamp brackets (invalid: `[| 00:10-00:18]`).
+- Use only valid Markdown and the supported markers below; never invent raw UI delimiters.
 
 SPECIAL FORMATTING (MUST USE):
 - Tip boxes: > [!TIP]\\n> Your tip content here
@@ -498,10 +503,45 @@ def _clean_answer(text: str) -> str:
     text = re.sub(r'\(\s*Doc\s+(\d+)\s*\)', r'[\1]', text)
     text = re.sub(r'\(\s*Chunk\s+(\d+)\s*\)', r'[\1]', text)
     text = re.sub(r'\[\s*[Cc]hunk\s+(\d+)\s*\]', r'[\1]', text)
+    text = normalize_response_markup(text)
     # Capitalize first letter
     if text and text[0].islower():
         text = text[0].upper() + text[1:]
     return text.strip()
+
+
+def normalize_response_markup(text: str) -> str:
+    """Normalize supported rich-response markers before storage/rendering."""
+    if not text:
+        return text
+
+    timestamp = r"\d{1,2}:\d{2}(?::\d{2})?"
+    text = re.sub(
+        rf"\[\s*(?:\|\s*)?(?:timestamps?\s*:?\s*)?({timestamp})"
+        rf"\s*(?:-->|->|[\u2013\u2014\-|])\s*({timestamp})\s*(?:\|\s*)?\]",
+        r"[\1-\2]",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        rf"\[\s*(?:\|\s*)?(?:timestamps?\s*:?\s*)?({timestamp})\s*(?:\|\s*)?\]",
+        r"[\1]",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        rf"\(\s*(?:timestamps?\s*:?\s*)?({timestamp})"
+        rf"\s*(?:-->|->|[\u2013\u2014\-|])\s*({timestamp})\s*\)",
+        r"[\1-\2]",
+        text,
+        flags=re.IGNORECASE,
+    )
+    return re.sub(
+        rf"\(\s*(?:timestamps?\s*:?\s*)?({timestamp})\s*\)",
+        r"[\1]",
+        text,
+        flags=re.IGNORECASE,
+    )
 
 
 def generate_answer_stream(
@@ -539,6 +579,13 @@ Response format:
 - Use **bold** for key terms and definitions.
 - Use numbered lists for ordered sequences, bullet lists for unordered points.
 - Use tables when comparing items or presenting structured data.
+- Use only valid Markdown and the supported markers below; never invent raw UI delimiters.
+- For one timestamp use exactly `[MM:SS]` or `[HH:MM:SS]`.
+- For a timestamp range use exactly `[MM:SS-MM:SS]` or `[HH:MM:SS-HH:MM:SS]`.
+- Never add pipes, labels, or extra wrapper characters inside timestamp brackets (invalid: `[| 00:10-00:18]`).
+- Tip boxes: `> [!TIP]` followed by `> Your tip content`.
+- Warning and caution boxes use the same form with `[!WARNING]` or `[!CAUTION]`.
+- Collapsible Q&A: `<details><summary>Click to reveal</summary>Answer content</details>`.
 
 Citation format rules:
 - The context is split into labeled chunks like [Chunk 12].
@@ -574,6 +621,13 @@ Response format:
 - Use **bold** for key terms and definitions.
 - Use numbered lists for ordered sequences, bullet lists for unordered points.
 - Use tables when comparing items or presenting structured data.
+- Use only valid Markdown and the supported markers below; never invent raw UI delimiters.
+- For one timestamp use exactly `[MM:SS]` or `[HH:MM:SS]`.
+- For a timestamp range use exactly `[MM:SS-MM:SS]` or `[HH:MM:SS-HH:MM:SS]`.
+- Never add pipes, labels, or extra wrapper characters inside timestamp brackets (invalid: `[| 00:10-00:18]`).
+- Tip boxes: `> [!TIP]` followed by `> Your tip content`.
+- Warning and caution boxes use the same form with `[!WARNING]` or `[!CAUTION]`.
+- Collapsible Q&A: `<details><summary>Click to reveal</summary>Answer content</details>`.
 
 Citation format rules:
 - The context is split into labeled chunks like [Chunk 12].
@@ -809,7 +863,12 @@ You are MyAiLibrary AI Tutor.
 Your task is to analyze the provided content and generate exceptionally deep, comprehensive, and detailed study notes. 
 
 FORMATTING RULES (CRITICAL - YOU MUST FOLLOW):
-1. TIMESTAMPS: Include timestamps in format [MM:SS] or [HH:MM:SS] next to EVERY heading, section, or bullet point. Example: "2.1 Unanimous Vote [0:08]"
+1. TIMESTAMPS: Include timestamps next to EVERY heading, section, bullet point, and Active Recall answer.
+   - A single timestamp must use exactly [MM:SS] or [HH:MM:SS]. Example: "2.1 Unanimous Vote [0:08]"
+   - A timestamp range must use exactly [MM:SS-MM:SS] or [HH:MM:SS-HH:MM:SS].
+   - These exact square-bracket formats are required inside <details> answers too.
+   - Never put timestamps in parentheses. Never add pipes, labels, or extra wrapper characters.
+   - Invalid: (0:15), (0:24-0:25), [| 0:15], [timestamp: 0:15].
 2. BOLD TEXT: Use **double asterisks** for ALL key terms, important concepts, and critical phrases. Example: "**unanimous vote**", "**criminal action**"
 3. TIP BOXES: Use this exact format for tips:
    > [!TIP]\\n> Your tip content here
@@ -821,7 +880,7 @@ FORMATTING RULES (CRITICAL - YOU MUST FOLLOW):
 7. BULLET LISTS: Use "- " for unordered lists
 8. SUBHEADINGS: Use ### for sub-sections
 9. Q&A SECTIONS: Format answers like this:
-   <details><summary>Click to reveal answer</summary>Your detailed answer here</details>
+   <details><summary>Click to reveal answer</summary>Your detailed answer with exact square-bracket timestamps such as [00:15] and [00:24-00:25].</details>
 10. SECTION HEADERS: Use format "N. Section Name [timestamp]" with blue bar styling
 
 STRUCTURE:
@@ -831,7 +890,7 @@ STRUCTURE:
 4. **Step-by-Step Explanations or Workflows** [timestamp]: Numbered processes and procedures
 5. **Common Pitfalls & Misconceptions** [timestamp]: Use > [!WARNING] and > [!CAUTION] blocks
 6. **Key Takeaways & Action Items** [timestamp]: Highlighted takeaways and actionable steps
-7. **Active Recall & Self-Test**: 3-5 Q&A pairs with <details> expandable answers
+7. **Active Recall & Self-Test**: 3-5 Q&A pairs with <details> expandable answers. Every answer must use the exact square-bracket timestamp syntax above.
 
 Content:
 
@@ -846,7 +905,7 @@ Study Notes:
         messages=[{"role": "user", "content": prompt}],
         temperature=0.35,
     )
-    output = response.choices[0].message.content
+    output = normalize_response_markup(response.choices[0].message.content)
     _record_completion(response, user_id=user_id, resource_id=resource_id, feature=feature, operation="content_generation", prompt_text=prompt, model=_model, completion_text=output)
     return output
 

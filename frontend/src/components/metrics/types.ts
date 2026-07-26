@@ -5,9 +5,13 @@ export interface MetricEntry {
   latency_ms?: number;
   cache_hit?: boolean;
   chunks?: number;
-  avg_rerank?: number;
-  top_rerank?: number;
+  avg_rerank?: number | null;
+  top_rerank?: number | null;
+  rerank_executed?: boolean;
   hallucinations?: number;
+  hallucination_checked?: boolean;
+  hallucination_check_status?: 'passed' | 'issues_detected' | 'skipped' | 'cached' | 'failed' | string;
+  response_passed?: boolean | null;
   confidence?: number;
   confidence_label?: string;
   complexity?: string;
@@ -110,6 +114,10 @@ export interface RequestRecord {
   latencyMs: number;
   avgRerank: number | null;
   topRerank: number | null;
+  rerankExecuted: boolean;
+  hallucinationChecked: boolean;
+  hallucinationCheckStatus: string | null;
+  responsePassed: boolean | null;
   complexity: string | null;
   parentExpansionUsed: boolean;
   hierarchicalUsed: boolean;
@@ -134,11 +142,11 @@ export type DashboardRange = 'hour' | 'today' | 'week' | 'month';
 
 export interface DashboardSummary {
   totalRequests: number;
-  successRate: number;
+  successRate: number | null;
   averageConfidence: number;
   averageResponseTime: number;
   cacheHitRate: number;
-  hallucinationRate: number;
+  hallucinationRate: number | null;
   averageRetrievalQuality: number | null;
   tokenUsage: number | null;
   promptTokens: number | null;
