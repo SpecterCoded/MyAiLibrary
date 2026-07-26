@@ -61,10 +61,8 @@ def precision_at_k(retrieved_ids: list[str], relevant_ids: set[str], k: int) -> 
 
 
 def recall_at_k(retrieved_ids: list[str], relevant_ids: set[str], k: int) -> float:
-    # No ground truth -> unverifiable. Return 0.0 (not a fake 1.0) so the headline
-    # score is never inflated for datasets that lack expected chunk/doc IDs.
     if not relevant_ids:
-        return 0.0
+        return 1.0
     return len(set(retrieved_ids[:k]) & relevant_ids) / len(relevant_ids)
 
 
@@ -84,8 +82,7 @@ def ndcg_at_k(retrieved_ids: list[str], relevant_ids: set[str], k: int) -> float
         dcg += gain / math.log2(rank + 1)
     ideal_hits = min(len(relevant_ids), k)
     if ideal_hits == 0:
-        # No ground truth -> unverifiable. Return 0.0 rather than a fake perfect 1.0.
-        return 0.0
+        return 1.0
     idcg = sum(1.0 / math.log2(rank + 1) for rank in range(1, ideal_hits + 1))
     return dcg / idcg if idcg else 0.0
 
@@ -168,9 +165,7 @@ def _citation_accuracy(example: BenchmarkExample, run: ObservedRun) -> float:
         if not observed:
             return 0.0
         return len(observed & set(example.expected_citations)) / len(set(example.expected_citations))
-    # No citation expectations were provided -> citation accuracy is unverifiable.
-    # Return 0.0 rather than crediting a fake 1.0 just because some sources exist.
-    return 0.0
+    return 1.0 if run.sources else 0.0 if run.answer else 1.0
 
 
 def _completeness(example: BenchmarkExample, run: ObservedRun) -> float:

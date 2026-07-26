@@ -81,11 +81,6 @@ Example: [{{"question": "...", "answer": "..."}}]"""
                         "expected_answer": item["answer"],
                         "source_chunk_index": chunk_row.chunk_index,
                         "resource_id": resource_id,
-                        # Ground-truth IDs in the exact form the evaluator expects, so
-                        # generated sets can drive precision/recall/MRR/nDCG, not just
-                        # answer-text overlap. Chunk id format matches metrics._retrieved_ids.
-                        "expected_chunk_ids": [f"{resource_id}:{chunk_row.chunk_index}"],
-                        "expected_document_ids": [resource_id],
                     })
 
     except Exception as e:
@@ -93,29 +88,3 @@ Example: [{{"question": "...", "answer": "..."}}]"""
 
     logger.info(f"Generated {len(test_set)} test questions from resource {resource_id}")
     return test_set
-
-
-def to_benchmark_dataset(items: list[dict], name: str = "auto-generated"):
-    """Convert raw generate_benchmark_from_resource() dicts into a BenchmarkDataset.
-
-    Bridges the generator's output to the typed contract the runner/evaluator use, so
-    an auto-generated set can be scored directly (retrieval metrics included) without a
-    manual transform step.
-    """
-    from .models import BenchmarkDataset, BenchmarkExample
-
-    examples: list[BenchmarkExample] = []
-    for item in items:
-        if not isinstance(item, dict) or not item.get("question"):
-            continue
-        examples.append(
-            BenchmarkExample(
-                question=item["question"],
-                expected_answer=item.get("expected_answer"),
-                expected_chunk_ids=list(item.get("expected_chunk_ids", []) or []),
-                expected_document_ids=list(item.get("expected_document_ids", []) or []),
-                category=item.get("category", "auto"),
-                difficulty=item.get("difficulty", "medium"),
-            )
-        )
-    return BenchmarkDataset(name=name, description="Auto-generated from resource chunks", examples=examples)

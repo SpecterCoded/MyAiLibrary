@@ -23,11 +23,6 @@ class BenchmarkConfig(BaseModel):
     prompt_cost_per_1k_tokens: float = Field(default=0.0, ge=0.0)
     completion_cost_per_1k_tokens: float = Field(default=0.0, ge=0.0)
     embedding_cost_per_1k_tokens: float = Field(default=0.0, ge=0.0)
-    # LLM-as-judge (optional, off by default). When enabled, an LLM rates
-    # faithfulness + answer relevance instead of relying only on token overlap.
-    # Requires judge_user_id so the judge can resolve that user's chat model.
-    use_llm_judge: bool = False
-    judge_user_id: str | None = None
 
     @classmethod
     def from_env(cls) -> "BenchmarkConfig":
@@ -44,8 +39,6 @@ class BenchmarkConfig(BaseModel):
             prompt_cost_per_1k_tokens=max(0.0, float(getenv("EVALUATION_PROMPT_COST_PER_1K", "0"))),
             completion_cost_per_1k_tokens=max(0.0, float(getenv("EVALUATION_COMPLETION_COST_PER_1K", "0"))),
             embedding_cost_per_1k_tokens=max(0.0, float(getenv("EVALUATION_EMBEDDING_COST_PER_1K", "0"))),
-            use_llm_judge=_enabled("EVALUATION_USE_LLM_JUDGE", "0"),
-            judge_user_id=(getenv("EVALUATION_JUDGE_USER_ID") or None),
         )
 
 
@@ -171,13 +164,6 @@ class AnswerQualityMetrics(BaseModel):
     completeness: float = 0.0
     hallucination_rate: float = 0.0
     confidence_calibration: float = 0.0
-    # LLM-judge outputs (populated only when the judge runs; see llm_judge.py).
-    # answer_relevance: how directly the answer addresses the question (0..1).
-    # llm_faithfulness: model-judged faithfulness, kept alongside the lexical one.
-    # llm_judge_used: True when the judge produced at least one score for this sample.
-    answer_relevance: float = 0.0
-    llm_faithfulness: float | None = None
-    llm_judge_used: bool = False
 
 
 class PerformanceMetrics(BaseModel):

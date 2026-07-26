@@ -21,7 +21,6 @@ class RAGEvaluator:
     def evaluate(self, example: BenchmarkExample, observed_run: ObservedRun) -> EvaluationSampleResult:
         retrieval = retrieval_metrics(example, observed_run, self.config)
         quality = answer_quality_metrics(example, observed_run, self.config)
-        quality = self._apply_llm_judge(observed_run, quality)
         performance = performance_metrics(observed_run)
         cost = cost_metrics(observed_run, self.config)
         sample = EvaluationSampleResult(
@@ -154,33 +153,6 @@ class RAGEvaluator:
                 execution_report.setdefault("modules_skipped", item.get("modules_skipped", []))
                 cache_hit = bool(item.get("cache_hit", cache_hit))
         return run.model_copy(update={"logs": matches, "planner_output": planner_output, "execution_report": execution_report, "cache_hit": cache_hit})
-
-    def _apply_llm_judge(self, run: ObservedRun, quality):
-        """Optionally overlay LLM-judge scores onto the lexical quality metrics.
-
-        No-op unless ``use_llm_judge`` is on and a ``judge_user_id`` is configured.
-        Fail-soft: any judge error leaves the lexical metrics untouched.
-        """
-        if not getattr(self.config, "use_llm_judge", False) or not getattr(self.config, "judge_user_id", None):
-            return quality
-        try:
-            from .llm_judge import judge_sample
-
-            result = judge_sample(run.question, run.answer, run.context, self.config.judge_user_id)
-        except Exception:
-            result = None
-        if not result:
-            return quality
-        updates: dict[str, Any] = {"llm_judge_used": True}
-        if result.get("answer_relevance") is not None:
-            updates["answer_relevance"] = round(float(result["answer_relevance"]), 4)
-        if result.get("faithfulness") is not None:
-            judged = round(float(result["faithfulness"]), 4)
-            updates["llm_faithfulness"] = judged
-            # The model-judged faithfulness is more trustworthy than token overlap,
-            # so promote it to the headline faithfulness metric when available.
-            updates["faithfulness"] = judged
-        return quality.model_copy(update=updates)
 
     @staticmethod
     def _notes(example: BenchmarkExample, run: ObservedRun) -> list[str]:

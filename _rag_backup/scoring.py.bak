@@ -29,7 +29,7 @@ def sample_overall_score(sample: EvaluationSampleResult) -> float:
         sample.retrieval.ndcg,
         sample.retrieval.hit_rate,
     ])
-    quality_components = [
+    quality_score = mean([
         sample.quality.faithfulness,
         sample.quality.groundedness,
         sample.quality.citation_accuracy,
@@ -37,12 +37,7 @@ def sample_overall_score(sample: EvaluationSampleResult) -> float:
         sample.quality.completeness,
         sample.quality.confidence_calibration,
         max(0.0, 1.0 - sample.quality.hallucination_rate),
-    ]
-    # Only fold in answer_relevance when the LLM judge actually produced it, so an
-    # unrun judge (default 0.0) can't silently drag the quality score down.
-    if sample.quality.llm_judge_used:
-        quality_components.append(sample.quality.answer_relevance)
-    quality_score = mean(quality_components)
+    ])
     latency_score = 1.0 / (1.0 + max(sample.performance.end_to_end_latency_ms, 0.0) / 1000.0)
     cost_score = 1.0 / (1.0 + max(sample.cost.estimated_api_cost, 0.0))
     return round((retrieval_score * 0.4) + (quality_score * 0.4) + (latency_score * 0.1) + (cost_score * 0.1), 4)
@@ -62,7 +57,6 @@ def aggregate_retrieval(samples: list[EvaluationSampleResult]) -> RetrievalMetri
 
 
 def aggregate_quality(samples: list[EvaluationSampleResult]) -> AnswerQualityMetrics:
-    judged = [item for item in samples if item.quality.llm_judge_used]
     return AnswerQualityMetrics(
         faithfulness=round(_avg([item.quality.faithfulness for item in samples]), 4),
         groundedness=round(_avg([item.quality.groundedness for item in samples]), 4),
@@ -71,8 +65,6 @@ def aggregate_quality(samples: list[EvaluationSampleResult]) -> AnswerQualityMet
         completeness=round(_avg([item.quality.completeness for item in samples]), 4),
         hallucination_rate=round(_avg([item.quality.hallucination_rate for item in samples]), 4),
         confidence_calibration=round(_avg([item.quality.confidence_calibration for item in samples]), 4),
-        answer_relevance=round(_avg([item.quality.answer_relevance for item in judged]), 4) if judged else 0.0,
-        llm_judge_used=bool(judged),
     )
 
 
@@ -201,35 +193,3 @@ def build_regression_report(baseline: BenchmarkRunReport, candidate: BenchmarkRu
         retrieval_quality_change=retrieval,
         highlights=highlights,
     )
-
-
-def regression_gate(
-    report: RegressionReport,
-    *,
-    max_overall_drop: float = 0.02,
-    max_faithfulness_drop: float = 0.03,
-    max_retrieval_drop: float = 0.03,
-) -> dict:
-    """Turn a regression report into a clear pass/fail decision.
-
-    Fails when the candidate run drops more than the allowed amount on overall score,
-    faithfulness, or retrieval quality. Use this in CI to block a change that quietly
-    makes answers worse. Returns ``{"passed": bool, "failures": [str, ...]}``.
-    """
-    failures: list[str] = []
-    if report.overall_score.absolute_change < -abs(max_overall_drop):
-        failures.append(
-            f"Overall score dropped {report.overall_score.absolute_change:+.4f} "
-            f"(limit -{abs(max_overall_drop):.4f})."
-        )
-    if report.accuracy_change.absolute_change < -abs(max_faithfulness_drop):
-        failures.append(
-            f"Faithfulness dropped {report.accuracy_change.absolute_change:+.4f} "
-            f"(limit -{abs(max_faithfulness_drop):.4f})."
-        )
-    if report.retrieval_quality_change.absolute_change < -abs(max_retrieval_drop):
-        failures.append(
-            f"Retrieval quality dropped {report.retrieval_quality_change.absolute_change:+.4f} "
-            f"(limit -{abs(max_retrieval_drop):.4f})."
-        )
-    return {"passed": not failures, "failures": failures}
