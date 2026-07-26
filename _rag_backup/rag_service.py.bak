@@ -22,13 +22,7 @@ from .planner.planner_models import RetrievalPlan
 from .agent.retrieval_agent import RetrievalAgent
 from .agent.workflow_executor import WorkflowExecutor
 from .agent.workflow_models import RetrievalWorkflow
-from core.config import (
-    ENABLE_QUERY_ROUTING,
-    ENABLE_CHUNK_OVERLAP,
-    ENABLE_HYDE,
-    ENABLE_PARENT_CHILD_RETRIEVAL,
-    ENABLE_HIERARCHICAL_RETRIEVAL,
-)
+from core.config import ENABLE_QUERY_ROUTING, ENABLE_CHUNK_OVERLAP, ENABLE_HYDE
 
 
 def _rerank_metric_values(results: list[dict], modules_executed: list[str]) -> tuple[bool, float | None, float | None]:
@@ -77,19 +71,16 @@ def get_user_rag_settings(user_id: str) -> dict:
                     "query_routing": ENABLE_QUERY_ROUTING,
                     "nli_verification": False,
                     "adaptive_rrf": True,
-                    "parent_child": ENABLE_PARENT_CHILD_RETRIEVAL,
-                    "hierarchical": ENABLE_HIERARCHICAL_RETRIEVAL,
+                    "parent_child": False,
+                    "hierarchical": False,
                 }
-            # A global env flag acts as a master switch: when on, the feature is
-            # enabled regardless of the per-user column (the user can still opt in
-            # via the column when the master switch is off).
             return {
-                "chunk_overlap": getattr(row, "rag_chunk_overlap", 0) == 1 or ENABLE_CHUNK_OVERLAP,
-                "query_routing": getattr(row, "rag_query_routing", 0) == 1 or ENABLE_QUERY_ROUTING,
+                "chunk_overlap": getattr(row, "rag_chunk_overlap", 0) == 1,
+                "query_routing": getattr(row, "rag_query_routing", 0) == 1,
                 "nli_verification": getattr(row, "rag_nli_verification", 0) == 1,
                 "adaptive_rrf": getattr(row, "rag_adaptive_rrf", 1) == 1,
-                "parent_child": getattr(row, "rag_parent_child", 0) == 1 or ENABLE_PARENT_CHILD_RETRIEVAL,
-                "hierarchical": getattr(row, "rag_hierarchical", 0) == 1 or ENABLE_HIERARCHICAL_RETRIEVAL,
+                "parent_child": getattr(row, "rag_parent_child", 0) == 1,
+                "hierarchical": getattr(row, "rag_hierarchical", 0) == 1,
             }
         finally:
             db.close()
@@ -99,8 +90,8 @@ def get_user_rag_settings(user_id: str) -> dict:
             "query_routing": ENABLE_QUERY_ROUTING,
             "nli_verification": False,
             "adaptive_rrf": True,
-            "parent_child": ENABLE_PARENT_CHILD_RETRIEVAL,
-            "hierarchical": ENABLE_HIERARCHICAL_RETRIEVAL,
+            "parent_child": False,
+            "hierarchical": False,
         }
 
 

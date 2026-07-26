@@ -1,0 +1,62 @@
+{
+  "name": "starter-goldset",
+  "description": "First human-checked evaluation set, drafted from real library content (a Suits clip + an ICT index-futures session). REVIEW every expected_answer and correct anything wrong before trusting the scores. Optionally add expected_document_ids / expected_chunk_ids from your live app to also measure retrieval (precision/recall).",
+  "examples": [
+    {
+      "question": "What does the man demand in exchange for his vote?",
+      "expected_answer": "He wants them to fabricate a lawsuit against his biggest competitor.",
+      "category": "harvey-clip",
+      "difficulty": "easy",
+      "notes": "DRAFT — verify against the clip."
+    },
+    {
+      "question": "Why won't Harvey agree to the deal right away?",
+      "expected_answer": "He suspects the man wants more than he is admitting, and he refuses to agree to anything until he knows the full story and the real reason behind the request.",
+      "category": "harvey-clip",
+      "difficulty": "medium",
+      "notes": "DRAFT — verify against the clip."
+    },
+    {
+      "question": "According to Harvey, what is Louis better at than him?",
+      "expected_answer": "Financial transactions.",
+      "category": "harvey-clip",
+      "difficulty": "easy",
+      "notes": "DRAFT — verify against the clip."
+    },
+    {
+      "question": "Which futures contract is the focus of the September 22, 2025 session?",
+      "expected_answer": "The December contract for NASDAQ E-mini (ENQ) futures.",
+      "category": "index-futures",
+      "difficulty": "easy",
+      "notes": "DRAFT — verify against the transcript."
+    },
+    {
+      "question": "What strategy does he recommend when a market is continuously making all-time highs?",
+      "expected_answer": "Keep taking continuous buy signals until they no longer work, instead of trying to pick or predict the top.",
+      "category": "index-futures",
+      "difficulty": "medium",
+      "notes": "DRAFT — verify against the transcript."
+    },
+    {
+      "question": "What time is the London kill zone in the video?",
+      "expected_answer": "Between 1:00 and 5:00 a.m.",
+      "category": "index-futures",
+      "difficulty": "easy",
+      "notes": "DRAFT — verify against the transcript."
+    },
+    {
+      "question": "What likelihood does he give for the market trading up to the consequent encroachment after the open?",
+      "expected_answer": "About 70% likelihood.",
+      "category": "index-futures",
+      "difficulty": "medium",
+      "notes": "DRAFT — verify against the transcript."
+    },
+    {
+      "question": "When does the New York AM session run, as he describes it?",
+      "expected_answer": "Roughly 7:00 a.m. to 11:00 a.m., which he splits into the pre-market session and the regular trading hours from 9:30 to 11.",
+      "category": "index-futures",
+      "difficulty": "medium",
+      "notes": "DRAFT — verify against the transcript."
+    }
+  ]
+}

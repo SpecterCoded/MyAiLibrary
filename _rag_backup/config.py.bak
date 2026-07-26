@@ -4,11 +4,11 @@ from core.paths import UPLOADS_DIR
 UPLOADS_ROOT = os.getenv("UPLOADS_ROOT", str(UPLOADS_DIR))
 ENABLE_PARENT_CHILD_RETRIEVAL = os.getenv(
     "ENABLE_PARENT_CHILD_RETRIEVAL",
-    os.getenv("enable_parent_child_retrieval", "1"),
+    os.getenv("enable_parent_child_retrieval", "0"),
 ).lower() in ("1", "true", "yes")
 ENABLE_HIERARCHICAL_RETRIEVAL = os.getenv(
     "ENABLE_HIERARCHICAL_RETRIEVAL",
-    os.getenv("enable_hierarchical_retrieval", "1"),
+    os.getenv("enable_hierarchical_retrieval", "0"),
 ).lower() in ("1", "true", "yes")
 PARENT_CHILD_GROUP_SIZE = max(1, int(os.getenv("PARENT_CHILD_GROUP_SIZE", "3")))
 PARENT_CHILD_MAX_CONTEXT_TOKENS = max(128, int(os.getenv("PARENT_CHILD_MAX_CONTEXT_TOKENS", "1800")))
@@ -45,26 +45,26 @@ enable_html_reports = ENABLE_HTML_REPORTS
 
 ENABLE_CHUNK_OVERLAP = os.getenv(
     "ENABLE_CHUNK_OVERLAP",
-    os.getenv("enable_chunk_overlap", "1"),
+    os.getenv("enable_chunk_overlap", "0"),
 ).lower() in ("1", "true", "yes")
 CHUNK_OVERLAP_CHARS = max(50, int(os.getenv("CHUNK_OVERLAP_CHARS", "150")))
 enable_chunk_overlap = ENABLE_CHUNK_OVERLAP
 
 ENABLE_QUERY_ROUTING = os.getenv(
     "ENABLE_QUERY_ROUTING",
-    os.getenv("enable_query_routing", "1"),
+    os.getenv("enable_query_routing", "0"),
 ).lower() in ("1", "true", "yes")
 enable_query_routing = ENABLE_QUERY_ROUTING
 
 ENABLE_HYDE = os.getenv(
     "ENABLE_HYDE",
-    os.getenv("enable_hyde", "1"),
+    os.getenv("enable_hyde", "0"),
 ).lower() in ("1", "true", "yes")
 enable_hyde = ENABLE_HYDE
 
 ENABLE_DOCUMENT_SEMANTIC_CHUNKING = os.getenv(
     "ENABLE_DOCUMENT_SEMANTIC_CHUNKING",
-    os.getenv("enable_document_semantic_chunking", "1"),
+    os.getenv("enable_document_semantic_chunking", "0"),
 ).lower() in ("1", "true", "yes")
 enable_document_semantic_chunking = ENABLE_DOCUMENT_SEMANTIC_CHUNKING
 
