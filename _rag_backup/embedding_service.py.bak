@@ -179,94 +179,6 @@ def embed_text(
         raise e
 
 
-def embed_texts(
-    texts: list[str],
-    user_id: str | None = None,
-    resource_id: str | None = None,
-    feature: str = "embedding",
-    batch_size: int = 64,
-) -> list[list[float]]:
-    """Embed many texts using batched API calls (faster + cheaper than one-per-call).
-
-    Order-preserving: ``results[i]`` always corresponds to ``texts[i]``.
-    - Empty/whitespace texts map to a zero vector (matching ``embed_text``).
-    - If a batch API call fails, that batch falls back to per-item ``embed_text``,
-      so this can never behave worse than the legacy one-at-a-time path.
-    - Zero vectors use the dimension detected from real embeddings in this run
-      (falls back to 3072 only if nothing else is available).
-    """
-    if not texts:
-        return []
-
-    _client, _model, _provider = get_user_embedding_client(user_id)
-
-    results: list[list[float] | None] = [None] * len(texts)
-    detected_dim = 0
-
-    # Only send non-empty texts to the API.
-    pending = [(i, t) for i, t in enumerate(texts) if t and t.strip()]
-
-    step = max(1, batch_size)
-    for start in range(0, len(pending), step):
-        batch = pending[start:start + step]
-        idxs = [i for i, _ in batch]
-        inputs = [t for _, t in batch]
-        try:
-            response = _client.embeddings.create(model=_model, input=inputs)
-            data = sorted(response.data, key=lambda d: getattr(d, "index", 0))
-            if len(data) != len(inputs):
-                raise ValueError(
-                    f"embedding count mismatch: got {len(data)} for {len(inputs)} inputs"
-                )
-            for pos, item in enumerate(data):
-                vec = item.embedding
-                results[idxs[pos]] = vec
-                if vec:
-                    detected_dim = len(vec)
-
-            usage = getattr(response, "usage", None)
-            prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
-            total_tokens = int(getattr(usage, "total_tokens", prompt_tokens) or prompt_tokens)
-            try:
-                record_ai_usage(
-                    user_id=user_id,
-                    resource_id=resource_id,
-                    feature=feature,
-                    operation="embedding",
-                    model=_model,
-                    prompt_tokens=prompt_tokens,
-                    completion_tokens=0,
-                    total_tokens=total_tokens,
-                    request_id=str(getattr(response, "id", "")) or None,
-                    metadata={
-                        "provider": "chatqt_embedding",
-                        "exact_tokens": total_tokens > 0,
-                        "exact_provider_cost": False,
-                        "batch_size": len(inputs),
-                    },
-                )
-            except Exception:
-                pass
-        except Exception as e:
-            # Safe fallback: embed this batch one item at a time (legacy behavior).
-            logger.warning(
-                f"Batch embedding failed ({e}); falling back to per-item for this batch of {len(inputs)}"
-            )
-            for i, t in batch:
-                vec = embed_text(
-                    t, user_id=user_id, resource_id=resource_id, feature=feature
-                )
-                results[i] = vec
-                if vec:
-                    detected_dim = len(vec)
-
-    dim = detected_dim or 3072
-    for i in range(len(results)):
-        if results[i] is None:
-            results[i] = [0.0] * dim
-    return results
-
-
 def split_text_into_sentences(text: str) -> list[str]:
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     paragraphs = [p.strip() for p in re.split(r"\n{2,}", text) if p.strip()]
@@ -783,47 +695,11 @@ def store_resource_embeddings(
             # single-argument signature.
             return embed_text(text)
 
-    def _embed_texts_compat(texts: list[str]):
-        # Batched embedding for the changed chunks. embed_texts() already falls back
-        # to per-item embed_text() internally if a batch call fails, so this is safe.
-        return embed_texts(
-            texts,
-            user_id=user_id,
-            resource_id=resource_id,
-            feature="resource_index_embedding",
-        )
-
     for record in removed_records:
         chunk_index = int((record.get("metadata") or {}).get("chunk_index", record.get("chunk_index", -1)))
         existing_row = existing_chunk_rows.get(chunk_index)
         if existing_row is not None:
             db.delete(existing_row)
-
-    # Phase 3: pre-compute embeddings for the changed chunks in batched API calls.
-    # Chunks whose content is unchanged reuse their existing vector (no API call);
-    # the rest are embedded together in one batched request per `batch_size` instead
-    # of one HTTP round-trip each. Positions are keyed by index into changed_records,
-    # so each vector stays aligned to its exact chunk.
-    embeddings_by_pos: dict[int, list] = {}
-    batch_texts: list[str] = []
-    batch_positions: list[int] = []
-    for _idx, _record in enumerate(changed_records):
-        _bucket = reusable_embeddings.get(_record["signature"]) or []
-        if _bucket:
-            embeddings_by_pos[_idx] = _bucket.pop()
-            reused_count += 1
-        else:
-            batch_texts.append(
-                _build_embedding_text_compat(transcript, _record["content"])
-            )
-            batch_positions.append(_idx)
-
-    if batch_texts:
-        logger.info(f"STORE EMBEDDINGS: Batch-embedding {len(batch_texts)} new chunks")
-        batch_vectors = _embed_texts_compat(batch_texts)
-        for _pos, _vector in zip(batch_positions, batch_vectors):
-            embeddings_by_pos[_pos] = _vector
-            embedded_count += 1
 
     logger.info(f"STORE EMBEDDINGS: Starting embedding loop for {len(changed_records)} chunks")
     for record_idx, record in enumerate(changed_records):
@@ -841,13 +717,17 @@ def store_resource_embeddings(
         else:
             existing_row.content = record["content"]
 
-        # Vector was pre-computed above (reused from the pool, or freshly batch-embedded).
-        embedding = embeddings_by_pos.get(record_idx)
-        if embedding is None:
-            # Safety net: should not happen, but never store a chunk without a vector.
+        reusable_bucket = reusable_embeddings.get(record["signature"]) or []
+        if reusable_bucket:
+            embedding = reusable_bucket.pop()
+            reused_count += 1
+        else:
+            if record_idx % 5 == 0:
+                logger.info(f"STORE EMBEDDINGS: Embedding chunk {record_idx + 1}/{len(changed_records)}")
             embedding = _embed_text_compat(
                 _build_embedding_text_compat(transcript, record["content"])
             )
+            embedded_count += 1
 
         # Wrap ChromaDB add with timeout to prevent hanging
         import concurrent.futures
@@ -878,15 +758,6 @@ def store_resource_embeddings(
     log_user_activity(db, user_id, 'ai_features', 'Chunks created', f'{len(chunk_records)} chunks from transcript')
     log_user_activity(db, user_id, 'ai_features', 'Embeddings stored', f'{embedded_count} new, {reused_count} reused, {len(diff["removed"])} removed')
     db.commit()
-
-    # Phase 3: the resource's content changed, so any cached answers for it are now
-    # stale. Drop them here (best-effort) so the next question re-runs retrieval.
-    try:
-        from services.cache_service import invalidate_resource_cache
-        invalidate_resource_cache(db, resource_id)
-    except Exception as e:
-        logger.warning(f"Failed to invalidate semantic cache for {resource_id}: {e}")
-
     db.close()
 
     # Invalidate BM25 cache for this resource so next search rebuilds the index

@@ -188,31 +188,3 @@ def save_to_cache(
         pass
 
     db.commit()
-
-
-def invalidate_resource_cache(db: Session, resource_id: str | None) -> int:
-    """Delete all cached answers tied to a resource.
-
-    Called after a resource is re-indexed: its underlying content changed, so any
-    previously cached answers for it are stale and must not be served again.
-    Returns the number of cache rows removed. Best-effort and safe to call even if
-    there is nothing to remove.
-    """
-    if not resource_id:
-        return 0
-    try:
-        entries = (
-            db.query(SemanticCache)
-            .filter(SemanticCache.resource_id == resource_id)
-            .all()
-        )
-        removed = 0
-        for entry in entries:
-            db.delete(entry)
-            removed += 1
-        if removed:
-            db.commit()
-        return removed
-    except Exception:
-        db.rollback()
-        return 0
