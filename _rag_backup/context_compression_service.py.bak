@@ -22,14 +22,7 @@ def compress_context(
     # Fast path: embedding-based compression (no LLM call)
     if EMBEDDING_COMPRESSION:
         from services.embedding_compression_service import compress_by_embedding
-        return compress_by_embedding(
-            question,
-            context_chunks,
-            max_chunks,
-            user_id=user_id,
-            resource_id=resource_id,
-            feature=feature,
-        )
+        return compress_by_embedding(question, context_chunks, max_chunks)
 
     # LLM-based compression (default)
 

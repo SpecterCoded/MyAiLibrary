@@ -6,8 +6,6 @@ Faster, cheaper, and nearly as accurate.
 
 from __future__ import annotations
 
-import math
-
 from core.logger import get_logger
 
 logger = get_logger("EMBEDDING_COMPRESSION")
@@ -17,31 +15,24 @@ def compress_by_embedding(
     query: str,
     chunks: list[str],
     max_chunks: int = 5,
-    user_id: str | None = None,
-    resource_id: str | None = None,
-    feature: str = "context_compression",
 ) -> list[str]:
     """Select the most relevant chunks using embedding similarity.
 
     Returns the top max_chunks chunks most similar to the query.
-    Zero LLM calls. Requires user_id so it can resolve that user's embedding
-    provider; without it, embedding lookups fail and it falls back to first-N.
+    Zero LLM calls, runs in milliseconds.
     """
     if not chunks or len(chunks) <= max_chunks:
         return chunks
 
     try:
         from embedding_service import embed_text
+        import math
 
-        query_embedding = embed_text(
-            query, user_id=user_id, resource_id=resource_id, feature=feature,
-        )
+        query_embedding = embed_text(query, feature="compression_query_embedding")
 
         scored: list[tuple[float, int]] = []
         for i, chunk in enumerate(chunks):
-            chunk_embedding = embed_text(
-                chunk, user_id=user_id, resource_id=resource_id, feature=feature,
-            )
+            chunk_embedding = embed_text(chunk, feature="compression_chunk_embedding")
             similarity = _cosine_similarity(query_embedding, chunk_embedding)
             scored.append((similarity, i))
 
