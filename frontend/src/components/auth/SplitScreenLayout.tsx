@@ -19,7 +19,7 @@ export function SplitScreenLayout({ children }: SplitScreenLayoutProps) {
   }, [currentQuote, nextQuote]);
 
   return (
-    <div className="flex min-h-screen w-full bg-white dark:bg-slate-950 font-sans text-gray-900 dark:text-white">
+    <div className="flex h-full min-h-0 w-full bg-white dark:bg-slate-950 font-sans text-gray-900 dark:text-white">
       {/* Left side: Form content */}
       <div className="w-full lg:w-1/2 flex flex-col items-center justify-center p-6 sm:p-12 lg:p-24 overflow-y-auto">
         <div className="w-full max-w-md mx-auto relative">

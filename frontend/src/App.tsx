@@ -43,6 +43,7 @@ interface PlaylistData {
 }
 
 import { SplitScreenLayout } from './components/auth/SplitScreenLayout';
+import { AuthWindowFrame } from './components/auth/AuthWindowFrame';
 import { LoginForm } from './components/auth/forms/LoginForm';
 import { SignupForm } from './components/auth/forms/SignupForm';
 import { AvatarSelection } from './components/auth/forms/AvatarSelection';
@@ -1347,13 +1348,15 @@ export default function App() {
             }}
           />
         ) : (
-          <SplitScreenLayout key="auth-layout">
-            {authView === 'login' && <LoginForm ctx={authContext} />}
-            {authView === 'signup' && <SignupForm ctx={authContext} />}
-            {authView === 'avatar' && <AvatarSelection ctx={authContext} />}
-            {authView === 'verify' && <EmailVerification ctx={authContext} />}
-            {authView === 'forgot' && <ForgotPassword ctx={authContext} />}
-          </SplitScreenLayout>
+          <AuthWindowFrame key="auth-layout">
+            <SplitScreenLayout>
+              {authView === 'login' && <LoginForm ctx={authContext} />}
+              {authView === 'signup' && <SignupForm ctx={authContext} />}
+              {authView === 'avatar' && <AvatarSelection ctx={authContext} />}
+              {authView === 'verify' && <EmailVerification ctx={authContext} />}
+              {authView === 'forgot' && <ForgotPassword ctx={authContext} />}
+            </SplitScreenLayout>
+          </AuthWindowFrame>
         )
       ) : currentUser && !currentUser.storage_root ? (
         <MacSetupAssistant
