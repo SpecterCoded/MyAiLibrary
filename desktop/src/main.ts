@@ -23,6 +23,7 @@ let attachmentViewerWindow: BrowserWindow | null = null
 let attachmentViewerReady = false
 let pendingAttachmentViewerPayload: AttachmentViewerPayload | null = null
 const attachmentViewerFilePaths = new Map<string, string>()
+const JOURNALIT_PACKAGE_FILENAME = 'Journalit-Local-1.8.1-Fresh.zip'
 
 type AttachmentViewerKind = 'image' | 'video' | 'audio' | 'pdf'
 
@@ -87,6 +88,12 @@ function sendBackendState(state: BackendState, detail?: string): void {
   for (const window of appWindows) {
     if (!window.isDestroyed()) window.webContents.send('desktop:backend-state', state, detail)
   }
+}
+
+function journalitPackagePath(): string {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'integrations', 'journalit', JOURNALIT_PACKAGE_FILENAME)
+    : path.resolve(__dirname, '..', '..', JOURNALIT_PACKAGE_FILENAME)
 }
 
 function resolvedSystemTheme(): 'light' | 'dark' {
@@ -300,6 +307,16 @@ function registerIpc(): void {
     if (!senderIsTrusted(event.senderFrame?.url ?? '') || typeof targetPath !== 'string' || !targetPath || targetPath.length > 32_768) return false
     if (!existsSync(targetPath)) return false
     shell.showItemInFolder(path.resolve(targetPath))
+    return true
+  })
+  ipcMain.handle('desktop:open-journalit-package', (event) => {
+    if (!senderIsTrusted(event.senderFrame?.url ?? '')) return false
+    const packagePath = journalitPackagePath()
+    if (!existsSync(packagePath)) {
+      console.error(`[desktop] Journalit integration package is missing: ${packagePath}`)
+      return false
+    }
+    shell.showItemInFolder(packagePath)
     return true
   })
   ipcMain.handle('desktop:get-version', (event) => senderIsTrusted(event.senderFrame?.url ?? '') ? app.getVersion() : '')

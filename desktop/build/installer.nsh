@@ -10,15 +10,15 @@
   !insertmacro MUI_UNPAGE_WELCOME
 !macroend
 
-!macro refreshShellIcons
+!macro refreshMyAiLibraryShellIcons
   ; Ask Explorer/Start Menu/taskbar to refresh cached icons after install changes.
   System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, i 0, i 0)'
 !macroend
 
 !macro customInstall
-  !insertmacro refreshShellIcons
+  !insertmacro refreshMyAiLibraryShellIcons
 !macroend
 
 !macro customUnInstall
-  !insertmacro refreshShellIcons
+  !insertmacro refreshMyAiLibraryShellIcons
 !macroend

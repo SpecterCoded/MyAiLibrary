@@ -61,6 +61,7 @@ contextBridge.exposeInMainWorld('desktop', {
   selectFile: (): Promise<string | null> => ipcRenderer.invoke('desktop:select-file'),
   selectFolder: (): Promise<string | null> => ipcRenderer.invoke('desktop:select-folder'),
   revealPath: (targetPath: string): Promise<boolean> => ipcRenderer.invoke('desktop:reveal-path', targetPath),
+  openJournalitPackage: (): Promise<boolean> => ipcRenderer.invoke('desktop:open-journalit-package'),
   getVersion: (): Promise<string> => ipcRenderer.invoke('desktop:get-version'),
   getUpdateState: (): Promise<UpdateState | null> => ipcRenderer.invoke('desktop:get-update-state'),
   checkForUpdates: (): Promise<UpdateState | null> => ipcRenderer.invoke('desktop:check-for-updates'),

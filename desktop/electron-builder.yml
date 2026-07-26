@@ -25,6 +25,8 @@ extraResources:
     to: ffmpeg
     filter:
       - "**/*"
+  - from: ../Journalit-Local-1.8.1-Fresh.zip
+    to: integrations/journalit/Journalit-Local-1.8.1-Fresh.zip
 
 win:
   target:

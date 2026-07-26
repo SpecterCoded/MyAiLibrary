@@ -57,6 +57,7 @@ declare global {
     selectFile(): Promise<string | null>
     selectFolder(): Promise<string | null>
     revealPath(targetPath: string): Promise<boolean>
+    openJournalitPackage(): Promise<boolean>
     getVersion(): Promise<string>
     getUpdateState(): Promise<DesktopUpdateState | null>
     checkForUpdates(): Promise<DesktopUpdateState | null>

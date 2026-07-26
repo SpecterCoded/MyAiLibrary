@@ -229,6 +229,7 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
   const [fetchLoading, setFetchLoading] = useState(true);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [openingJournalitPackage, setOpeningJournalitPackage] = useState(false);
   const [updateState, setUpdateState] = useState<DesktopUpdateState | null>(null);
   const [updatePreferences, setUpdatePreferences] = useState<DesktopUpdatePreferences>({
     automaticallyCheck: true,
@@ -353,6 +354,29 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
     if (!window.desktop || !targetPath) return;
     const opened = await window.desktop.revealPath(targetPath);
     if (!opened) setErrorMessage('That folder is not available yet.');
+  };
+
+  const handleOpenJournalitPackage = async () => {
+    setSuccessMessage(null);
+    setErrorMessage(null);
+
+    if (!window.desktop) {
+      setErrorMessage('The Journalit package can be opened from the installed MyAiLibrary desktop app.');
+      return;
+    }
+
+    setOpeningJournalitPackage(true);
+    try {
+      const opened = await window.desktop.openJournalitPackage();
+      if (!opened) {
+        throw new Error('The Journalit installation package could not be found.');
+      }
+      setSuccessMessage('Journalit opened in File Explorer. Extract the ZIP, then follow the installation steps below.');
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Could not open the Journalit installation package.');
+    } finally {
+      setOpeningJournalitPackage(false);
+    }
   };
 
   const openExternalUrl = (url: string) => {
@@ -1774,21 +1798,98 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
                       <p className="text-sm text-gray-500 dark:text-slate-500 mt-1">Supercharge your workflow and connect the tools you use every day.</p>
                     </div>
                     <div className="space-y-4">
-                      <div className="border border-gray-200 dark:border-white/10 rounded-xl p-5 bg-white dark:bg-white/5 shadow-sm flex items-start justify-between">
-                        <div className="flex gap-4">
+                      <div className="border border-gray-200 dark:border-white/10 rounded-xl p-5 bg-white dark:bg-white/5 shadow-sm">
+                        <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="flex gap-4">
                           <div className="w-10 h-10 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
                             <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
                             </svg>
                           </div>
                           <div>
-                            <h4 className="text-sm font-semibold text-gray-900 dark:text-white">AI Trading Journal</h4>
-                            <p className="text-sm text-gray-500 dark:text-slate-500 mt-1">Connect your open-source trading journal for seamless AI-assisted market analysis.</p>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <h4 className="text-sm font-semibold text-gray-900 dark:text-white">Journalit Trading Journal</h4>
+                                <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700 ring-1 ring-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-500/30">
+                                  Included
+                                </span>
+                              </div>
+                              <p className="text-sm text-gray-500 dark:text-slate-400 mt-1">
+                                Install Journalit 1.8.1 manually in an Obsidian vault for local trading journals, analytics, and MetaTrader import.
+                              </p>
+                              <p className="mt-2 text-xs font-medium text-gray-400 dark:text-slate-500">
+                                Obsidian desktop 1.12.4 or later · Desktop only
+                              </p>
+                            </div>
                           </div>
+                          <button
+                            type="button"
+                            onClick={handleOpenJournalitPackage}
+                            disabled={openingJournalitPackage}
+                            className="inline-flex min-w-[104px] items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:bg-gray-50 disabled:cursor-wait disabled:opacity-60 dark:border-white/20 dark:bg-white/5 dark:text-slate-200 dark:hover:bg-white/10"
+                            title="Open the Journalit installation package in File Explorer"
+                          >
+                            {openingJournalitPackage ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <FolderOpen className="h-4 w-4" />
+                            )}
+                            {openingJournalitPackage ? 'Opening…' : 'Open'}
+                          </button>
                         </div>
-                        <button className="px-4 py-2 bg-white dark:bg-white/5 border border-gray-300 dark:border-white/20 rounded-lg text-sm font-semibold text-gray-700 dark:text-slate-300 shadow-sm hover:bg-gray-50 dark:bg-white/10 transition-colors whitespace-nowrap">
-                          Connect
-                        </button>
+                      </div>
+
+                      <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-white/10 dark:bg-white/5">
+                        <div className="border-b border-gray-100 px-5 py-4 dark:border-white/10">
+                          <div className="flex items-center gap-2">
+                            <ShieldCheck className="h-4 w-4 text-indigo-500" />
+                            <h4 className="text-sm font-semibold text-gray-900 dark:text-white">Install Journalit in your vault</h4>
+                          </div>
+                          <p className="mt-1 text-xs text-gray-500 dark:text-slate-400">
+                            Journalit stays local and writes normal Markdown notes. MyAiLibrary does not modify your vault automatically.
+                          </p>
+                        </div>
+
+                        <div className="space-y-5 p-5">
+                          <div className="flex gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-200">
+                            <Info className="mt-0.5 h-4 w-4 shrink-0" />
+                            <p>
+                              Back up your vault and close Obsidian before copying or replacing plugin files.
+                            </p>
+                          </div>
+
+                          <ol className="space-y-3">
+                            {[
+                              <>Click <strong>Open</strong> above. File Explorer will select <code className="rounded bg-gray-100 px-1 py-0.5 font-mono text-[11px] dark:bg-white/10">Journalit-Local-1.8.1-Fresh.zip</code>.</>,
+                              <>Extract the ZIP once. It should produce one top-level folder named <code className="rounded bg-gray-100 px-1 py-0.5 font-mono text-[11px] dark:bg-white/10">journalit</code>.</>,
+                              <>Open your Obsidian vault in File Explorer, then open <code className="rounded bg-gray-100 px-1 py-0.5 font-mono text-[11px] dark:bg-white/10">.obsidian/plugins</code>.</>,
+                              <>Copy the complete extracted <code className="rounded bg-gray-100 px-1 py-0.5 font-mono text-[11px] dark:bg-white/10">journalit</code> folder into <code className="rounded bg-gray-100 px-1 py-0.5 font-mono text-[11px] dark:bg-white/10">plugins</code>.</>,
+                              <>Reopen Obsidian, go to <strong>Settings → Community plugins</strong>, reload plugins if needed, and enable <strong>Journalit</strong>.</>,
+                            ].map((instruction, index) => (
+                              <li key={index} className="flex gap-3 text-sm leading-6 text-gray-600 dark:text-slate-300">
+                                <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-indigo-50 text-[10px] font-bold text-indigo-600 ring-1 ring-indigo-100 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-500/20">
+                                  {index + 1}
+                                </span>
+                                <span>{instruction}</span>
+                              </li>
+                            ))}
+                          </ol>
+
+                          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-500/20 dark:bg-emerald-500/10">
+                            <div className="flex items-start gap-2">
+                              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-300" />
+                              <div>
+                                <p className="text-xs font-semibold text-emerald-900 dark:text-emerald-200">Verify the final path</p>
+                                <code className="mt-1 block break-all font-mono text-[11px] text-emerald-800 dark:text-emerald-300">
+                                  &lt;vault&gt;/.obsidian/plugins/journalit/manifest.json
+                                </code>
+                              </div>
+                            </div>
+                          </div>
+
+                          <p className="text-xs leading-5 text-gray-500 dark:text-slate-400">
+                            Avoid double nesting such as <code className="rounded bg-gray-100 px-1 py-0.5 font-mono text-[11px] dark:bg-white/10">journalit/journalit/manifest.json</code>. If Journalit is not listed after reopening Obsidian, use <strong>Reload plugins</strong> or restart Obsidian completely.
+                          </p>
+                        </div>
                       </div>
                     </div>
                   </div>
