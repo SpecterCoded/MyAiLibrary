@@ -48,7 +48,7 @@ def draw_round_line(draw: ImageDraw.ImageDraw, points: list[tuple[int, int]], wi
         draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=fill)
 
 
-def draw_lucide_sparkles(draw: ImageDraw.ImageDraw, size: int, icon_ratio: float = 0.5) -> None:
+def draw_lucide_sparkles(draw: ImageDraw.ImageDraw, size: int, icon_ratio: float = 0.7) -> None:
     # Sidebar source: <Sparkles className="w-5 h-5 text-white" strokeWidth={2} />
     # inside a 40x40 rounded-2xl gradient square.
     icon_size = size * icon_ratio
@@ -77,7 +77,7 @@ def draw_lucide_sparkles(draw: ImageDraw.ImageDraw, size: int, icon_ratio: float
     draw.ellipse((cx - r, cy - r, cx + r, cy + r), outline=white, width=stroke)
 
 
-def draw_mark(size: int, *, radius_ratio: float = 0.4, icon_ratio: float = 0.5) -> Image.Image:
+def draw_mark(size: int, *, radius_ratio: float = 0.4, icon_ratio: float = 0.7) -> Image.Image:
     image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
     margin = 0
