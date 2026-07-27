@@ -1650,18 +1650,6 @@ html:not(.dark) #search-modal-footer kbd {
     margin-top: 14px !important;
   }
 
-  .app-main-panel {
-    height: calc(100% - 32px) !important;
-    margin-top: 16px !important;
-    margin-bottom: 16px !important;
-  }
-
-  .app-sidebar-panel {
-    height: calc(100% - 32px) !important;
-    margin-top: 16px !important;
-    margin-bottom: 16px !important;
-  }
-
   .ragx-header {
     padding: 16px 24px !important;
     gap: 16px !important;
@@ -1735,18 +1723,6 @@ html:not(.dark) #search-modal-footer kbd {
 /* The custom workspace titlebar uses 40px of vertical space. Treat restored
    Electron windows as compact a little earlier so Home still breathes. */
 @media (max-height: 960px) {
-  .app-main-panel {
-    height: calc(100% - 16px) !important;
-    margin-top: 8px !important;
-    margin-bottom: 8px !important;
-  }
-
-  .app-sidebar-panel {
-    height: calc(100% - 16px) !important;
-    margin-top: 8px !important;
-    margin-bottom: 8px !important;
-  }
-
   .home-view {
     padding: 20px 24px 24px !important;
   }

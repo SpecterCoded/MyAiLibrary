@@ -130,7 +130,7 @@ export default function Sidebar({ user, activeTab = 'home', hasActiveDownloads =
   ];
 
   return (
-    <aside className="app-sidebar-panel w-20 h-[calc(100%-48px)] my-6 ml-6 flex flex-col items-center py-4 px-2 bg-white/65 dark:bg-slate-900/40 backdrop-blur-[20px] border border-white/50 dark:border-white/10 shrink-0 select-none rounded-[32px] shadow-sm relative z-50">
+    <aside className="app-sidebar-panel relative z-50 flex h-full w-20 shrink-0 select-none flex-col items-center border-r border-slate-200/80 bg-slate-50 px-2 py-4 dark:border-white/10 dark:bg-[#202226]">
       
       {/* Logo Section */}
       <div 

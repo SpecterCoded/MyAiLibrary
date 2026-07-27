@@ -1295,8 +1295,8 @@ export default function App() {
               } ${
                 isPrimaryWorkspaceWindow
                   ? tabView === 'concepts'
-                    ? 'h-[calc(100%-48px)] my-6 mx-6 rounded-[32px] bg-[#FCFBF9] dark:bg-[#25272b] border border-slate-200/60 dark:border-white/10 shadow-none backdrop-blur-none'
-                    : 'h-[calc(100%-48px)] my-6 mx-6 rounded-[32px] bg-white/40 dark:bg-slate-900/30 backdrop-blur-2xl border border-white/60 dark:border-slate-800/40 shadow-sm dark:shadow-[0_24px_50px_-12px_rgba(0,0,0,0.4)]'
+                    ? 'h-full bg-[#FCFBF9] dark:bg-[#25272b]'
+                    : 'h-full bg-white dark:bg-[#25272b]'
                   : 'h-full w-full rounded-none border-0 bg-white dark:bg-[#1e1f22] shadow-none'
               }`}
             >
