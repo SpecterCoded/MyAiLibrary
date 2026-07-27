@@ -1374,6 +1374,17 @@ html:not(.dark) #search-modal-footer kbd {
   min-height: 450px;
 }
 
+/* Keep the animated home grid from being recomposited through the real cards. */
+.home-playlist-card {
+  background-color: #ffffff;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.dark .home-playlist-card {
+  background-color: var(--dk-surface-2) !important;
+}
+
 .playlist-card-skeleton--library {
   height: 386px;
   min-height: 386px;
