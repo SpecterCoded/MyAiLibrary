@@ -24,9 +24,15 @@ interface CommandSearchModalProps {
   isOpen: boolean;
   onClose: () => void;
   isFloating?: boolean;
+  animationReady?: boolean;
 }
 
-const CommandSearchModal: React.FC<CommandSearchModalProps> = ({ isOpen, onClose, isFloating = false }) => {
+const CommandSearchModal: React.FC<CommandSearchModalProps> = ({
+  isOpen,
+  onClose,
+  isFloating = false,
+  animationReady = true,
+}) => {
   const [shouldRender, setShouldRender] = useState(isOpen);
   const [animate, setAnimate] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -244,7 +250,7 @@ const CommandSearchModal: React.FC<CommandSearchModalProps> = ({ isOpen, onClose
       return () => window.removeEventListener('keydown', handleKeyDown);
     } else {
       setAnimate(false);
-      const timer = setTimeout(() => setShouldRender(false), 300);
+      const timer = setTimeout(() => setShouldRender(false), 420);
       return () => clearTimeout(timer);
     }
   }, [isOpen, onClose]);
@@ -349,6 +355,7 @@ const CommandSearchModal: React.FC<CommandSearchModalProps> = ({ isOpen, onClose
     ['Folders', 'Resources', 'Chapters', 'Subchapters', 'Notes', 'Concepts'];
 
   const activeItem = filteredItems[activeIndex];
+  const shouldAnimate = animate && (!isFloating || animationReady);
   let autocompleteSuggestion = '';
   if (activeItem && searchQuery && activeItem.title.toLowerCase().startsWith(searchQuery.toLowerCase())) {
     autocompleteSuggestion = activeItem.title.slice(searchQuery.length);
@@ -360,9 +367,9 @@ const CommandSearchModal: React.FC<CommandSearchModalProps> = ({ isOpen, onClose
       <motion.div
         className="absolute inset-0"
         initial={{ opacity: 0 }}
-        animate={{ opacity: animate ? 1 : 0 }}
+        animate={{ opacity: shouldAnimate ? 1 : 0 }}
         exit={{ opacity: 0 }}
-        transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+        transition={{ duration: isFloating ? 0.34 : 0.28, ease: [0.16, 1, 0.3, 1] }}
         onClick={onClose}
       />
 
@@ -370,10 +377,17 @@ const CommandSearchModal: React.FC<CommandSearchModalProps> = ({ isOpen, onClose
       <motion.div
         id="search-modal-container"
         className="relative w-full max-w-4xl bg-[#FCFAF7] border border-[#EFECE6] shadow-[0_32px_64px_-16px_rgba(40,35,30,0.12)] rounded-3xl overflow-hidden font-sans"
-        initial={{ opacity: 0, scale: 0.94, y: 24, filter: 'blur(8px)' }}
-        animate={animate ? { opacity: 1, scale: 1, y: 0, filter: 'blur(0px)' } : { opacity: 0, scale: 0.96, y: 18, filter: 'blur(6px)' }}
-        exit={{ opacity: 0, scale: 0.96, y: 18, filter: 'blur(6px)' }}
-        transition={{
+        initial={isFloating ? { opacity: 0, scale: 0.975, y: 14 } : { opacity: 0, scale: 0.94, y: 24, filter: 'blur(8px)' }}
+        animate={isFloating
+          ? { opacity: shouldAnimate ? 1 : 0, scale: shouldAnimate ? 1 : 0.975, y: shouldAnimate ? 0 : 14 }
+          : animate
+            ? { opacity: 1, scale: 1, y: 0, filter: 'blur(0px)' }
+            : { opacity: 0, scale: 0.96, y: 18, filter: 'blur(6px)' }}
+        exit={isFloating ? { opacity: 0, scale: 0.975, y: 14 } : { opacity: 0, scale: 0.96, y: 18, filter: 'blur(6px)' }}
+        transition={isFloating ? {
+          duration: 0.36,
+          ease: [0.16, 1, 0.3, 1],
+        } : {
           opacity: { duration: 0.2, ease: [0.16, 1, 0.3, 1] },
           scale: { type: 'spring', stiffness: 300, damping: 36, mass: 0.9 },
           y: { type: 'spring', stiffness: 300, damping: 38, mass: 0.9 },

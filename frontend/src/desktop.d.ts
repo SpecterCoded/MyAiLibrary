@@ -58,6 +58,8 @@ declare global {
   interface DesktopBridge {
     openFloatingTool(kind: 'search' | 'create-playlist' | 'import-content'): Promise<boolean>
     closeFloatingTool(): void
+    floatingToolReady(): Promise<boolean>
+    moveFloatingToolBy(deltaX: number, deltaY: number): void
     sendFloatingToolAction(action:
       | { type: 'navigate'; detail: Record<string, unknown> }
       | { type: 'refresh-playlists' }

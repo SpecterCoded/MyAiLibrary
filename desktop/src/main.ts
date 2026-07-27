@@ -438,7 +438,7 @@ function normalizeFloatingToolAction(value: unknown): FloatingToolAction | null 
 function createFloatingToolWindow(kind: FloatingToolKind, sourceWindow: BrowserWindow | null): BrowserWindow {
   const sizes: Record<FloatingToolKind, { width: number; height: number; minWidth: number; minHeight: number; title: string }> = {
     search: { width: 940, height: 720, minWidth: 720, minHeight: 520, title: 'Search MyAiLibrary' },
-    'create-playlist': { width: 760, height: 850, minWidth: 640, minHeight: 620, title: 'Create Playlist' },
+    'create-playlist': { width: 840, height: 920, minWidth: 720, minHeight: 680, title: 'Create Playlist' },
     'import-content': { width: 760, height: 900, minWidth: 520, minHeight: 680, title: 'Import Content' },
   }
   const config = sizes[kind]
@@ -462,7 +462,7 @@ function createFloatingToolWindow(kind: FloatingToolKind, sourceWindow: BrowserW
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',
-    hasShadow: true,
+    hasShadow: false,
     resizable: true,
     movable: true,
     minimizable: true,
@@ -487,9 +487,12 @@ function createFloatingToolWindow(kind: FloatingToolKind, sourceWindow: BrowserW
   floatingToolWindows.set(kind, toolWindow)
   const toolWebContentsId = toolWindow.webContents.id
   floatingToolKindsByWebContents.set(toolWebContentsId, kind)
-  toolWindow.once('ready-to-show', () => {
-    toolWindow.show()
-    toolWindow.focus()
+  toolWindow.webContents.once('did-finish-load', () => {
+    setTimeout(() => {
+      if (toolWindow.isDestroyed() || toolWindow.isVisible()) return
+      toolWindow.show()
+      toolWindow.focus()
+    }, 1_000)
   })
   toolWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   toolWindow.webContents.on('will-navigate', (event, url) => {
@@ -504,6 +507,15 @@ function createFloatingToolWindow(kind: FloatingToolKind, sourceWindow: BrowserW
     appWindows.delete(toolWindow)
     floatingToolKindsByWebContents.delete(toolWebContentsId)
     if (floatingToolWindows.get(kind) === toolWindow) floatingToolWindows.delete(kind)
+    if (!quitting) {
+      setTimeout(() => {
+        const returnWindow = sourceWindow && !sourceWindow.isDestroyed() ? sourceWindow : mainWindow
+        if (!returnWindow || returnWindow.isDestroyed()) return
+        if (returnWindow.isMinimized()) returnWindow.restore()
+        returnWindow.show()
+        returnWindow.focus()
+      }, 0)
+    }
   })
   void toolWindow.loadURL(floatingToolRendererUrl(kind))
   return toolWindow
@@ -682,6 +694,31 @@ function registerIpc(): void {
     const toolWindow = floatingToolWindows.get(kind)
     if (toolWindow?.webContents !== event.sender || toolWindow.isDestroyed()) return
     toolWindow.close()
+  })
+  ipcMain.handle('desktop:floating-tool-ready', (event) => {
+    const kind = floatingToolKindsByWebContents.get(event.sender.id)
+    const toolWindow = kind ? floatingToolWindows.get(kind) : undefined
+    if (!toolWindow || toolWindow.webContents !== event.sender || toolWindow.isDestroyed()) return false
+    toolWindow.show()
+    toolWindow.focus()
+    return true
+  })
+  ipcMain.on('desktop:move-floating-tool', (event, deltaX: unknown, deltaY: unknown) => {
+    const kind = floatingToolKindsByWebContents.get(event.sender.id)
+    const toolWindow = kind ? floatingToolWindows.get(kind) : undefined
+    if (
+      !toolWindow ||
+      toolWindow.webContents !== event.sender ||
+      toolWindow.isDestroyed() ||
+      typeof deltaX !== 'number' ||
+      typeof deltaY !== 'number' ||
+      !Number.isFinite(deltaX) ||
+      !Number.isFinite(deltaY) ||
+      Math.abs(deltaX) > 500 ||
+      Math.abs(deltaY) > 500
+    ) return
+    const [x, y] = toolWindow.getPosition()
+    toolWindow.setPosition(x + Math.round(deltaX), y + Math.round(deltaY), false)
   })
   ipcMain.on('desktop:floating-tool-action', (event, value: unknown) => {
     const kind = floatingToolKindsByWebContents.get(event.sender.id)

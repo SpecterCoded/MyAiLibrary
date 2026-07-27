@@ -75,7 +75,17 @@ const formatUpdateDate = (value?: string) => {
   return Number.isNaN(date.getTime()) ? 'Unknown' : date.toLocaleString();
 };
 
-const SocialIcon = ({ type }: { type: 'telegram' | 'youtube' | 'instagram' | 'x' }) => {
+type SocialLinkType = 'website' | 'telegram' | 'youtube' | 'instagram' | 'x';
+
+const SocialIcon = ({ type }: { type: SocialLinkType }) => {
+  if (type === 'website') {
+    return (
+      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+        <circle cx="12" cy="12" r="9" />
+        <path d="M3 12h18M12 3c2.5 2.7 3.8 5.7 3.8 9S14.5 18.3 12 21c-2.5-2.7-3.8-5.7-3.8-9S9.5 5.7 12 3Z" />
+      </svg>
+    );
+  }
   if (type === 'telegram') {
     return (
       <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor" aria-hidden="true">
@@ -107,10 +117,11 @@ const SocialIcon = ({ type }: { type: 'telegram' | 'youtube' | 'instagram' | 'x'
 };
 
 const ABOUT_SOCIAL_LINKS = [
+  { label: 'Website', type: 'website' as const, href: 'https://ivory-spider.staticdomains.app/' },
   { label: 'Telegram', type: 'telegram' as const, href: 'https://t.me/ChartedByICT' },
-  { label: 'YouTube', type: 'youtube' as const, href: 'https://www.youtube.com/@ChartedByICT' },
   { label: 'Instagram', type: 'instagram' as const, href: 'https://www.instagram.com/ChartedByICT' },
-  { label: 'X / Twitter', type: 'x' as const, href: 'https://x.com/ChartedByICT' },
+  { label: 'YouTube', type: 'youtube' as const, href: 'https://www.youtube.com/@ChartedByICT' },
+  { label: 'X.com', type: 'x' as const, href: 'https://x.com/ChartedByICT' },
 ];
 
 export default function SettingsView({ user, onUserUpdate, theme: propTheme, setTheme: propSetTheme }: SettingsViewProps) {
@@ -1408,7 +1419,7 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
   ];
 
   return (
-    <div className="flex-1 flex flex-col h-full w-full bg-white/65 dark:bg-slate-900/40 backdrop-blur-[24px] border border-white/50 dark:border-white/10 rounded-[32px] overflow-hidden relative shadow-sm dark:shadow-[0_12px_30px_-4px_rgba(0,0,0,0.5)]">
+    <div className="flex h-full w-full flex-1 flex-col overflow-hidden rounded-none border-0 bg-white/65 backdrop-blur-[24px] relative shadow-sm dark:bg-slate-900/40 dark:shadow-[0_12px_30px_-4px_rgba(0,0,0,0.5)]">
       
       {/* Toast notifications */}
       <AnimatePresence>
@@ -1439,7 +1450,7 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
       {/* Header with Banner & Profile */}
       <div className="shrink-0 bg-transparent">
         {/* Gradient Banner */}
-        <div className="group relative h-48 w-full rounded-t-[32px] overflow-hidden bg-gradient-to-r from-pink-200 via-purple-200 to-indigo-200">
+        <div className="group relative h-48 w-full overflow-hidden bg-gradient-to-r from-pink-200 via-purple-200 to-indigo-200">
           {bannerUrl && <img src={bannerUrl} alt="Banner" className="w-full h-full object-cover" />}
           <label className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
             <span className="px-4 py-2 bg-white/20 backdrop-blur-sm rounded-lg text-white text-sm font-semibold flex items-center gap-2 border border-white/30">
@@ -1475,7 +1486,7 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
               </div>
                         </div>
             
-            {/* Action Buttons */}
+            {/* Previous profile actions kept here for a possible future profile-sharing feature.
             <div className="flex gap-3 pb-2">
               <button className="px-4 py-2 bg-white dark:bg-white/5 border border-gray-300 dark:border-white/20 rounded-lg text-sm font-semibold text-gray-700 dark:text-slate-300 shadow-sm hover:bg-gray-50 dark:bg-white/10 transition-colors flex items-center gap-2">
                 <svg className="w-4 h-4 text-gray-500 dark:text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1486,6 +1497,27 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
               <button className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold shadow-sm hover:bg-indigo-700 transition-colors">
                 View profile
               </button>
+            </div>
+            */}
+
+            <div className="flex flex-col items-center gap-2 pb-2 text-center">
+              <span className="w-full text-center text-xs font-semibold uppercase tracking-[0.14em] text-gray-400 dark:text-slate-500">
+                Follow us on social
+              </span>
+              <div className="flex items-center gap-2">
+                {ABOUT_SOCIAL_LINKS.map((link) => (
+                  <button
+                    key={link.label}
+                    type="button"
+                    onClick={() => openExternalUrl(link.href)}
+                    aria-label={`Open ${link.label}`}
+                    title={link.label}
+                    className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 shadow-sm transition-all hover:-translate-y-0.5 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 dark:border-white/10 dark:bg-white/5 dark:text-slate-400 dark:hover:border-indigo-400/40 dark:hover:bg-indigo-500/10 dark:hover:text-indigo-300"
+                  >
+                    <SocialIcon type={link.type} />
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 
@@ -3466,7 +3498,7 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
                             key={link.label}
                             type="button"
                             onClick={() => openExternalUrl(link.href)}
-                            className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-gray-50 px-4 py-2 text-sm font-semibold text-gray-700 transition-all hover:-translate-y-0.5 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 dark:border-white/10 dark:bg-white/5 dark:text-slate-300 dark:hover:border-indigo-400/40 dark:hover:bg-indigo-500/10 dark:hover:text-indigo-300"
+                            className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-gray-200 bg-gray-50 px-4 py-2 text-sm font-semibold text-gray-700 transition-all hover:-translate-y-0.5 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 dark:border-white/10 dark:bg-white/5 dark:text-slate-300 dark:hover:border-indigo-400/40 dark:hover:bg-indigo-500/10 dark:hover:text-indigo-300"
                           >
                             <SocialIcon type={link.type} />
                             {link.label}
@@ -3474,7 +3506,7 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
                         ))}
                       </div>
                       <p className="mt-4 text-xs text-gray-500 dark:text-slate-500">
-                        These links are easy to change before release if any handle is different.
+                        Visit the project website or follow ChartedByICT for updates and videos.
                       </p>
                     </div>
                   </div>

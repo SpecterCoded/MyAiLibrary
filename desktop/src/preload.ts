@@ -80,6 +80,9 @@ contextBridge.exposeInMainWorld('desktop', {
   openFloatingTool: (kind: FloatingToolKind): Promise<boolean> =>
     ipcRenderer.invoke('desktop:open-floating-tool', kind),
   closeFloatingTool: (): void => ipcRenderer.send('desktop:close-floating-tool'),
+  floatingToolReady: (): Promise<boolean> => ipcRenderer.invoke('desktop:floating-tool-ready'),
+  moveFloatingToolBy: (deltaX: number, deltaY: number): void =>
+    ipcRenderer.send('desktop:move-floating-tool', deltaX, deltaY),
   sendFloatingToolAction: (action: FloatingToolAction): void =>
     ipcRenderer.send('desktop:floating-tool-action', action),
   onFloatingToolAction: (listener: (action: FloatingToolAction) => void): (() => void) => {

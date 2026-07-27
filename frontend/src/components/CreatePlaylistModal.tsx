@@ -8,6 +8,7 @@ interface CreatePlaylistModalProps {
   isOpen: boolean;
   onClose: () => void;
   isFloating?: boolean;
+  animationReady?: boolean;
 }
 
 interface Subfolder {
@@ -16,7 +17,12 @@ interface Subfolder {
   isDefault?: boolean;
 }
 
-const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({ isOpen, onClose, isFloating = false }) => {
+const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
+  isOpen,
+  onClose,
+  isFloating = false,
+  animationReady = true,
+}) => {
   const [playlistName, setPlaylistName] = useState('');
   const [playlistDescription, setPlaylistDescription] = useState('');
   const [subfolders, setSubfolders] = useState<Subfolder[]>([
@@ -59,7 +65,7 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({ isOpen, onClo
       requestAnimationFrame(() => setAnimate(true));
     } else {
       setAnimate(false);
-      const timer = setTimeout(() => setShouldRender(false), 300);
+      const timer = setTimeout(() => setShouldRender(false), 420);
       return () => clearTimeout(timer);
     }
   }, [isOpen]);
@@ -160,6 +166,7 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({ isOpen, onClo
     { name: 'Audios', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg> },
     { name: 'Images', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg> }
   ];
+  const shouldAnimate = animate && (!isFloating || animationReady);
 
   return (
     <>
@@ -168,19 +175,26 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({ isOpen, onClo
       <motion.div
         className="absolute inset-0"
         initial={{ opacity: 0 }}
-        animate={{ opacity: animate ? 1 : 0 }}
+        animate={{ opacity: shouldAnimate ? 1 : 0 }}
         exit={{ opacity: 0 }}
-        transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+        transition={{ duration: isFloating ? 0.34 : 0.28, ease: [0.16, 1, 0.3, 1] }}
         onClick={onClose}
       />
 
       {/* Modal Container */}
       <motion.div
-        className="create-playlist-modal relative w-full max-w-2xl border border-slate-200/80 dark:border-slate-600/45 shadow-[0_24px_50px_-12px_rgba(142,160,185,0.4)] dark:shadow-[0_24px_60px_-12px_rgba(0,0,0,0.6)] rounded-[32px] p-8"
-        initial={{ opacity: 0, scale: 0.94, y: 26, filter: 'blur(8px)' }}
-        animate={animate ? { opacity: 1, scale: 1, y: 0, filter: 'blur(0px)' } : { opacity: 0, scale: 0.96, y: 18, filter: 'blur(6px)' }}
-        exit={{ opacity: 0, scale: 0.96, y: 18, filter: 'blur(6px)' }}
-        transition={{
+        className={`create-playlist-modal relative w-full border border-slate-200/80 dark:border-slate-600/45 rounded-[32px] p-8 ${isFloating ? 'max-w-3xl shadow-none' : 'max-w-2xl shadow-[0_24px_50px_-12px_rgba(142,160,185,0.4)] dark:shadow-[0_24px_60px_-12px_rgba(0,0,0,0.6)]'}`}
+        initial={isFloating ? { opacity: 0, scale: 0.975, y: 14 } : { opacity: 0, scale: 0.94, y: 26, filter: 'blur(8px)' }}
+        animate={isFloating
+          ? { opacity: shouldAnimate ? 1 : 0, scale: shouldAnimate ? 1 : 0.975, y: shouldAnimate ? 0 : 14 }
+          : animate
+            ? { opacity: 1, scale: 1, y: 0, filter: 'blur(0px)' }
+            : { opacity: 0, scale: 0.96, y: 18, filter: 'blur(6px)' }}
+        exit={isFloating ? { opacity: 0, scale: 0.975, y: 14 } : { opacity: 0, scale: 0.96, y: 18, filter: 'blur(6px)' }}
+        transition={isFloating ? {
+          duration: 0.36,
+          ease: [0.16, 1, 0.3, 1],
+        } : {
           opacity: { duration: 0.24, ease: [0.16, 1, 0.3, 1] },
           scale: { type: 'spring', stiffness: 420, damping: 31, mass: 0.8 },
           y: { type: 'spring', stiffness: 420, damping: 33, mass: 0.8 },

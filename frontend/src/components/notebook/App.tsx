@@ -53,7 +53,7 @@ function AppContent({ mainView }: { mainView: 'notebooks' | 'concepts' }) {
 
         <div className="flex min-w-0 flex-1 flex-col bg-white dark:bg-[#191919] relative max-h-screen">
           <Topbar />
-          <div className="flex-1 overflow-y-auto">
+          <div className="no-scrollbar flex-1 overflow-y-auto">
             {currentView === 'note' && <EditorArea key={selectedNoteId || "empty"} />}
             {currentView === 'drafts' && <DraftsList />}
             {currentView === 'deleted' && <DeletedList />}

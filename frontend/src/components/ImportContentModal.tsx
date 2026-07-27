@@ -56,6 +56,7 @@ interface ImportModalProps {
   onClose: () => void;
   onNavigateToDownloads: () => void;
   isFloating?: boolean;
+  animationReady?: boolean;
 }
 
 interface Playlist {
@@ -130,7 +131,13 @@ const InstagramLogo = ({ className = "w-5 h-5 text-pink-600" }: { className?: st
   </svg>
 );
 
-export default function ImportContentModal({ isOpen, onClose, onNavigateToDownloads, isFloating = false }: ImportModalProps) {
+export default function ImportContentModal({
+  isOpen,
+  onClose,
+  onNavigateToDownloads,
+  isFloating = false,
+  animationReady = true,
+}: ImportModalProps) {
   const [url, setUrl] = useState('');
   const [selectedFolder, setSelectedFolder] = useState('');
   const [youtubeQuality, setYoutubeQuality] = useState('best');
@@ -672,18 +679,25 @@ export default function ImportContentModal({ isOpen, onClose, onNavigateToDownlo
         key="import-content-backdrop"
         className="absolute inset-0"
         initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
+        animate={{ opacity: isFloating && !animationReady ? 0 : 1 }}
         exit={{ opacity: 0 }}
-        transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+        transition={{ duration: isFloating ? 0.34 : 0.3, ease: [0.16, 1, 0.3, 1] }}
         onClick={onClose}
       />
       <motion.div
         key="import-content-modal"
         onClick={(e) => e.stopPropagation()}
-        initial={{ opacity: 0, scale: 0.94, y: 26, filter: 'blur(8px)' }}
-        animate={{ opacity: 1, scale: 1, y: 0, filter: 'blur(0px)' }}
-        exit={{ opacity: 0, scale: 0.96, y: 18, filter: 'blur(6px)' }}
-        transition={{
+        initial={isFloating ? { opacity: 0, scale: 0.975, y: 14 } : { opacity: 0, scale: 0.94, y: 26, filter: 'blur(8px)' }}
+        animate={isFloating
+          ? animationReady
+            ? { opacity: 1, scale: 1, y: 0 }
+            : { opacity: 0, scale: 0.975, y: 14 }
+          : { opacity: 1, scale: 1, y: 0, filter: 'blur(0px)' }}
+        exit={isFloating ? { opacity: 0, scale: 0.975, y: 14 } : { opacity: 0, scale: 0.96, y: 18, filter: 'blur(6px)' }}
+        transition={isFloating ? {
+          duration: 0.36,
+          ease: [0.16, 1, 0.3, 1],
+        } : {
           opacity: { duration: 0.24, ease: [0.16, 1, 0.3, 1] },
           scale: { type: 'spring', stiffness: 420, damping: 31, mass: 0.8 },
           y: { type: 'spring', stiffness: 420, damping: 33, mass: 0.8 },

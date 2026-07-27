@@ -1,4 +1,4 @@
-import { StrictMode, useEffect } from 'react'
+import { StrictMode, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '@fontsource/plus-jakarta-sans/400.css'
 import '@fontsource/plus-jakarta-sans/500.css'
@@ -22,8 +22,11 @@ function readFloatingToolKind(): FloatingToolKind | null {
   return value === 'search' || value === 'create-playlist' || value === 'import-content' ? value : null
 }
 
-function FloatingToolApp() {
+export function FloatingToolApp() {
   const tool = readFloatingToolKind()
+  const [isOpen, setIsOpen] = useState(true)
+  const [animationReady, setAnimationReady] = useState(false)
+  const closeTimer = useRef<number | null>(null)
 
   useEffect(() => {
     const relayNavigation = (event: Event) => {
@@ -47,6 +50,29 @@ function FloatingToolApp() {
   }, [])
 
   useEffect(() => {
+    let cancelled = false
+    let frame = 0
+    const nextFrame = () => new Promise<void>((resolve) => {
+      frame = window.requestAnimationFrame(() => resolve())
+    })
+    const reveal = async () => {
+      await nextFrame()
+      await nextFrame()
+      if (cancelled) return
+      if (window.desktop) await window.desktop.floatingToolReady()
+      if (cancelled) return
+      await nextFrame()
+      await nextFrame()
+      if (!cancelled) setAnimationReady(true)
+    }
+    void reveal()
+    return () => {
+      cancelled = true
+      if (frame) window.cancelAnimationFrame(frame)
+    }
+  }, [])
+
+  useEffect(() => {
     const preference = localStorage.getItem('app_theme')
     if (preference === 'light' || preference === 'dark') {
       applyFloatingToolTheme(preference)
@@ -64,24 +90,31 @@ function FloatingToolApp() {
     }
   }, [])
 
+  useEffect(() => () => {
+    if (closeTimer.current !== null) window.clearTimeout(closeTimer.current)
+  }, [])
+
   const closeWindow = () => {
-    window.setTimeout(() => {
+    if (closeTimer.current !== null) return
+    setIsOpen(false)
+    closeTimer.current = window.setTimeout(() => {
       if (window.desktop) window.desktop.closeFloatingTool()
       else window.close()
-    }, 0)
+    }, 460)
   }
 
   if (tool === 'search') {
-    return <CommandSearchModal isOpen onClose={closeWindow} isFloating />
+    return <CommandSearchModal isOpen={isOpen} onClose={closeWindow} isFloating animationReady={animationReady} />
   }
   if (tool === 'create-playlist') {
-    return <CreatePlaylistModal isOpen onClose={closeWindow} isFloating />
+    return <CreatePlaylistModal isOpen={isOpen} onClose={closeWindow} isFloating animationReady={animationReady} />
   }
   if (tool === 'import-content') {
     return (
       <ImportContentModal
-        isOpen
+        isOpen={isOpen}
         isFloating
+        animationReady={animationReady}
         onClose={closeWindow}
         onNavigateToDownloads={() => {
           window.desktop?.sendFloatingToolAction({ type: 'navigate', detail: { view: 'downloads' } })
