@@ -37,6 +37,8 @@ const PRIMARY_WORKSPACE_WIDTH = 1600
 const PRIMARY_WORKSPACE_HEIGHT = 960
 const DETACHED_WORKSPACE_MIN_WIDTH = 800
 const DETACHED_WORKSPACE_MIN_HEIGHT = 600
+const DETACHED_FILE_EXPLORER_MIN_WIDTH = 1220
+const DETACHED_FILE_EXPLORER_MIN_HEIGHT = 815
 const WORKSPACE_WINDOW_REGISTRY_VERSION = 1
 const workspaceWindowsById = new Map<string, BrowserWindow>()
 const workspaceWindowIdsByWebContents = new Map<number, string>()
@@ -322,7 +324,18 @@ function scheduleWorkspaceWindowRegistrySave(): void {
   workspaceRegistrySaveTimer = setTimeout(persistWorkspaceWindowRegistry, 250)
 }
 
-function clampWorkspaceBounds(bounds: WorkspaceWindowBounds | undefined, primary: boolean): WorkspaceWindowBounds {
+function detachedWorkspaceMinimumSize(record: WorkspaceWindowRecord): { width: number; height: number } {
+  const containsFileExplorer = record.tabsState?.tabs.some((tab) => tab.kind === 'folder') ?? false
+  return containsFileExplorer
+    ? { width: DETACHED_FILE_EXPLORER_MIN_WIDTH, height: DETACHED_FILE_EXPLORER_MIN_HEIGHT }
+    : { width: DETACHED_WORKSPACE_MIN_WIDTH, height: DETACHED_WORKSPACE_MIN_HEIGHT }
+}
+
+function clampWorkspaceBounds(
+  bounds: WorkspaceWindowBounds | undefined,
+  primary: boolean,
+  minimum = { width: DETACHED_WORKSPACE_MIN_WIDTH, height: DETACHED_WORKSPACE_MIN_HEIGHT },
+): WorkspaceWindowBounds {
   const display = bounds
     ? screen.getDisplayMatching(bounds)
     : screen.getPrimaryDisplay()
@@ -331,10 +344,10 @@ function clampWorkspaceBounds(bounds: WorkspaceWindowBounds | undefined, primary
   const defaultHeight = Math.min(primary ? PRIMARY_WORKSPACE_HEIGHT : 880, area.height)
   const width = primary
     ? defaultWidth
-    : Math.min(Math.max(bounds?.width ?? defaultWidth, DETACHED_WORKSPACE_MIN_WIDTH), area.width)
+    : Math.min(Math.max(bounds?.width ?? defaultWidth, minimum.width), area.width)
   const height = primary
     ? defaultHeight
-    : Math.min(Math.max(bounds?.height ?? defaultHeight, DETACHED_WORKSPACE_MIN_HEIGHT), area.height)
+    : Math.min(Math.max(bounds?.height ?? defaultHeight, minimum.height), area.height)
   const defaultX = area.x + Math.round((area.width - width) / 2)
   const defaultY = area.y + Math.round((area.height - height) / 2)
   const x = Math.min(Math.max(bounds?.x ?? defaultX, area.x), area.x + area.width - width)
@@ -411,6 +424,42 @@ function senderIsTrusted(frameUrl: string): boolean {
   } catch {
     return false
   }
+}
+
+function configureRendererPermissions(): void {
+  const rendererSession = session.defaultSession
+
+  rendererSession.setPermissionCheckHandler((webContents, permission, requestingOrigin, details) => {
+    if (
+      permission !== 'media' ||
+      !webContents ||
+      !workspaceWindowIdsByWebContents.has(webContents.id) ||
+      !senderIsTrusted(webContents.getURL())
+    ) return false
+
+    const requestUrl = details.securityOrigin || details.requestingUrl || requestingOrigin
+    return (
+      senderIsTrusted(requestUrl) &&
+      details.mediaType !== 'video'
+    )
+  })
+
+  rendererSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    if (
+      permission !== 'media' ||
+      !workspaceWindowIdsByWebContents.has(webContents.id) ||
+      !senderIsTrusted(webContents.getURL())
+    ) {
+      callback(false)
+      return
+    }
+
+    const mediaDetails = details as Electron.MediaAccessPermissionRequest
+    const requestUrl = mediaDetails.securityOrigin || mediaDetails.requestingUrl
+    const mediaTypes = mediaDetails.mediaTypes ?? []
+    const requestsAudioOnly = mediaTypes.length > 0 && mediaTypes.every((mediaType) => mediaType === 'audio')
+    callback(senderIsTrusted(requestUrl) && requestsAudioOnly)
+  })
 }
 
 function isFloatingToolKind(value: unknown): value is FloatingToolKind {
@@ -1109,11 +1158,12 @@ function createSplash(): BrowserWindow {
 
 function createWorkspaceWindow(record: WorkspaceWindowRecord): BrowserWindow {
   const iconPath = path.join(__dirname, '..', 'assets', 'icon.png')
-  const bounds = clampWorkspaceBounds(record.bounds, record.primary)
+  const minimum = detachedWorkspaceMinimumSize(record)
+  const bounds = clampWorkspaceBounds(record.bounds, record.primary, minimum)
   const window = new BrowserWindow({
     ...bounds,
-    minWidth: record.primary ? bounds.width : DETACHED_WORKSPACE_MIN_WIDTH,
-    minHeight: record.primary ? bounds.height : DETACHED_WORKSPACE_MIN_HEIGHT,
+    minWidth: record.primary ? bounds.width : minimum.width,
+    minHeight: record.primary ? bounds.height : minimum.height,
     resizable: true,
     maximizable: true,
     minimizable: true,
@@ -1333,7 +1383,7 @@ app.whenReady().then(async () => {
   nativeTheme.themeSource = 'system'
   nativeTheme.on('updated', sendSystemThemeChanged)
   Menu.setApplicationMenu(null)
-  session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
+  configureRendererPermissions()
   const dataRoot = desktopDataRoot()
   updater = new DesktopUpdater(dataRoot, async (targetVersion) => {
     const previousToken = backend?.token ?? randomBytes(32).toString('hex')

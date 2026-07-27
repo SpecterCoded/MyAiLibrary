@@ -3631,7 +3631,10 @@ async def transcribe_voice_input(
         ]
         run_hidden(ffmpeg_cmd, check=True, capture_output=True)
 
-        result = transcribe_audio(wav_path)
+        result = transcribe_audio(
+            wav_path,
+            user_id=current_user.id,
+        )
         return {"transcript": (result.get("transcript") or "").strip()}
     except Exception as exc:
         sys_logger.error(f"[VOICE_TRANSCRIBE] ERROR: {exc}")

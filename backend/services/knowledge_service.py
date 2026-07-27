@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from database import SessionLocal
 from core.paths import EXTRA_FILES_DIR
+from services.url_utils import strip_api_suffix
 from models import (
     AliasCandidate,
     Chapter,
@@ -465,7 +466,6 @@ def _call_structured(
     resource_id: str,
     feature: str,
 ) -> dict[str, Any]:
-    from services.url_utils import strip_api_suffix
     from services.dependency_failure_service import (
         DependencyFailure, classify_provider_error,
     )

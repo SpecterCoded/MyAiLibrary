@@ -630,10 +630,11 @@ export default function ChatApp({ user }: ChatAppProps) {
   const [notebookTreeData, setNotebookTreeData] = useState<any[]>([]);
   const [notebookFolderCache, setNotebookFolderCache] = useState<Map<string, any[]>>(new Map());
 
-  // Web Speech & Interactive Voice typing state
+  // Interactive voice typing state
   const [isListening, setIsListening] = useState(false);
   const [isVoicePanelOpen, setIsVoicePanelOpen] = useState(false);
   const [isMicAccessGranted, setIsMicAccessGranted] = useState<boolean | null>(null);
+  const [isTranscribingVoice, setIsTranscribingVoice] = useState(false);
   const [audioLevel, setAudioLevel] = useState<number>(0);
   const [voiceDraft, setVoiceDraft] = useState('');
   const recognitionRef = useRef<any>(null);
@@ -646,6 +647,7 @@ export default function ChatApp({ user }: ChatAppProps) {
   const animationFrameRef = useRef<number | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const voiceChunksRef = useRef<Blob[]>([]);
+  const voiceConfirmingRef = useRef(false);
 
   // Starts the audio level visualizer using a pre-obtained stream (no double getUserMedia)
   const startAudioVisualizerWithStream = async (stream: MediaStream) => {
@@ -748,15 +750,39 @@ export default function ChatApp({ user }: ChatAppProps) {
 
   const stopAudioVisualizer = () => {
     if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+    animationFrameRef.current = null;
     if (microphoneRef.current) microphoneRef.current.disconnect();
+    microphoneRef.current = null;
+    analyserRef.current = null;
     if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
       audioContextRef.current.close();
     }
+    audioContextRef.current = null;
     if (audioStreamRef.current) {
       audioStreamRef.current.getTracks().forEach(track => track.stop());
     }
     audioStreamRef.current = null;
     setAudioLevel(0);
+  };
+
+  const stopActiveVoiceCapture = async () => {
+    const recordedVoice = await stopVoiceRecording();
+    const recognition = recognitionRef.current;
+    recognitionRef.current = null;
+
+    if (recognition) {
+      try {
+        recognition.stop();
+        // Give Web Speech a moment to deliver its final result.
+        await new Promise(resolve => setTimeout(resolve, 250));
+      } catch {
+        // Recognition may already have ended.
+      }
+    }
+
+    stopAudioVisualizer();
+    setIsListening(false);
+    return recordedVoice;
   };
 
   const handleStopGeneration = () => {
@@ -767,18 +793,37 @@ export default function ChatApp({ user }: ChatAppProps) {
     setIsGenerating(false);
   };
 
-  // Toggle microphone: SpeechRecognition starts first (gets mic priority),
-  // then we separately start the AudioContext visualizer stream.
+  // Electron records locally and uses the app's transcription endpoint. Browser
+  // SpeechRecognition is intentionally avoided there because Chromium's hosted
+  // recognition service can end immediately even while microphone access works.
   const toggleListening = async () => {
-    // If already listening, stop everything
     if (isListening) {
-      if (recognitionRef.current) recognitionRef.current.stop();
-      stopAudioVisualizer();
-      setIsListening(false);
+      await stopActiveVoiceCapture();
       return;
     }
 
-    // Check browser support first
+    voiceDraftRef.current = '';
+    setVoiceDraft('');
+
+    if (window.desktop) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        setIsMicAccessGranted(true);
+        startVoiceRecording(stream);
+        await startAudioVisualizerWithStream(stream);
+        setIsListening(true);
+        setIsVoicePanelOpen(true);
+      } catch (err) {
+        console.error('Failed to start Electron voice recording:', err);
+        setIsMicAccessGranted(false);
+        stopAudioVisualizer();
+        setIsListening(false);
+        setIsVoicePanelOpen(false);
+        showToast('Microphone access was blocked. Please enable it in Windows privacy settings.');
+      }
+      return;
+    }
+
     const SpeechObj = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechObj) {
       showToast('Speech recognition is not supported. Please use Chrome or Edge.');
@@ -786,10 +831,6 @@ export default function ChatApp({ user }: ChatAppProps) {
       return;
     }
 
-    voiceDraftRef.current = '';
-    setVoiceDraft('');
-
-    // Step 1: Create a FRESH SpeechRecognition
     const rec = new SpeechObj();
     rec.continuous = true;
     rec.interimResults = true;
@@ -827,8 +868,6 @@ export default function ChatApp({ user }: ChatAppProps) {
       stopAudioVisualizer();
     };
 
-    // Step 2: Start SpeechRecognition FIRST — it claims the mic before our AudioContext
-    // This is the critical order: recognition before visualizer getUserMedia
     try {
       rec.start();
     } catch (err: any) {
@@ -841,12 +880,10 @@ export default function ChatApp({ user }: ChatAppProps) {
       return;
     }
 
-    // Step 3: Open panel & mark listening state
     setIsListening(true);
     setIsVoicePanelOpen(true);
 
-    // Step 4: After a brief grace period (let SpeechRecognition settle), start visualizer
-    // Using a separate getUserMedia — mic permission is already granted so no dialog
+    // Let SpeechRecognition claim the microphone before starting the visualizer.
     setTimeout(async () => {
       try {
         const vizStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
@@ -859,42 +896,55 @@ export default function ChatApp({ user }: ChatAppProps) {
   };
 
   const confirmVoiceInput = async () => {
-    const recordedVoice = await stopVoiceRecording();
+    if (voiceConfirmingRef.current) return;
+    voiceConfirmingRef.current = true;
+    setIsTranscribingVoice(true);
 
-    if (isListening && recognitionRef.current) {
-      recognitionRef.current.stop();
-      await new Promise(resolve => setTimeout(resolve, 250));
-    }
+    try {
+      const recordedVoice = await stopActiveVoiceCapture();
+      let transcript = voiceDraftRef.current.trim();
+      let transcriptionFailed = false;
 
-    let transcript = voiceDraftRef.current.trim();
-    if (!transcript && recordedVoice) {
-      try {
-        transcript = await transcribeVoiceBlob(recordedVoice);
-      } catch {
-        showToast('Voice transcription failed. Please try again.');
+      if (!transcript && recordedVoice) {
+        try {
+          transcript = await transcribeVoiceBlob(recordedVoice);
+        } catch {
+          transcriptionFailed = true;
+          showToast('Voice transcription failed. Please try again.');
+        }
       }
-    }
 
-    if (transcript) {
-      setInputValue(transcript);
-    } else {
-      showToast('No speech detected yet. Please try speaking again.');
-    }
-    setIsVoicePanelOpen(false);
-    setVoiceDraft('');
-    voiceDraftRef.current = '';
+      if (transcript) {
+        setInputValue(transcript);
+      } else if (!transcriptionFailed) {
+        showToast('No speech detected yet. Please try speaking again.');
+      }
+      setIsVoicePanelOpen(false);
+      setVoiceDraft('');
+      voiceDraftRef.current = '';
 
-    setTimeout(() => {
-      const el = document.querySelector<HTMLInputElement>('input[placeholder="Write a message here..."]');
-      el?.focus();
-    }, 150);
+      setTimeout(() => {
+        const el = document.querySelector<HTMLInputElement>('input[placeholder="Write a message here..."]');
+        el?.focus();
+      }, 150);
+    } finally {
+      voiceConfirmingRef.current = false;
+      setIsTranscribingVoice(false);
+    }
   };
 
-  const cancelVoiceInput = () => {
-    if (isListening && recognitionRef.current) recognitionRef.current.stop();
+  const cancelVoiceInput = async () => {
+    if (isTranscribingVoice) return;
+    await stopActiveVoiceCapture();
     setIsVoicePanelOpen(false);
     setVoiceDraft('');
     voiceDraftRef.current = '';
+  };
+
+  const collapseVoiceInput = async () => {
+    if (isTranscribingVoice) return;
+    await stopActiveVoiceCapture();
+    setIsVoicePanelOpen(false);
   };
 
   // Reaction toggling helper
@@ -2305,10 +2355,9 @@ export default function ChatApp({ user }: ChatAppProps) {
                 >
                   {/* Left — Close voice panel (keep text) */}
                   <button
-                    onClick={() => {
-                      if (isListening && recognitionRef.current) recognitionRef.current.stop();
-                      setIsVoicePanelOpen(false);
-                    }}
+                    type="button"
+                    onClick={collapseVoiceInput}
+                    disabled={isTranscribingVoice}
                     className="w-10 h-10 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-800 hover:bg-gray-100 transition-colors shrink-0"
                     title="Collapse voice panel"
                   >
@@ -2345,7 +2394,11 @@ export default function ChatApp({ user }: ChatAppProps) {
                       </span>
                     ) : (
                       <span className="text-gray-400 text-[11px] text-center">
-                        {isListening ? 'Listening…' : 'Tap mic to start'}
+                        {isTranscribingVoice
+                          ? 'Transcribing locally…'
+                          : isListening
+                            ? 'Listening… Press confirm when finished'
+                            : 'Tap mic to start'}
                       </span>
                     )}
                   </div>
@@ -2370,18 +2423,24 @@ export default function ChatApp({ user }: ChatAppProps) {
                   {/* Right — Cancel (X) clears text | Confirm (✓) puts text in input box */}
                   <div className="flex items-center shrink-0 gap-1">
                     <button
+                      type="button"
                       title="Cancel — discard voice text"
                       onClick={cancelVoiceInput}
-                      className="w-10 h-10 rounded-full flex items-center justify-center text-gray-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                      disabled={isTranscribingVoice}
+                      className="w-10 h-10 rounded-full flex items-center justify-center text-gray-400 hover:text-rose-600 hover:bg-rose-50 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <X size={18} />
                     </button>
                     <button
+                      type="button"
                       title="Confirm — move voice text to message input"
                       onClick={confirmVoiceInput}
-                      className="w-10 h-10 rounded-full flex items-center justify-center bg-indigo-600 text-white hover:bg-indigo-700 transition-colors shadow-sm"
+                      disabled={isTranscribingVoice}
+                      className="w-10 h-10 rounded-full flex items-center justify-center bg-indigo-600 text-white hover:bg-indigo-700 transition-colors shadow-sm disabled:cursor-wait disabled:opacity-70"
                     >
-                      <Check size={16} strokeWidth={2.5} />
+                      {isTranscribingVoice
+                        ? <Loader2 size={16} className="animate-spin" />
+                        : <Check size={16} strokeWidth={2.5} />}
                     </button>
                   </div>
                 </motion.div>
