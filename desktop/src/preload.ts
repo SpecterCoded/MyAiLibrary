@@ -76,8 +76,15 @@ contextBridge.exposeInMainWorld('desktop', {
     ipcRenderer.invoke('desktop:get-workspace-window-context'),
   openWorkspaceWindow: (tab: WorkspaceTabPayload): Promise<{ success: boolean; windowId?: string; error?: string }> =>
     ipcRenderer.invoke('desktop:open-workspace-window', tab),
+  attachWorkspaceWindowToPrimary: (): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('desktop:attach-workspace-window-to-primary'),
   saveWorkspaceWindowTabs: (state: WorkspaceTabsStatePayload): Promise<boolean> =>
     ipcRenderer.invoke('desktop:save-workspace-window-tabs', state),
+  onWorkspaceTabsAttached: (listener: (state: WorkspaceTabsStatePayload) => void): (() => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, state: WorkspaceTabsStatePayload) => listener(state)
+    ipcRenderer.on('desktop:workspace-tabs-attached', wrapped)
+    return () => ipcRenderer.removeListener('desktop:workspace-tabs-attached', wrapped)
+  },
   selectFile: (): Promise<string | null> => ipcRenderer.invoke('desktop:select-file'),
   selectFolder: (): Promise<string | null> => ipcRenderer.invoke('desktop:select-folder'),
   revealPath: (targetPath: string): Promise<boolean> => ipcRenderer.invoke('desktop:reveal-path', targetPath),

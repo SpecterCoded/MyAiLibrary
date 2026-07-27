@@ -15,7 +15,7 @@ import ActivityLogPanel from './components/ActivityLogPanel';
 import { GridBackground } from './components/grid';
 import { FileExplorerContainer as FileExplorer } from './components/FileExplorer/FileExplorer';
 import { PipelineQueueDock } from './components/PipelineQueueDock';
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { CheckCircle2, Download, Loader2 } from 'lucide-react';
 import AudioPlayerApp from './components/audio-player/AudioPlayerApp';
 import VideoPlayerApp from './components/video-player/VideoPlayerApp';
@@ -163,6 +163,7 @@ const readInitialWorkspaceTabsState = (): WorkspaceTabsState => {
 };
 
 export default function App() {
+  const prefersReducedMotion = useReducedMotion();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentUser, setCurrentUser] = useState<BackendUser | null>(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
@@ -508,6 +509,8 @@ export default function App() {
     return { tabs: [tab], activeTabId: tab.id };
   });
   const [workspaceWindowContextLoaded, setWorkspaceWindowContextLoaded] = useState(() => !window.desktop);
+  const [isPrimaryWorkspaceWindow, setIsPrimaryWorkspaceWindow] = useState(true);
+  const [isAttachingToPrimary, setIsAttachingToPrimary] = useState(false);
   const [desktopUpdateState, setDesktopUpdateState] = useState<DesktopUpdateState | null>(null);
   const [installedUpdateInfo, setInstalledUpdateInfo] = useState<DesktopInstalledUpdateInfo | null>(null);
   const [dismissedAvailableVersion, setDismissedAvailableVersion] = useState<string | null>(null);
@@ -536,6 +539,18 @@ export default function App() {
       stopInstalled();
     };
   }, []);
+
+  useEffect(() => {
+    if (!window.desktop || !workspaceWindowContextLoaded || !isPrimaryWorkspaceWindow) return;
+    return window.desktop.onWorkspaceTabsAttached((state) => {
+      const attachedState = normalizeWorkspaceTabsState(state);
+      setWorkspaceTabsState(attachedState);
+      const attachedTab =
+        attachedState.tabs.find((tab) => tab.id === attachedState.activeTabId) ||
+        attachedState.tabs[0];
+      if (attachedTab) applyWorkspaceTab(attachedTab);
+    });
+  }, [workspaceWindowContextLoaded, isPrimaryWorkspaceWindow]);
 
   const openUpdatesTab = () => {
     const url = new URL(window.location.href);
@@ -591,6 +606,7 @@ export default function App() {
     void window.desktop.getWorkspaceWindowContext()
       .then((context) => {
         if (!active) return;
+        setIsPrimaryWorkspaceWindow(context?.isPrimary ?? true);
         const restoredState = context?.tabsState
           ? normalizeWorkspaceTabsState(context.tabsState)
           : readInitialWorkspaceTabsState();
@@ -602,6 +618,8 @@ export default function App() {
       .catch((error) => {
         console.error('Failed to load the workspace window context:', error);
         if (!active) return;
+        const windowId = new URLSearchParams(window.location.search).get('workspaceWindow');
+        setIsPrimaryWorkspaceWindow(!windowId || windowId === 'main');
         const fallbackState = readInitialWorkspaceTabsState();
         setWorkspaceTabsState(fallbackState);
         const fallbackTab = fallbackState.tabs.find((tab) => tab.id === fallbackState.activeTabId) || fallbackState.tabs[0];
@@ -735,19 +753,44 @@ export default function App() {
     });
   };
 
-  const handleOpenWorkspaceTabInWindow = async (tabId: string) => {
-    const tab = workspaceTabs.find((item) => item.id === tabId);
-    if (!tab || tab.kind === 'home' || !window.desktop) return;
+  const requestDetachedWorkspaceWindow = async (tab: WorkspaceTab): Promise<boolean> => {
+    if (tab.kind === 'home' || tab.kind === 'library' || !window.desktop) return false;
     try {
       const result = await window.desktop.openWorkspaceWindow(tab);
       if (!result.success) {
-        window.alert(result.error || 'The tab could not be opened in a new window.');
-        return;
+        window.alert(result.error || 'The page could not be opened in a new window.');
+        return false;
       }
-      handleCloseWorkspaceTab(tabId);
+      return true;
     } catch (error) {
-      console.error('Failed to open workspace tab in a new window:', error);
-      window.alert('The tab could not be opened in a new window. It is still open here.');
+      console.error('Failed to open workspace page in a new window:', error);
+      window.alert('The page could not be opened in a new window.');
+      return false;
+    }
+  };
+
+  const handleOpenWorkspaceTabInWindow = async (tabId: string) => {
+    const tab = workspaceTabs.find((item) => item.id === tabId);
+    if (!tab || tab.kind === 'home' || tab.kind === 'library' || !window.desktop) return;
+    const opened = await requestDetachedWorkspaceWindow(tab);
+    if (opened) {
+      handleCloseWorkspaceTab(tabId);
+    }
+  };
+
+  const handleAttachWorkspaceWindowToPrimary = async () => {
+    if (!window.desktop || isPrimaryWorkspaceWindow || isAttachingToPrimary) return;
+    setIsAttachingToPrimary(true);
+    try {
+      const result = await window.desktop.attachWorkspaceWindowToPrimary();
+      if (!result.success) {
+        window.alert(result.error || 'The page could not be attached to the main window.');
+        setIsAttachingToPrimary(false);
+      }
+    } catch (error) {
+      console.error('Failed to attach workspace page to the main window:', error);
+      window.alert('The page could not be attached to the main window.');
+      setIsAttachingToPrimary(false);
     }
   };
 
@@ -772,11 +815,17 @@ export default function App() {
   };
 
   const handleOpenPlaylistInNewTab = (id: string, name: string) => {
+    const title = name || 'Folder';
+    if (!isPrimaryWorkspaceWindow && window.desktop) {
+      void requestDetachedWorkspaceWindow(
+        createWorkspaceTab('folder', { playlistId: id, playlistName: title }, title),
+      );
+      return;
+    }
     if (workspaceTabs.length >= MAX_WORKSPACE_TABS) {
       window.alert(`You can keep up to ${MAX_WORKSPACE_TABS} workspace tabs open.`);
       return;
     }
-    const title = name || 'Folder';
     const tab = createWorkspaceTab('folder', { playlistId: id, playlistName: title }, title);
     setWorkspaceTabsState((prev) => {
       return { tabs: [...prev.tabs, tab], activeTabId: tab.id };
@@ -787,6 +836,10 @@ export default function App() {
   };
 
   const openWorkspaceInNewTab = (kind: WorkspaceTabKind, params: WorkspaceTabParams = {}, title?: string) => {
+    if (!isPrimaryWorkspaceWindow && window.desktop) {
+      void requestDetachedWorkspaceWindow(createWorkspaceTab(kind, params, title));
+      return;
+    }
     if (workspaceTabs.length >= MAX_WORKSPACE_TABS) {
       window.alert(`You can keep up to ${MAX_WORKSPACE_TABS} workspace tabs open.`);
       return;
@@ -972,7 +1025,7 @@ export default function App() {
     };
     window.addEventListener('app-navigate', handleAppNavigate);
     return () => window.removeEventListener('app-navigate', handleAppNavigate);
-  }, [currentView]);
+  }, [currentView, isPrimaryWorkspaceWindow]);
 
   const toggleSearchModal = () => setIsSearchModalOpen(!isSearchModalOpen);
   const toggleCreatePlaylistModal = () => setIsCreatePlaylistModalOpen(!isCreatePlaylistModalOpen);
@@ -1056,14 +1109,23 @@ export default function App() {
 
   const renderWorkspaceTabPanel = (tab: WorkspaceTab) => {
     const isActive = tab.id === workspaceTabsState.activeTabId;
-    const panelClassName = `absolute inset-0 min-h-0 min-w-0 flex ${
+    const panelClassName = `workspace-tab-panel absolute inset-0 min-h-0 min-w-0 flex ${
       isActive ? 'z-10' : 'pointer-events-none z-0'
     }`;
-    const panelMotion = {
-      opacity: isActive ? 1 : 0,
-      y: isActive ? 0 : 12,
-      scale: isActive ? 1 : 0.985,
-      filter: isActive ? 'blur(0px)' : 'blur(2px)',
+    const panelMotion = isActive
+      ? {
+          opacity: 1,
+          y: 0,
+          visibility: 'visible' as const,
+        }
+      : {
+          opacity: 0,
+          y: prefersReducedMotion ? 0 : 4,
+          transitionEnd: { visibility: 'hidden' as const },
+        };
+    const panelTransition = {
+      duration: prefersReducedMotion ? 0 : 0.16,
+      ease: [0.16, 1, 0.3, 1] as const,
     };
     const tabView = tab.kind as DashboardView;
 
@@ -1075,7 +1137,7 @@ export default function App() {
           aria-hidden={!isActive}
           initial={false}
           animate={panelMotion}
-          transition={{ duration: 0.22, ease: 'easeOut' }}
+          transition={panelTransition}
         >
           <AnimatePresence mode="wait" initial={false}>
             <motion.div
@@ -1112,7 +1174,7 @@ export default function App() {
           aria-hidden={!isActive}
           initial={false}
           animate={panelMotion}
-          transition={{ duration: 0.22, ease: 'easeOut' }}
+          transition={panelTransition}
         >
           <AnimatePresence mode="wait" initial={false}>
             <motion.div
@@ -1151,7 +1213,7 @@ export default function App() {
           aria-hidden={!isActive}
           initial={false}
           animate={panelMotion}
-          transition={{ duration: 0.22, ease: 'easeOut' }}
+          transition={panelTransition}
         >
           <AnimatePresence mode="wait" initial={false}>
             <motion.div
@@ -1193,7 +1255,7 @@ export default function App() {
           aria-hidden={!isActive}
           initial={false}
           animate={panelMotion}
-          transition={{ duration: 0.22, ease: 'easeOut' }}
+          transition={panelTransition}
         >
           <AnimatePresence mode="wait" initial={false}>
             <motion.div
@@ -1223,7 +1285,7 @@ export default function App() {
         aria-hidden={!isActive}
         initial={false}
         animate={panelMotion}
-        transition={{ duration: 0.3, ease: 'easeOut' }}
+        transition={panelTransition}
       >
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
@@ -1234,35 +1296,39 @@ export default function App() {
             transition={{ duration: 0.3, ease: 'easeOut' }}
             className="flex h-full w-full min-h-0 min-w-0"
           >
-            <Sidebar
-              user={currentUser}
-              activeTab={tabView}
-              hasActiveDownloads={hasActiveDownloads}
-              hasUpdateAvailable={updateBadgeVisible}
-              onTabChange={(nextTab) => {
-                if (
-                  nextTab === 'home' ||
-                  nextTab === 'library' ||
-                  nextTab === 'downloads' ||
-                  nextTab === 'notebooks' ||
-                  nextTab === 'concepts' ||
-                  nextTab === 'chat' ||
-                  nextTab === 'settings' ||
-                  nextTab === 'metrics' ||
-                  nextTab === 'rag-explorer'
-                ) {
-                  window.dispatchEvent(new CustomEvent('app-navigate', { detail: { view: nextTab, name: nextTab } }));
-                }
-              }}
-            />
+            {isPrimaryWorkspaceWindow && (
+              <Sidebar
+                user={currentUser}
+                activeTab={tabView}
+                hasActiveDownloads={hasActiveDownloads}
+                hasUpdateAvailable={updateBadgeVisible}
+                onTabChange={(nextTab) => {
+                  if (
+                    nextTab === 'home' ||
+                    nextTab === 'library' ||
+                    nextTab === 'downloads' ||
+                    nextTab === 'notebooks' ||
+                    nextTab === 'concepts' ||
+                    nextTab === 'chat' ||
+                    nextTab === 'settings' ||
+                    nextTab === 'metrics' ||
+                    nextTab === 'rag-explorer'
+                  ) {
+                    window.dispatchEvent(new CustomEvent('app-navigate', { detail: { view: nextTab, name: nextTab } }));
+                  }
+                }}
+              />
+            )}
 
             <main
-              className={`app-main-panel flex-1 flex flex-col relative z-0 p-0 overflow-x-hidden no-scrollbar min-w-0 min-h-0 ${
+              className={`${isPrimaryWorkspaceWindow ? 'app-main-panel' : 'detached-main-panel'} flex-1 flex flex-col relative z-0 p-0 overflow-x-hidden no-scrollbar min-w-0 min-h-0 ${
                 tabView === 'home' || tabView === 'rag-explorer' ? 'overflow-hidden' : 'overflow-y-auto'
               } ${
-                tabView === 'concepts'
-                  ? 'h-[calc(100%-48px)] my-6 mx-6 rounded-[32px] bg-[#FCFBF9] dark:bg-[#25272b] border border-slate-200/60 dark:border-white/10 shadow-none backdrop-blur-none'
-                  : 'h-[calc(100%-48px)] my-6 mx-6 rounded-[32px] bg-white/40 dark:bg-slate-900/30 backdrop-blur-2xl border border-white/60 dark:border-slate-800/40 shadow-sm dark:shadow-[0_24px_50px_-12px_rgba(0,0,0,0.4)]'
+                isPrimaryWorkspaceWindow
+                  ? tabView === 'concepts'
+                    ? 'h-[calc(100%-48px)] my-6 mx-6 rounded-[32px] bg-[#FCFBF9] dark:bg-[#25272b] border border-slate-200/60 dark:border-white/10 shadow-none backdrop-blur-none'
+                    : 'h-[calc(100%-48px)] my-6 mx-6 rounded-[32px] bg-white/40 dark:bg-slate-900/30 backdrop-blur-2xl border border-white/60 dark:border-slate-800/40 shadow-sm dark:shadow-[0_24px_50px_-12px_rgba(0,0,0,0.4)]'
+                  : 'h-full w-full rounded-none border-0 bg-white dark:bg-[#1e1f22] shadow-none'
               }`}
             >
               <AnimatePresence mode="wait" initial={false}>
@@ -1381,6 +1447,28 @@ export default function App() {
     }
   };
 
+  const workspaceContent = (
+    <div id="myai-workspace-content" className="relative flex min-h-0 flex-1 overflow-hidden">
+      {workspacePanelTabs.map(renderWorkspaceTabPanel)}
+      <CommandSearchModal isOpen={isSearchModalOpen} onClose={toggleSearchModal} />
+      <CreatePlaylistModal isOpen={isCreatePlaylistModalOpen} onClose={toggleCreatePlaylistModal} />
+      <ImportContentModal
+        isOpen={isImportModalOpen}
+        onClose={toggleImportModal}
+        onNavigateToDownloads={() => navigateWorkspace('downloads')}
+      />
+      <NotificationPanel
+        isOpen={isNotificationPanelOpen}
+        onClose={toggleNotificationPanel}
+        onRefreshCount={fetchUnreadNotificationsCount}
+      />
+      {isPrimaryWorkspaceWindow && <PipelineQueueDock />}
+      {isPrimaryWorkspaceWindow && (
+        <ActivityLogPanel isOpen={isActivityLogOpen} onClose={toggleActivityLogPanel} />
+      )}
+    </div>
+  );
+
   return (
     <AnimatePresence mode="wait">
       {loadingAuth || !workspaceWindowContextLoaded ? (
@@ -1417,6 +1505,31 @@ export default function App() {
           user={currentUser}
           onSetupComplete={handleSetupComplete}
         />
+      ) : !isPrimaryWorkspaceWindow ? (
+        <div key="detached-workspace-layout" className="detached-workspace-root h-screen w-screen overflow-hidden">
+          <header className="detached-window-header">
+            <div className="detached-window-title" title={activeWorkspaceTab?.title || 'MyAiLibrary'}>
+              {activeWorkspaceTab?.title || 'MyAiLibrary'}
+            </div>
+            <button
+              type="button"
+              className="detached-window-attach-button"
+              onClick={handleAttachWorkspaceWindowToPrimary}
+              disabled={isAttachingToPrimary}
+              aria-label="Attach this page to the main window"
+              title="Attach to main window"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h8A1.5 1.5 0 0 1 15 5.5v2a1 1 0 1 1-2 0V6H6v10h3.5a1 1 0 1 1 0 2h-4A1.5 1.5 0 0 1 4 16.5v-11Z" />
+                <path d="M11 12.5a1.5 1.5 0 0 1 1.5-1.5h6a1.5 1.5 0 0 1 1.5 1.5v6a1.5 1.5 0 0 1-1.5 1.5h-6a1.5 1.5 0 0 1-1.5-1.5v-6Zm2 .5v5h5v-5h-5Z" />
+              </svg>
+              <span>{isAttachingToPrimary ? 'Attaching…' : 'Attach to main window'}</span>
+            </button>
+          </header>
+          <div className="detached-workspace-content h-full w-full overflow-hidden">
+            {workspaceContent}
+          </div>
+        </div>
       ) : (
         <DashboardLayout key="dashboard-layout">
           <WorkspaceTitleBar
@@ -1429,28 +1542,12 @@ export default function App() {
             onOpenTabInNewWindow={window.desktop ? handleOpenWorkspaceTabInWindow : undefined}
             onReorderTabs={handleReorderWorkspaceTabs}
           />
-          <div id="myai-workspace-content" className="relative flex min-h-0 flex-1 overflow-hidden">
-            {workspacePanelTabs.map(renderWorkspaceTabPanel)}
-          <CommandSearchModal isOpen={isSearchModalOpen} onClose={toggleSearchModal} />
-          <CreatePlaylistModal isOpen={isCreatePlaylistModalOpen} onClose={toggleCreatePlaylistModal} />
-          <ImportContentModal
-            isOpen={isImportModalOpen}
-            onClose={toggleImportModal}
-            onNavigateToDownloads={() => navigateWorkspace('downloads')}
-          />
-          <NotificationPanel
-            isOpen={isNotificationPanelOpen}
-            onClose={toggleNotificationPanel}
-            onRefreshCount={fetchUnreadNotificationsCount}
-          />
-          <PipelineQueueDock />
-          <ActivityLogPanel isOpen={isActivityLogOpen} onClose={toggleActivityLogPanel} />
-          </div>
+          {workspaceContent}
         </DashboardLayout>
       )}
 
       <AnimatePresence>
-        {isAuthenticated && availableUpdateVersion && dismissedAvailableVersion !== availableUpdateVersion && (
+        {isAuthenticated && isPrimaryWorkspaceWindow && availableUpdateVersion && dismissedAvailableVersion !== availableUpdateVersion && (
           <motion.div
             key={`available-update-${availableUpdateVersion}`}
             initial={{ opacity: 0, y: 24, scale: 0.96 }}
@@ -1493,7 +1590,7 @@ export default function App() {
           </motion.div>
         )}
 
-        {isAuthenticated && installedUpdateInfo && dismissedInstalledVersion !== installedUpdateInfo.currentVersion && (
+        {isAuthenticated && isPrimaryWorkspaceWindow && installedUpdateInfo && dismissedInstalledVersion !== installedUpdateInfo.currentVersion && (
           <motion.div
             key={`installed-update-${installedUpdateInfo.currentVersion}`}
             initial={{ opacity: 0, y: 24, scale: 0.96 }}

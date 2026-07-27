@@ -41,6 +41,7 @@ export default function WorkspaceTitleBar({
   const canOpenContextTabInNewWindow = Boolean(
     contextMenuTab &&
     contextMenuTab.kind !== 'home' &&
+    contextMenuTab.kind !== 'library' &&
     onOpenTabInNewWindow,
   );
 
@@ -69,7 +70,7 @@ export default function WorkspaceTitleBar({
     event.preventDefault();
     event.stopPropagation();
     const menuWidth = 220;
-    const menuHeight = tab.kind === 'home' || !onOpenTabInNewWindow ? 48 : 88;
+    const menuHeight = tab.kind === 'home' || tab.kind === 'library' || !onOpenTabInNewWindow ? 48 : 88;
     const edgeGap = 8;
     setContextMenu({
       tabId: tab.id,
@@ -94,7 +95,7 @@ export default function WorkspaceTitleBar({
               <Reorder.Item
                 key={tab.id}
                 value={tab.id}
-                layout
+                layout="position"
                 transition={{ type: 'spring', stiffness: 520, damping: 38, mass: 0.7 }}
                 whileDrag={{ scale: 1.025, y: -2, zIndex: 40 }}
                 onDragStart={() => {

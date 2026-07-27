@@ -27,6 +27,10 @@ const JOURNALIT_PACKAGE_FILENAME = 'Journalit-Local-1.8.1-Fresh.zip'
 const PRIMARY_WORKSPACE_WINDOW_ID = 'main'
 const MAX_WORKSPACE_WINDOWS = 5
 const MAX_WORKSPACE_TABS = 5
+const PRIMARY_WORKSPACE_WIDTH = 1600
+const PRIMARY_WORKSPACE_HEIGHT = 960
+const DETACHED_WORKSPACE_MIN_WIDTH = 800
+const DETACHED_WORKSPACE_MIN_HEIGHT = 600
 const WORKSPACE_WINDOW_REGISTRY_VERSION = 1
 const workspaceWindowsById = new Map<string, BrowserWindow>()
 const workspaceWindowIdsByWebContents = new Map<number, string>()
@@ -209,6 +213,14 @@ function normalizeWorkspaceTabsState(value: unknown): WorkspaceTabsStatePayload 
   return { tabs: normalizedTabs, activeTabId: candidate.activeTabId }
 }
 
+function normalizeDetachedWorkspaceTabsState(value: unknown): WorkspaceTabsStatePayload | null {
+  const state = normalizeWorkspaceTabsState(value)
+  if (!state) return null
+  const activeTab = state.tabs.find((tab) => tab.id === state.activeTabId)
+  if (!activeTab || activeTab.kind === 'home') return null
+  return { tabs: [activeTab], activeTabId: activeTab.id }
+}
+
 function normalizeWorkspaceBounds(value: unknown): WorkspaceWindowBounds | undefined {
   if (!value || typeof value !== 'object') return undefined
   const candidate = value as Record<string, unknown>
@@ -245,7 +257,11 @@ function loadWorkspaceWindowRegistry(): void {
           workspaceWindowRecords.has(candidate.id)
         ) continue
         const primary = candidate.id === PRIMARY_WORKSPACE_WINDOW_ID
-        const tabsState = candidate.tabsState === undefined ? undefined : normalizeWorkspaceTabsState(candidate.tabsState) ?? undefined
+        const tabsState = candidate.tabsState === undefined
+          ? undefined
+          : (primary
+              ? normalizeWorkspaceTabsState(candidate.tabsState)
+              : normalizeDetachedWorkspaceTabsState(candidate.tabsState)) ?? undefined
         if (!primary && !tabsState) continue
         workspaceWindowRecords.set(candidate.id, {
           id: candidate.id,
@@ -305,10 +321,14 @@ function clampWorkspaceBounds(bounds: WorkspaceWindowBounds | undefined, primary
     ? screen.getDisplayMatching(bounds)
     : screen.getPrimaryDisplay()
   const area = display.workArea
-  const defaultWidth = Math.min(primary ? 1600 : 1440, area.width)
-  const defaultHeight = Math.min(primary ? 960 : 880, area.height)
-  const width = Math.min(Math.max(bounds?.width ?? defaultWidth, 1024), area.width)
-  const height = Math.min(Math.max(bounds?.height ?? defaultHeight, 700), area.height)
+  const defaultWidth = Math.min(primary ? PRIMARY_WORKSPACE_WIDTH : 1440, area.width)
+  const defaultHeight = Math.min(primary ? PRIMARY_WORKSPACE_HEIGHT : 880, area.height)
+  const width = primary
+    ? defaultWidth
+    : Math.min(Math.max(bounds?.width ?? defaultWidth, DETACHED_WORKSPACE_MIN_WIDTH), area.width)
+  const height = primary
+    ? defaultHeight
+    : Math.min(Math.max(bounds?.height ?? defaultHeight, DETACHED_WORKSPACE_MIN_HEIGHT), area.height)
   const defaultX = area.x + Math.round((area.width - width) / 2)
   const defaultY = area.y + Math.round((area.height - height) / 2)
   const x = Math.min(Math.max(bounds?.x ?? defaultX, area.x), area.x + area.width - width)
@@ -544,18 +564,75 @@ function registerIpc(): void {
       return { success: false, error: 'This window is not authorized to open workspace windows.' }
     }
     const tab = normalizeWorkspaceTab(value)
-    if (!tab || tab.kind === 'home') {
-      return { success: false, error: 'Only a valid non-Home workspace tab can be moved.' }
+    if (!tab || tab.kind === 'home' || tab.kind === 'library') {
+      return { success: false, error: 'Home and Library stay in the primary window.' }
     }
     return openDetachedWorkspaceWindow(tab, BrowserWindow.fromWebContents(event.sender))
+  })
+  ipcMain.handle('desktop:attach-workspace-window-to-primary', (event) => {
+    if (!senderIsTrusted(event.senderFrame?.url ?? '')) {
+      return { success: false, error: 'This window is not authorized to attach workspace pages.' }
+    }
+    const sourceWindowId = workspaceWindowIdsByWebContents.get(event.sender.id)
+    const sourceRecord = sourceWindowId ? workspaceWindowRecords.get(sourceWindowId) : undefined
+    const sourceWindow = BrowserWindow.fromWebContents(event.sender)
+    if (!sourceWindowId || !sourceRecord || sourceRecord.primary || !sourceWindow || sourceWindow.isDestroyed()) {
+      return { success: false, error: 'Only a detached workspace window can be attached.' }
+    }
+    const sourceState = sourceRecord.tabsState
+      ? normalizeDetachedWorkspaceTabsState(sourceRecord.tabsState)
+      : null
+    const primaryRecord = workspaceWindowRecords.get(PRIMARY_WORKSPACE_WINDOW_ID)
+    const primaryWindow = workspaceWindowsById.get(PRIMARY_WORKSPACE_WINDOW_ID)
+    const primaryState = primaryRecord?.tabsState
+      ? normalizeWorkspaceTabsState(primaryRecord.tabsState)
+      : null
+    if (!sourceState || !primaryRecord || !primaryWindow || primaryWindow.isDestroyed() || !primaryState) {
+      return { success: false, error: 'The primary workspace is not ready yet.' }
+    }
+
+    const sourceTab = sourceState.tabs[0]
+    const existingIds = new Set(primaryState.tabs.map((tab) => tab.id))
+    const attachedTab = existingIds.has(sourceTab.id)
+      ? {
+          ...sourceTab,
+          id: `tab-${randomBytes(8).toString('hex')}`,
+          updatedAt: Date.now(),
+        }
+      : sourceTab
+    if (primaryState.tabs.length >= MAX_WORKSPACE_TABS) {
+      return { success: false, error: `The primary window already has ${MAX_WORKSPACE_TABS} tabs open.` }
+    }
+
+    const nextState: WorkspaceTabsStatePayload = {
+      tabs: [...primaryState.tabs, attachedTab],
+      activeTabId: attachedTab.id,
+    }
+    primaryRecord.tabsState = nextState
+    scheduleWorkspaceWindowRegistrySave()
+    primaryWindow.webContents.send('desktop:workspace-tabs-attached', nextState)
+    if (primaryWindow.isMinimized()) primaryWindow.restore()
+    primaryWindow.show()
+    primaryWindow.focus()
+    sourceWindow.hide()
+    setTimeout(() => {
+      if (!sourceWindow.isDestroyed()) sourceWindow.close()
+    }, 50)
+    return { success: true }
   })
   ipcMain.handle('desktop:save-workspace-window-tabs', (event, value: unknown) => {
     if (!senderIsTrusted(event.senderFrame?.url ?? '')) return false
     const windowId = workspaceWindowIdsByWebContents.get(event.sender.id)
-    const state = normalizeWorkspaceTabsState(value)
-    if (!windowId || !state) return false
+    if (!windowId) return false
     const record = workspaceWindowRecords.get(windowId)
     if (!record) return false
+    const normalizedState = normalizeWorkspaceTabsState(value)
+    if (!normalizedState) return false
+    if (!record.primary && normalizedState.tabs.length !== 1) return false
+    const state = record.primary
+      ? normalizedState
+      : normalizeDetachedWorkspaceTabsState(normalizedState)
+    if (!state) return false
     record.tabsState = state
     scheduleWorkspaceWindowRegistrySave()
     return true
@@ -700,8 +777,11 @@ function applyTitleBarTheme(theme: 'light' | 'dark'): void {
   if (windowControlsHidden) return
   for (const window of appWindows) {
     if (window.isDestroyed()) continue
+    const windowId = workspaceWindowIdsByWebContents.get(window.webContents.id)
+    const record = windowId ? workspaceWindowRecords.get(windowId) : undefined
+    const isDetachedWorkspaceWindow = record?.primary === false
     window.setTitleBarOverlay({
-      color: theme === 'dark' ? '#0f141d' : '#f5f8fd',
+      color: isDetachedWorkspaceWindow ? '#00000000' : (theme === 'dark' ? '#0f141d' : '#f5f8fd'),
       symbolColor: theme === 'dark' ? '#f8fafc' : '#0f172a',
       height: 40,
     })
@@ -846,19 +926,19 @@ function createWorkspaceWindow(record: WorkspaceWindowRecord): BrowserWindow {
   const bounds = clampWorkspaceBounds(record.bounds, record.primary)
   const window = new BrowserWindow({
     ...bounds,
-    minWidth: 1024,
-    minHeight: 700,
-    resizable: true,
+    minWidth: record.primary ? bounds.width : DETACHED_WORKSPACE_MIN_WIDTH,
+    minHeight: record.primary ? bounds.height : DETACHED_WORKSPACE_MIN_HEIGHT,
+    resizable: !record.primary,
     maximizable: true,
     minimizable: true,
-    fullscreenable: true,
+    fullscreenable: !record.primary,
     show: false,
     backgroundColor: currentTitleBarTheme === 'dark' ? '#090b10' : '#f5f8fd',
     icon: existsSync(iconPath) ? iconPath : undefined,
     title: 'MyAiLibrary',
     titleBarStyle: 'hidden',
       titleBarOverlay: {
-        color: currentTitleBarTheme === 'dark' ? '#0f141d' : '#f5f8fd',
+        color: record.primary ? (currentTitleBarTheme === 'dark' ? '#0f141d' : '#f5f8fd') : '#00000000',
         symbolColor: currentTitleBarTheme === 'dark' ? '#f8fafc' : '#0f172a',
         height: 40,
       },

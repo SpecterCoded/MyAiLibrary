@@ -66,7 +66,12 @@ declare global {
       windowId?: string
       error?: string
     }>
+    attachWorkspaceWindowToPrimary(): Promise<{
+      success: boolean
+      error?: string
+    }>
     saveWorkspaceWindowTabs(state: WorkspaceTabsState): Promise<boolean>
+    onWorkspaceTabsAttached(listener: (state: WorkspaceTabsState) => void): () => void
     selectFile(): Promise<string | null>
     selectFolder(): Promise<string | null>
     revealPath(targetPath: string): Promise<boolean>
