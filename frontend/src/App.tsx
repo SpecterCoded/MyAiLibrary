@@ -30,7 +30,7 @@ import RagExplorerPage from './components/rag-explorer/RagExplorerPage';
 import WorkspaceTitleBar from './components/WorkspaceTitleBar';
 import { init as initActivityLogger, destroy as destroyActivityLogger } from './utils/activityLogger';
 import { auth } from './firebase';
-import type { WorkspaceTab, WorkspaceTabKind, WorkspaceTabParams } from './types/workspaceTabs';
+import type { WorkspaceTab, WorkspaceTabKind, WorkspaceTabParams, WorkspaceTabsState } from './types/workspaceTabs';
 
 interface PlaylistData {
   id: number;
@@ -65,11 +65,6 @@ export interface AuthContextType {
 }
 
 type DashboardView = 'home' | 'library' | 'folder' | 'downloads' | 'notebooks' | 'concepts' | 'chat' | 'metrics' | 'settings' | 'document-intelligence' | 'rag-explorer';
-
-interface WorkspaceTabsState {
-  tabs: WorkspaceTab[];
-  activeTabId: string;
-}
 
 const MAX_WORKSPACE_TABS = 5;
 const WORKSPACE_TABS_STORAGE_KEY = 'myai_workspace_tabs_v1';
@@ -507,7 +502,12 @@ export default function App() {
   });
   const [selectedDocumentIntelligenceResourceId, setSelectedDocumentIntelligenceResourceId] = useState<string | null>(null);
   const [returnViewFromDocumentIntelligence, setReturnViewFromDocumentIntelligence] = useState<Exclude<DashboardView, 'document-intelligence'>>('library');
-  const [workspaceTabsState, setWorkspaceTabsState] = useState<WorkspaceTabsState>(() => readInitialWorkspaceTabsState());
+  const [workspaceTabsState, setWorkspaceTabsState] = useState<WorkspaceTabsState>(() => {
+    if (!window.desktop) return readInitialWorkspaceTabsState();
+    const tab = createWorkspaceTab('home');
+    return { tabs: [tab], activeTabId: tab.id };
+  });
+  const [workspaceWindowContextLoaded, setWorkspaceWindowContextLoaded] = useState(() => !window.desktop);
   const [desktopUpdateState, setDesktopUpdateState] = useState<DesktopUpdateState | null>(null);
   const [installedUpdateInfo, setInstalledUpdateInfo] = useState<DesktopInstalledUpdateInfo | null>(null);
   const [dismissedAvailableVersion, setDismissedAvailableVersion] = useState<string | null>(null);
@@ -560,14 +560,6 @@ export default function App() {
     return createdDelta || left.id.localeCompare(right.id);
   });
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(WORKSPACE_TABS_STORAGE_KEY, JSON.stringify(workspaceTabsState));
-    } catch {
-      // Losing tab restore is non-critical; never interrupt the app for it.
-    }
-  }, [workspaceTabsState]);
-
   const applyWorkspaceTab = (tab: WorkspaceTab) => {
     if (tab.kind === 'audio-player' || tab.kind === 'video-player') return;
 
@@ -592,6 +584,49 @@ export default function App() {
       }, 0);
     }
   };
+
+  useEffect(() => {
+    if (!window.desktop) return;
+    let active = true;
+    void window.desktop.getWorkspaceWindowContext()
+      .then((context) => {
+        if (!active) return;
+        const restoredState = context?.tabsState
+          ? normalizeWorkspaceTabsState(context.tabsState)
+          : readInitialWorkspaceTabsState();
+        setWorkspaceTabsState(restoredState);
+        const restoredTab = restoredState.tabs.find((tab) => tab.id === restoredState.activeTabId) || restoredState.tabs[0];
+        if (restoredTab) applyWorkspaceTab(restoredTab);
+        setWorkspaceWindowContextLoaded(true);
+      })
+      .catch((error) => {
+        console.error('Failed to load the workspace window context:', error);
+        if (!active) return;
+        const fallbackState = readInitialWorkspaceTabsState();
+        setWorkspaceTabsState(fallbackState);
+        const fallbackTab = fallbackState.tabs.find((tab) => tab.id === fallbackState.activeTabId) || fallbackState.tabs[0];
+        if (fallbackTab) applyWorkspaceTab(fallbackTab);
+        setWorkspaceWindowContextLoaded(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!workspaceWindowContextLoaded) return;
+    if (window.desktop) {
+      void window.desktop.saveWorkspaceWindowTabs(workspaceTabsState).then((saved) => {
+        if (!saved) console.warn('Electron rejected the workspace tab state.');
+      });
+      return;
+    }
+    try {
+      localStorage.setItem(WORKSPACE_TABS_STORAGE_KEY, JSON.stringify(workspaceTabsState));
+    } catch {
+      // Losing tab restore is non-critical; never interrupt the app for it.
+    }
+  }, [workspaceTabsState, workspaceWindowContextLoaded]);
 
   const updateActiveWorkspaceTab = (kind: WorkspaceTabKind, params: WorkspaceTabParams = {}, title?: string) => {
     setWorkspaceTabsState((prev) => {
@@ -650,16 +685,18 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (!isAuthenticated || !activeWorkspaceTab) return;
+    if (!workspaceWindowContextLoaded || !isAuthenticated || !activeWorkspaceTab) return;
     if (activeWorkspaceTab.kind === 'audio-player' || activeWorkspaceTab.kind === 'video-player') return;
     const params: WorkspaceTabParams =
       currentView === 'folder'
         ? { playlistId: selectedPlaylistId || undefined, playlistName: selectedPlaylistName || undefined }
         : currentView === 'document-intelligence'
           ? { resourceId: selectedDocumentIntelligenceResourceId || undefined }
+          : currentView === 'settings'
+            ? { settingsTab: activeWorkspaceTab.kind === 'settings' ? activeWorkspaceTab.params?.settingsTab : undefined }
           : {};
     updateActiveWorkspaceTab(currentView, params);
-  }, [currentView, selectedPlaylistId, selectedPlaylistName, selectedDocumentIntelligenceResourceId, isAuthenticated]);
+  }, [currentView, selectedPlaylistId, selectedPlaylistName, selectedDocumentIntelligenceResourceId, isAuthenticated, workspaceWindowContextLoaded]);
 
   const handleSelectWorkspaceTab = (tabId: string) => {
     const tab = workspaceTabs.find((item) => item.id === tabId);
@@ -696,6 +733,22 @@ export default function App() {
       window.setTimeout(() => applyWorkspaceTab(nextActiveTab), 0);
       return { tabs: nextTabs, activeTabId: nextActiveTab.id };
     });
+  };
+
+  const handleOpenWorkspaceTabInWindow = async (tabId: string) => {
+    const tab = workspaceTabs.find((item) => item.id === tabId);
+    if (!tab || tab.kind === 'home' || !window.desktop) return;
+    try {
+      const result = await window.desktop.openWorkspaceWindow(tab);
+      if (!result.success) {
+        window.alert(result.error || 'The tab could not be opened in a new window.');
+        return;
+      }
+      handleCloseWorkspaceTab(tabId);
+    } catch (error) {
+      console.error('Failed to open workspace tab in a new window:', error);
+      window.alert('The tab could not be opened in a new window. It is still open here.');
+    }
   };
 
   const handleReorderWorkspaceTabs = (tabIds: string[]) => {
@@ -1330,7 +1383,7 @@ export default function App() {
 
   return (
     <AnimatePresence mode="wait">
-      {loadingAuth ? (
+      {loadingAuth || !workspaceWindowContextLoaded ? (
         <LogoLoading
           key="auth-loading"
           fullscreen
@@ -1373,6 +1426,7 @@ export default function App() {
             onSelectTab={handleSelectWorkspaceTab}
             onNewTab={handleNewWorkspaceTab}
             onCloseTab={handleCloseWorkspaceTab}
+            onOpenTabInNewWindow={window.desktop ? handleOpenWorkspaceTabInWindow : undefined}
             onReorderTabs={handleReorderWorkspaceTabs}
           />
           <div id="myai-workspace-content" className="relative flex min-h-0 flex-1 overflow-hidden">

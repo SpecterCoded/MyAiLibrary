@@ -1,3 +1,5 @@
+import type { WorkspaceTab, WorkspaceTabsState } from './types/workspaceTabs'
+
 export {}
 
 declare global {
@@ -54,6 +56,17 @@ declare global {
   }
 
   interface DesktopBridge {
+    getWorkspaceWindowContext(): Promise<{
+      windowId: string
+      isPrimary: boolean
+      tabsState: WorkspaceTabsState | null
+    } | null>
+    openWorkspaceWindow(tab: WorkspaceTab): Promise<{
+      success: boolean
+      windowId?: string
+      error?: string
+    }>
+    saveWorkspaceWindowTabs(state: WorkspaceTabsState): Promise<boolean>
     selectFile(): Promise<string | null>
     selectFolder(): Promise<string | null>
     revealPath(targetPath: string): Promise<boolean>

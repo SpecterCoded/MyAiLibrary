@@ -1,7 +1,14 @@
-import React, { useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Reorder } from 'framer-motion';
-import { Plus, X } from 'lucide-react';
+import { ExternalLink, Plus, X } from 'lucide-react';
 import type { WorkspaceTab } from '../types/workspaceTabs';
+
+interface TabContextMenuState {
+  tabId: string;
+  x: number;
+  y: number;
+}
 
 interface WorkspaceTitleBarProps {
   tabs: WorkspaceTab[];
@@ -10,6 +17,7 @@ interface WorkspaceTitleBarProps {
   onSelectTab: (tabId: string) => void;
   onNewTab: () => void;
   onCloseTab: (tabId: string) => void;
+  onOpenTabInNewWindow?: (tabId: string) => void | Promise<void>;
   onReorderTabs: (tabIds: string[]) => void;
 }
 
@@ -20,17 +28,61 @@ export default function WorkspaceTitleBar({
   onSelectTab,
   onNewTab,
   onCloseTab,
+  onOpenTabInNewWindow,
   onReorderTabs,
 }: WorkspaceTitleBarProps) {
   const canAddTab = tabs.length < maxTabs;
   const draggingTabIdRef = useRef<string | null>(null);
   const suppressClickRef = useRef(false);
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
+  const [contextMenu, setContextMenu] = useState<TabContextMenuState | null>(null);
   const tabIds = tabs.map((tab) => tab.id);
+  const contextMenuTab = contextMenu ? tabs.find((tab) => tab.id === contextMenu.tabId) : undefined;
+  const canOpenContextTabInNewWindow = Boolean(
+    contextMenuTab &&
+    contextMenuTab.kind !== 'home' &&
+    onOpenTabInNewWindow,
+  );
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const closeMenu = () => setContextMenu(null);
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!contextMenuRef.current?.contains(event.target as Node)) closeMenu();
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeMenu();
+    };
+    window.addEventListener('pointerdown', handlePointerDown, true);
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('resize', closeMenu);
+    window.addEventListener('scroll', closeMenu, true);
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown, true);
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('resize', closeMenu);
+      window.removeEventListener('scroll', closeMenu, true);
+    };
+  }, [contextMenu]);
+
+  const openContextMenu = (event: React.MouseEvent, tab: WorkspaceTab) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const menuWidth = 220;
+    const menuHeight = tab.kind === 'home' || !onOpenTabInNewWindow ? 48 : 88;
+    const edgeGap = 8;
+    setContextMenu({
+      tabId: tab.id,
+      x: Math.max(edgeGap, Math.min(event.clientX, window.innerWidth - menuWidth - edgeGap)),
+      y: Math.max(edgeGap, Math.min(event.clientY, window.innerHeight - menuHeight - edgeGap)),
+    });
+  };
 
   return (
-    <div className="workspace-titlebar flex h-10 shrink-0 items-stretch border-b border-slate-200/70 bg-[#f5f8fd] text-slate-700 dark:border-white/10 dark:bg-[#0f141d] dark:text-slate-200">
-      <div className="workspace-drag-region flex min-w-0 flex-1 items-end gap-1 px-2 pr-[150px]">
-        <Reorder.Group
+    <>
+      <div className="workspace-titlebar flex h-10 shrink-0 items-stretch border-b border-slate-200/70 bg-[#f5f8fd] text-slate-700 dark:border-white/10 dark:bg-[#0f141d] dark:text-slate-200">
+        <div className="workspace-drag-region flex min-w-0 flex-1 items-end gap-1 px-2 pr-[150px]">
+          <Reorder.Group
           axis="x"
           values={tabIds}
           onReorder={onReorderTabs}
@@ -63,6 +115,7 @@ export default function WorkspaceTitleBar({
                   if (draggingTabIdRef.current === tab.id || suppressClickRef.current) return;
                   onSelectTab(tab.id);
                 }}
+                onContextMenu={(event) => openContextMenu(event, tab)}
                 className={`group flex h-8 w-full items-center justify-between gap-2 rounded-t-[10px] px-3 text-left text-[12px] font-semibold transition-colors ${
                   active
                     ? 'border border-slate-200/80 border-b-transparent bg-white text-slate-950 shadow-[0_1px_8px_rgba(15,23,42,0.08)] dark:border-white/10 dark:border-b-transparent dark:bg-[#25272b] dark:text-white dark:shadow-none'
@@ -101,8 +154,46 @@ export default function WorkspaceTitleBar({
           >
             <Plus className="h-4 w-4" />
           </button>
-        </Reorder.Group>
+          </Reorder.Group>
+        </div>
       </div>
-    </div>
+      {contextMenu && contextMenuTab && createPortal(
+        <div
+          ref={contextMenuRef}
+          role="menu"
+          aria-label={`${contextMenuTab.title} tab actions`}
+          className="fixed z-[10050] w-[220px] overflow-hidden rounded-xl border border-slate-200/90 bg-white p-1.5 text-slate-700 shadow-[0_18px_48px_rgba(15,23,42,0.2)] dark:border-white/10 dark:bg-[#25272b] dark:text-slate-200 dark:shadow-[0_18px_48px_rgba(0,0,0,0.5)]"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+        >
+          {canOpenContextTabInNewWindow && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setContextMenu(null);
+                void onOpenTabInNewWindow?.(contextMenuTab.id);
+              }}
+              className="flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-[12px] font-medium transition-colors hover:bg-slate-100 dark:hover:bg-white/10"
+            >
+              <ExternalLink className="h-4 w-4" />
+              <span>Open in new window</span>
+            </button>
+          )}
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setContextMenu(null);
+              onCloseTab(contextMenuTab.id);
+            }}
+            className="flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-[12px] font-medium transition-colors hover:bg-slate-100 dark:hover:bg-white/10"
+          >
+            <X className="h-4 w-4" />
+            <span>Close tab</span>
+          </button>
+        </div>,
+        document.body,
+      )}
+    </>
   );
 }

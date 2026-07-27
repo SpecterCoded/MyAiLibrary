@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { app, autoUpdater as nativeAutoUpdater, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, screen, session, shell, Tray } from 'electron'
 import { BackendRuntime, BackendState, startBackend, stopBackend } from './backend-process'
@@ -24,6 +24,64 @@ let attachmentViewerReady = false
 let pendingAttachmentViewerPayload: AttachmentViewerPayload | null = null
 const attachmentViewerFilePaths = new Map<string, string>()
 const JOURNALIT_PACKAGE_FILENAME = 'Journalit-Local-1.8.1-Fresh.zip'
+const PRIMARY_WORKSPACE_WINDOW_ID = 'main'
+const MAX_WORKSPACE_WINDOWS = 5
+const MAX_WORKSPACE_TABS = 5
+const WORKSPACE_WINDOW_REGISTRY_VERSION = 1
+const workspaceWindowsById = new Map<string, BrowserWindow>()
+const workspaceWindowIdsByWebContents = new Map<number, string>()
+const workspaceWindowRecords = new Map<string, WorkspaceWindowRecord>()
+let workspaceRegistrySaveTimer: NodeJS.Timeout | null = null
+
+const WORKSPACE_TAB_KINDS = new Set([
+  'home',
+  'library',
+  'folder',
+  'downloads',
+  'notebooks',
+  'concepts',
+  'chat',
+  'metrics',
+  'settings',
+  'rag-explorer',
+  'audio-player',
+  'video-player',
+  'document-intelligence',
+])
+
+interface WorkspaceTabPayload {
+  id: string
+  title: string
+  kind: string
+  params?: Record<string, string | number | undefined>
+  createdAt: number
+  updatedAt: number
+}
+
+interface WorkspaceTabsStatePayload {
+  tabs: WorkspaceTabPayload[]
+  activeTabId: string
+}
+
+interface WorkspaceWindowBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+interface WorkspaceWindowRecord {
+  id: string
+  primary: boolean
+  bounds?: WorkspaceWindowBounds
+  maximized?: boolean
+  tabsState?: WorkspaceTabsStatePayload
+}
+
+interface WorkspaceWindowRegistry {
+  version: number
+  windows: WorkspaceWindowRecord[]
+}
 
 type AttachmentViewerKind = 'image' | 'video' | 'audio' | 'pdf'
 
@@ -81,6 +139,187 @@ if (process.platform === 'win32') {
 function desktopDataRoot(): string {
   const base = process.env.LOCALAPPDATA || app.getPath('userData')
   return path.join(base, 'MyAILibrary')
+}
+
+function workspaceWindowRegistryPath(): string {
+  return path.join(desktopDataRoot(), 'workspace-windows.json')
+}
+
+function normalizeWorkspaceTab(value: unknown): WorkspaceTabPayload | null {
+  if (!value || typeof value !== 'object') return null
+  const candidate = value as Record<string, unknown>
+  if (
+    typeof candidate.id !== 'string' ||
+    candidate.id.length < 1 ||
+    candidate.id.length > 256 ||
+    typeof candidate.title !== 'string' ||
+    candidate.title.length < 1 ||
+    candidate.title.length > 512 ||
+    typeof candidate.kind !== 'string' ||
+    !WORKSPACE_TAB_KINDS.has(candidate.kind) ||
+    typeof candidate.createdAt !== 'number' ||
+    !Number.isFinite(candidate.createdAt) ||
+    typeof candidate.updatedAt !== 'number' ||
+    !Number.isFinite(candidate.updatedAt)
+  ) return null
+
+  const normalized: WorkspaceTabPayload = {
+    id: candidate.id,
+    title: candidate.title,
+    kind: candidate.kind,
+    createdAt: candidate.createdAt,
+    updatedAt: candidate.updatedAt,
+  }
+  if (candidate.params !== undefined) {
+    if (!candidate.params || typeof candidate.params !== 'object' || Array.isArray(candidate.params)) return null
+    const params = candidate.params as Record<string, unknown>
+    const allowedStringKeys = ['playlistId', 'playlistName', 'folderId', 'folderName', 'resourceId', 'mediaUrl', 'settingsTab']
+    const normalizedParams: Record<string, string | number> = {}
+    for (const [key, paramValue] of Object.entries(params)) {
+      if (paramValue === undefined) continue
+      if (key === 'time') {
+        if (typeof paramValue !== 'number' || !Number.isFinite(paramValue) || paramValue < 0) return null
+        normalizedParams.time = paramValue
+        continue
+      }
+      if (!allowedStringKeys.includes(key) || typeof paramValue !== 'string') return null
+      const maxLength = key === 'mediaUrl' ? 32_768 : 1_024
+      if (paramValue.length > maxLength) return null
+      normalizedParams[key] = paramValue
+    }
+    normalized.params = normalizedParams
+  }
+  return normalized
+}
+
+function normalizeWorkspaceTabsState(value: unknown): WorkspaceTabsStatePayload | null {
+  if (!value || typeof value !== 'object') return null
+  const candidate = value as Record<string, unknown>
+  if (
+    !Array.isArray(candidate.tabs) ||
+    candidate.tabs.length < 1 ||
+    candidate.tabs.length > MAX_WORKSPACE_TABS ||
+    typeof candidate.activeTabId !== 'string'
+  ) return null
+  const tabs = candidate.tabs.map(normalizeWorkspaceTab)
+  if (tabs.some((tab) => tab === null)) return null
+  const normalizedTabs = tabs as WorkspaceTabPayload[]
+  if (new Set(normalizedTabs.map((tab) => tab.id)).size !== normalizedTabs.length) return null
+  if (!normalizedTabs.some((tab) => tab.id === candidate.activeTabId)) return null
+  return { tabs: normalizedTabs, activeTabId: candidate.activeTabId }
+}
+
+function normalizeWorkspaceBounds(value: unknown): WorkspaceWindowBounds | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const candidate = value as Record<string, unknown>
+  if (
+    typeof candidate.x !== 'number' ||
+    typeof candidate.y !== 'number' ||
+    typeof candidate.width !== 'number' ||
+    typeof candidate.height !== 'number' ||
+    !Number.isFinite(candidate.x) ||
+    !Number.isFinite(candidate.y) ||
+    !Number.isFinite(candidate.width) ||
+    !Number.isFinite(candidate.height)
+  ) return undefined
+  return {
+    x: Math.round(candidate.x),
+    y: Math.round(candidate.y),
+    width: Math.max(1024, Math.round(candidate.width)),
+    height: Math.max(700, Math.round(candidate.height)),
+  }
+}
+
+function loadWorkspaceWindowRegistry(): void {
+  workspaceWindowRecords.clear()
+  try {
+    const parsed = JSON.parse(readFileSync(workspaceWindowRegistryPath(), 'utf8')) as Partial<WorkspaceWindowRegistry>
+    if (parsed.version === WORKSPACE_WINDOW_REGISTRY_VERSION && Array.isArray(parsed.windows)) {
+      for (const value of parsed.windows.slice(0, MAX_WORKSPACE_WINDOWS)) {
+        if (!value || typeof value !== 'object') continue
+        const candidate = value as Partial<WorkspaceWindowRecord>
+        if (
+          typeof candidate.id !== 'string' ||
+          candidate.id.length < 1 ||
+          candidate.id.length > 128 ||
+          workspaceWindowRecords.has(candidate.id)
+        ) continue
+        const primary = candidate.id === PRIMARY_WORKSPACE_WINDOW_ID
+        const tabsState = candidate.tabsState === undefined ? undefined : normalizeWorkspaceTabsState(candidate.tabsState) ?? undefined
+        if (!primary && !tabsState) continue
+        workspaceWindowRecords.set(candidate.id, {
+          id: candidate.id,
+          primary,
+          bounds: normalizeWorkspaceBounds(candidate.bounds),
+          maximized: candidate.maximized === true,
+          tabsState,
+        })
+      }
+    }
+  } catch {
+    // Missing or corrupt state starts with a clean primary window.
+  }
+  const existingPrimary = workspaceWindowRecords.get(PRIMARY_WORKSPACE_WINDOW_ID)
+  workspaceWindowRecords.set(PRIMARY_WORKSPACE_WINDOW_ID, existingPrimary ?? {
+    id: PRIMARY_WORKSPACE_WINDOW_ID,
+    primary: true,
+  })
+}
+
+function captureWorkspaceWindowRecord(record: WorkspaceWindowRecord): void {
+  const window = workspaceWindowsById.get(record.id)
+  if (!window || window.isDestroyed()) return
+  const bounds = window.isMaximized() ? window.getNormalBounds() : window.getBounds()
+  record.bounds = normalizeWorkspaceBounds(bounds)
+  record.maximized = window.isMaximized()
+}
+
+function persistWorkspaceWindowRegistry(): void {
+  if (workspaceRegistrySaveTimer) {
+    clearTimeout(workspaceRegistrySaveTimer)
+    workspaceRegistrySaveTimer = null
+  }
+  for (const record of workspaceWindowRecords.values()) captureWorkspaceWindowRecord(record)
+  const registry: WorkspaceWindowRegistry = {
+    version: WORKSPACE_WINDOW_REGISTRY_VERSION,
+    windows: Array.from(workspaceWindowRecords.values()).slice(0, MAX_WORKSPACE_WINDOWS),
+  }
+  const targetPath = workspaceWindowRegistryPath()
+  const temporaryPath = `${targetPath}.tmp`
+  try {
+    mkdirSync(path.dirname(targetPath), { recursive: true })
+    writeFileSync(temporaryPath, JSON.stringify(registry, null, 2), 'utf8')
+    renameSync(temporaryPath, targetPath)
+  } catch (error) {
+    console.warn('[desktop] failed to persist workspace windows', error)
+  }
+}
+
+function scheduleWorkspaceWindowRegistrySave(): void {
+  if (workspaceRegistrySaveTimer) clearTimeout(workspaceRegistrySaveTimer)
+  workspaceRegistrySaveTimer = setTimeout(persistWorkspaceWindowRegistry, 250)
+}
+
+function clampWorkspaceBounds(bounds: WorkspaceWindowBounds | undefined, primary: boolean): WorkspaceWindowBounds {
+  const display = bounds
+    ? screen.getDisplayMatching(bounds)
+    : screen.getPrimaryDisplay()
+  const area = display.workArea
+  const defaultWidth = Math.min(primary ? 1600 : 1440, area.width)
+  const defaultHeight = Math.min(primary ? 960 : 880, area.height)
+  const width = Math.min(Math.max(bounds?.width ?? defaultWidth, 1024), area.width)
+  const height = Math.min(Math.max(bounds?.height ?? defaultHeight, 700), area.height)
+  const defaultX = area.x + Math.round((area.width - width) / 2)
+  const defaultY = area.y + Math.round((area.height - height) / 2)
+  const x = Math.min(Math.max(bounds?.x ?? defaultX, area.x), area.x + area.width - width)
+  const y = Math.min(Math.max(bounds?.y ?? defaultY, area.y), area.y + area.height - height)
+  return { x, y, width, height }
+}
+
+function workspaceRendererUrl(windowId: string): string {
+  const url = new URL(currentRendererUrl)
+  url.searchParams.set('workspaceWindow', windowId)
+  return url.toString()
 }
 
 function sendBackendState(state: BackendState, detail?: string): void {
@@ -288,10 +527,44 @@ function openAttachmentViewer(payload: AttachmentViewerPayload): void {
 }
 
 function registerIpc(): void {
+  ipcMain.handle('desktop:get-workspace-window-context', (event) => {
+    if (!senderIsTrusted(event.senderFrame?.url ?? '')) return null
+    const windowId = workspaceWindowIdsByWebContents.get(event.sender.id)
+    if (!windowId) return null
+    const record = workspaceWindowRecords.get(windowId)
+    if (!record) return null
+    return {
+      windowId: record.id,
+      isPrimary: record.primary,
+      tabsState: record.tabsState ?? null,
+    }
+  })
+  ipcMain.handle('desktop:open-workspace-window', async (event, value: unknown) => {
+    if (!senderIsTrusted(event.senderFrame?.url ?? '') || !workspaceWindowIdsByWebContents.has(event.sender.id)) {
+      return { success: false, error: 'This window is not authorized to open workspace windows.' }
+    }
+    const tab = normalizeWorkspaceTab(value)
+    if (!tab || tab.kind === 'home') {
+      return { success: false, error: 'Only a valid non-Home workspace tab can be moved.' }
+    }
+    return openDetachedWorkspaceWindow(tab, BrowserWindow.fromWebContents(event.sender))
+  })
+  ipcMain.handle('desktop:save-workspace-window-tabs', (event, value: unknown) => {
+    if (!senderIsTrusted(event.senderFrame?.url ?? '')) return false
+    const windowId = workspaceWindowIdsByWebContents.get(event.sender.id)
+    const state = normalizeWorkspaceTabsState(value)
+    if (!windowId || !state) return false
+    const record = workspaceWindowRecords.get(windowId)
+    if (!record) return false
+    record.tabsState = state
+    scheduleWorkspaceWindowRegistrySave()
+    return true
+  })
   ipcMain.handle('desktop:select-file', async (event) => {
     if (!senderIsTrusted(event.senderFrame?.url ?? '')) return null
     const options: Electron.OpenDialogOptions = { properties: ['openFile'] }
-    const result = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options)
+    const parent = BrowserWindow.fromWebContents(event.sender)
+    const result = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options)
     return result.canceled ? null : result.filePaths[0] ?? null
   })
   ipcMain.handle('desktop:select-folder', async (event) => {
@@ -300,7 +573,8 @@ function registerIpc(): void {
       title: 'Select Library Workspace Folder',
       properties: ['openDirectory', 'createDirectory'],
     }
-    const result = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options)
+    const parent = BrowserWindow.fromWebContents(event.sender)
+    const result = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options)
     return result.canceled ? null : result.filePaths[0] ?? null
   })
   ipcMain.handle('desktop:reveal-path', async (event, targetPath: unknown) => {
@@ -567,11 +841,11 @@ function createSplash(): BrowserWindow {
   return splash
 }
 
-function createMainWindow(): BrowserWindow {
+function createWorkspaceWindow(record: WorkspaceWindowRecord): BrowserWindow {
   const iconPath = path.join(__dirname, '..', 'assets', 'icon.png')
+  const bounds = clampWorkspaceBounds(record.bounds, record.primary)
   const window = new BrowserWindow({
-    width: 1600,
-    height: 960,
+    ...bounds,
     minWidth: 1024,
     minHeight: 700,
     resizable: true,
@@ -599,19 +873,34 @@ function createMainWindow(): BrowserWindow {
   })
   window.setMenu(null)
   window.setMenuBarVisibility(false)
-  window.on('will-resize', (event) => {
-    if (!window.isMaximized() && !window.isFullScreen()) {
-      event.preventDefault()
-    }
-  })
+  const webContentsId = window.webContents.id
+  workspaceWindowsById.set(record.id, window)
+  workspaceWindowIdsByWebContents.set(webContentsId, record.id)
+  appWindows.add(window)
+  if (record.primary) mainWindow = window
+
+  const saveBounds = () => {
+    captureWorkspaceWindowRecord(record)
+    scheduleWorkspaceWindowRegistrySave()
+  }
+  window.on('resize', saveBounds)
+  window.on('move', saveBounds)
+  window.on('maximize', saveBounds)
+  window.on('unmaximize', saveBounds)
   window.on('close', (event) => {
     if (quitting) return
-    event.preventDefault()
-    window.hide()
+    if (record.primary) {
+      event.preventDefault()
+      window.hide()
+      return
+    }
+    workspaceWindowRecords.delete(record.id)
+    persistWorkspaceWindowRegistry()
   })
-  appWindows.add(window)
   window.on('closed', () => {
     appWindows.delete(window)
+    workspaceWindowsById.delete(record.id)
+    workspaceWindowIdsByWebContents.delete(webContentsId)
     if (mainWindow === window) mainWindow = null
   })
 
@@ -632,7 +921,56 @@ function createMainWindow(): BrowserWindow {
       openBackendLogTerminal()
     }
   })
+  if (record.maximized) window.once('ready-to-show', () => window.maximize())
   return window
+}
+
+async function launchWorkspaceWindow(record: WorkspaceWindowRecord): Promise<BrowserWindow> {
+  const window = createWorkspaceWindow(record)
+  window.once('ready-to-show', () => window.show())
+  try {
+    await window.loadURL(workspaceRendererUrl(record.id))
+    return window
+  } catch (error) {
+    if (!window.isDestroyed()) window.destroy()
+    throw error
+  }
+}
+
+async function openDetachedWorkspaceWindow(
+  tab: WorkspaceTabPayload,
+  sourceWindow: BrowserWindow | null,
+): Promise<{ success: true; windowId: string } | { success: false; error: string }> {
+  if (workspaceWindowRecords.size >= MAX_WORKSPACE_WINDOWS) {
+    return { success: false, error: `You can keep up to ${MAX_WORKSPACE_WINDOWS} workspace windows open.` }
+  }
+  const windowId = `workspace-${randomBytes(8).toString('hex')}`
+  const sourceBounds = sourceWindow && !sourceWindow.isDestroyed() ? sourceWindow.getBounds() : undefined
+  const record: WorkspaceWindowRecord = {
+    id: windowId,
+    primary: false,
+    bounds: sourceBounds ? {
+      x: sourceBounds.x + 36,
+      y: sourceBounds.y + 36,
+      width: sourceBounds.width,
+      height: sourceBounds.height,
+    } : undefined,
+    maximized: false,
+    tabsState: { tabs: [tab], activeTabId: tab.id },
+  }
+  workspaceWindowRecords.set(windowId, record)
+  persistWorkspaceWindowRegistry()
+  try {
+    const window = await launchWorkspaceWindow(record)
+    window.focus()
+    return { success: true, windowId }
+  } catch (error) {
+    workspaceWindowRecords.delete(windowId)
+    persistWorkspaceWindowRegistry()
+    const detail = error instanceof Error ? error.message : String(error)
+    console.error('[desktop] failed to create detached workspace window', error)
+    return { success: false, error: `The new window could not be opened. ${detail}` }
+  }
 }
 
 async function showStartupFailure(error: unknown, logPath?: string): Promise<void> {
@@ -687,13 +1025,24 @@ async function bootApplication(): Promise<void> {
     allowedRendererOrigin = new URL(rendererUrl).origin
     configureBackendSession(backend.origin, token)
 
-    mainWindow = createMainWindow()
-    mainWindow.once('ready-to-show', () => {
-      splashWindow?.close()
-      splashWindow = null
-      mainWindow?.show()
-    })
-    await mainWindow.loadURL(rendererUrl)
+    loadWorkspaceWindowRegistry()
+    const primaryRecord = workspaceWindowRecords.get(PRIMARY_WORKSPACE_WINDOW_ID)!
+    mainWindow = await launchWorkspaceWindow(primaryRecord)
+    splashWindow?.close()
+    splashWindow = null
+
+    const detachedRecords = Array.from(workspaceWindowRecords.values())
+      .filter((record) => !record.primary)
+      .slice(0, MAX_WORKSPACE_WINDOWS - 1)
+    for (const record of detachedRecords) {
+      try {
+        await launchWorkspaceWindow(record)
+      } catch (error) {
+        workspaceWindowRecords.delete(record.id)
+        console.error(`[desktop] failed to restore workspace window ${record.id}`, error)
+      }
+    }
+    scheduleWorkspaceWindowRegistrySave()
     updater?.markApplicationReady()
     updater?.scheduleAutomaticCheck()
   } catch (error) {
@@ -730,7 +1079,11 @@ app.whenReady().then(async () => {
       currentRendererUrl = rendererUrl
       allowedRendererOrigin = new URL(rendererUrl).origin
       configureBackendSession(backend.origin, previousToken)
-      if (app.isPackaged && mainWindow && !mainWindow.isDestroyed()) await mainWindow.loadURL(rendererUrl)
+      if (app.isPackaged) {
+        await Promise.all(Array.from(workspaceWindowsById.entries()).map(async ([windowId, window]) => {
+          if (!window.isDestroyed()) await window.loadURL(workspaceRendererUrl(windowId))
+        }))
+      }
       throw error
     }
   })
@@ -757,5 +1110,6 @@ app.on('before-quit', (event) => {
   if (quitting) return
   event.preventDefault()
   quitting = true
+  persistWorkspaceWindowRegistry()
   void stopBackend(backend, sendBackendState).finally(() => app.exit(0))
 })

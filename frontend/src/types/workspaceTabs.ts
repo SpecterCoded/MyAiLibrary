@@ -33,7 +33,11 @@ export interface WorkspaceTab {
   updatedAt: number;
 }
 
+export interface WorkspaceTabsState {
+  tabs: WorkspaceTab[];
+  activeTabId: string;
+}
+
 export type WorkspaceLayout =
   | { type: 'tabs'; tabIds: string[]; activeTabId: string }
   | { type: 'split'; direction: 'horizontal' | 'vertical'; children: WorkspaceLayout[] };
-

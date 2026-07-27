@@ -22,6 +22,20 @@ interface AttachmentViewerPayload {
   activeIndex: number
 }
 
+interface WorkspaceTabPayload {
+  id: string
+  title: string
+  kind: string
+  params?: Record<string, string | number | undefined>
+  createdAt: number
+  updatedAt: number
+}
+
+interface WorkspaceTabsStatePayload {
+  tabs: WorkspaceTabPayload[]
+  activeTabId: string
+}
+
 const ATTACHMENT_VIEWER_CHANNELS = {
   payload: 'attachment-viewer:payload',
   close: 'attachment-viewer:close',
@@ -58,6 +72,12 @@ window.addEventListener(
 )
 
 contextBridge.exposeInMainWorld('desktop', {
+  getWorkspaceWindowContext: (): Promise<{ windowId: string; isPrimary: boolean; tabsState: WorkspaceTabsStatePayload | null } | null> =>
+    ipcRenderer.invoke('desktop:get-workspace-window-context'),
+  openWorkspaceWindow: (tab: WorkspaceTabPayload): Promise<{ success: boolean; windowId?: string; error?: string }> =>
+    ipcRenderer.invoke('desktop:open-workspace-window', tab),
+  saveWorkspaceWindowTabs: (state: WorkspaceTabsStatePayload): Promise<boolean> =>
+    ipcRenderer.invoke('desktop:save-workspace-window-tabs', state),
   selectFile: (): Promise<string | null> => ipcRenderer.invoke('desktop:select-file'),
   selectFolder: (): Promise<string | null> => ipcRenderer.invoke('desktop:select-folder'),
   revealPath: (targetPath: string): Promise<boolean> => ipcRenderer.invoke('desktop:reveal-path', targetPath),
