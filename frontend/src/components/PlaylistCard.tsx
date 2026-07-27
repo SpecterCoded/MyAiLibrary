@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { logActivity } from '../utils/activityLogger';
@@ -172,6 +172,7 @@ export default function PlaylistCard({
   const [currentIcon, setCurrentIcon] = useState<PlaylistIconType>(iconType);
   const [loadingIcon, setLoadingIcon] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const menuContainerRef = useRef<HTMLDivElement>(null);
   const [isFav, setIsFav] = useState(isFavorite || false);
   const [isRenameOpen, setIsRenameOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
@@ -183,6 +184,33 @@ export default function PlaylistCard({
   useEffect(() => {
     setIsFav(isFavorite || false);
   }, [isFavorite]);
+
+  useEffect(() => {
+    if (!isMenuOpen) return;
+
+    const handleOutsidePointerDown = (event: PointerEvent) => {
+      if (
+        event.target instanceof Node &&
+        !menuContainerRef.current?.contains(event.target)
+      ) {
+        setIsMenuOpen(false);
+      }
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('pointerdown', handleOutsidePointerDown, true);
+    document.addEventListener('keydown', handleEscape);
+
+    return () => {
+      document.removeEventListener('pointerdown', handleOutsidePointerDown, true);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [isMenuOpen]);
 
   const handleToggleFavorite = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -329,7 +357,7 @@ export default function PlaylistCard({
               {shapeLabel}
             </span>
             {isLibrary ? (
-              <div className="flex items-center gap-2 relative">
+              <div ref={menuContainerRef} className="flex items-center gap-2 relative">
                 <button
                   onClick={handleToggleFavorite}
                   className="p-1 hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg transition-colors flex items-center justify-center shrink-0"
@@ -350,21 +378,19 @@ export default function PlaylistCard({
                 </button>
                 <AnimatePresence>
                   {isMenuOpen && (
-                    <>
-                      <div className="fixed inset-0" style={{ zIndex: 49 }} onClick={() => setIsMenuOpen(false)} />
-                      <motion.div
-                        initial={{ opacity: 0, scale: 0.95, y: -4 }}
-                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                        exit={{ opacity: 0, scale: 0.95, y: -4 }}
-                        transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
-                        className="absolute right-0 top-full mt-1 w-44 bg-white rounded-xl shadow-xl border border-slate-100 py-1.5 z-50"
-                      >
-                        <button onClick={handleRename} className="w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 font-semibold flex items-center gap-2.5 transition-colors rounded-lg mx-0.5">
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.95, y: -4 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.95, y: -4 }}
+                      transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
+                      className="absolute right-0 top-full mt-1 w-44 bg-white dark:bg-[#2b2d31] rounded-xl shadow-xl border border-slate-100 dark:border-white/10 py-1.5 z-50"
+                    >
+                        <button onClick={handleRename} className="w-full text-left px-3 py-2 text-xs text-slate-700 dark:text-slate-200 hover:bg-indigo-50 hover:text-indigo-700 dark:hover:bg-white/[0.07] dark:hover:text-indigo-300 font-semibold flex items-center gap-2.5 transition-colors rounded-lg mx-0.5">
                           <Pencil className="w-3.5 h-3.5" />
                           Rename
                         </button>
                         {onOpenInNewTab && (
-                          <button onClick={handleOpenInNewTab} className="w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 font-semibold flex items-center gap-2.5 transition-colors rounded-lg mx-0.5">
+                          <button onClick={handleOpenInNewTab} className="w-full text-left px-3 py-2 text-xs text-slate-700 dark:text-slate-200 hover:bg-indigo-50 hover:text-indigo-700 dark:hover:bg-white/[0.07] dark:hover:text-indigo-300 font-semibold flex items-center gap-2.5 transition-colors rounded-lg mx-0.5">
                             <ExternalLink className="w-3.5 h-3.5" />
                             Open in new tab
                           </button>
@@ -376,24 +402,23 @@ export default function PlaylistCard({
                               setIsMenuOpen(false);
                               onShare(id, title);
                             }}
-                            className="w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 font-semibold flex items-center gap-2.5 transition-colors rounded-lg mx-0.5"
+                            className="w-full text-left px-3 py-2 text-xs text-slate-700 dark:text-slate-200 hover:bg-indigo-50 hover:text-indigo-700 dark:hover:bg-white/[0.07] dark:hover:text-indigo-300 font-semibold flex items-center gap-2.5 transition-colors rounded-lg mx-0.5"
                           >
                             <Folder className="w-3.5 h-3.5" />
                             Share to Team
                           </button>
                         )}
-                        <div className="mx-2 my-1 h-px bg-slate-100" />
-                        <button onClick={handleDeleteClick} className="w-full text-left px-3 py-2 text-xs text-rose-600 hover:bg-rose-50 font-semibold flex items-center gap-2.5 transition-colors rounded-lg mx-0.5">
+                        <div className="mx-2 my-1 h-px bg-slate-100 dark:bg-white/10" />
+                        <button onClick={handleDeleteClick} className="w-full text-left px-3 py-2 text-xs text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/10 font-semibold flex items-center gap-2.5 transition-colors rounded-lg mx-0.5">
                           <Trash2 className="w-3.5 h-3.5" />
                           Delete
                         </button>
-                      </motion.div>
-                    </>
+                    </motion.div>
                   )}
                 </AnimatePresence>
               </div>
             ) : (
-              <div className="flex items-center gap-1.5 relative">
+              <div ref={menuContainerRef} className="flex items-center gap-1.5 relative">
                 <button
                   onClick={handleToggleFavorite}
                   className="p-1 hover:bg-slate-100 dark:hover:bg-white/5 rounded-lg transition-colors flex items-center justify-center shrink-0"
@@ -411,21 +436,19 @@ export default function PlaylistCard({
                 </button>
                 <AnimatePresence>
                   {isMenuOpen && (
-                    <>
-                      <div className="fixed inset-0" style={{ zIndex: 49 }} onClick={() => setIsMenuOpen(false)} />
-                      <motion.div
-                        initial={{ opacity: 0, scale: 0.95, y: -4 }}
-                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                        exit={{ opacity: 0, scale: 0.95, y: -4 }}
-                        transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
-                        className="absolute right-0 top-full mt-1 w-44 bg-white rounded-xl shadow-xl border border-slate-100 py-1.5 z-50"
-                      >
-                        <button onClick={handleRename} className="w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 font-semibold flex items-center gap-2.5 transition-colors rounded-lg mx-0.5">
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.95, y: -4 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.95, y: -4 }}
+                      transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
+                      className="absolute right-0 top-full mt-1 w-44 bg-white dark:bg-[#2b2d31] rounded-xl shadow-xl border border-slate-100 dark:border-white/10 py-1.5 z-50"
+                    >
+                        <button onClick={handleRename} className="w-full text-left px-3 py-2 text-xs text-slate-700 dark:text-slate-200 hover:bg-indigo-50 hover:text-indigo-700 dark:hover:bg-white/[0.07] dark:hover:text-indigo-300 font-semibold flex items-center gap-2.5 transition-colors rounded-lg mx-0.5">
                           <Pencil className="w-3.5 h-3.5" />
                           Rename
                         </button>
                         {onOpenInNewTab && (
-                          <button onClick={handleOpenInNewTab} className="w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 font-semibold flex items-center gap-2.5 transition-colors rounded-lg mx-0.5">
+                          <button onClick={handleOpenInNewTab} className="w-full text-left px-3 py-2 text-xs text-slate-700 dark:text-slate-200 hover:bg-indigo-50 hover:text-indigo-700 dark:hover:bg-white/[0.07] dark:hover:text-indigo-300 font-semibold flex items-center gap-2.5 transition-colors rounded-lg mx-0.5">
                             <ExternalLink className="w-3.5 h-3.5" />
                             Open in new tab
                           </button>
@@ -437,19 +460,18 @@ export default function PlaylistCard({
                               setIsMenuOpen(false);
                               onShare(id, title);
                             }}
-                            className="w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 font-semibold flex items-center gap-2.5 transition-colors rounded-lg mx-0.5"
+                            className="w-full text-left px-3 py-2 text-xs text-slate-700 dark:text-slate-200 hover:bg-indigo-50 hover:text-indigo-700 dark:hover:bg-white/[0.07] dark:hover:text-indigo-300 font-semibold flex items-center gap-2.5 transition-colors rounded-lg mx-0.5"
                           >
                             <Folder className="w-3.5 h-3.5" />
                             Share to Team
                           </button>
                         )}
-                        <div className="mx-2 my-1 h-px bg-slate-100" />
-                        <button onClick={handleDeleteClick} className="w-full text-left px-3 py-2 text-xs text-rose-600 hover:bg-rose-50 font-semibold flex items-center gap-2.5 transition-colors rounded-lg mx-0.5">
+                        <div className="mx-2 my-1 h-px bg-slate-100 dark:bg-white/10" />
+                        <button onClick={handleDeleteClick} className="w-full text-left px-3 py-2 text-xs text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/10 font-semibold flex items-center gap-2.5 transition-colors rounded-lg mx-0.5">
                           <Trash2 className="w-3.5 h-3.5" />
                           Delete
                         </button>
-                      </motion.div>
-                    </>
+                    </motion.div>
                   )}
                 </AnimatePresence>
               </div>

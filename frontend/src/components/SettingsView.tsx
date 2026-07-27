@@ -371,7 +371,11 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
       if (!opened) {
         throw new Error('The Journalit installation package could not be found.');
       }
-      setSuccessMessage('Journalit opened in File Explorer. Extract the ZIP, then follow the installation steps below.');
+      const message = 'Journalit opened in File Explorer. Extract the ZIP, then follow the installation steps below.';
+      setSuccessMessage(message);
+      setTimeout(() => {
+        setSuccessMessage((current) => current === message ? null : current);
+      }, 5000);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Could not open the Journalit installation package.');
     } finally {
@@ -3480,7 +3484,7 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
           </AnimatePresence>
 
           {/* Action Buttons */}
-          {activeTab !== 'updates' && activeTab !== 'about' && <div className="mt-8 pt-6 border-t border-gray-200/60 dark:border-white/10 flex justify-end gap-3 pb-8">
+          {activeTab !== 'updates' && activeTab !== 'about' && activeTab !== 'team' && activeTab !== 'integrations' && <div className="mt-8 pt-6 border-t border-gray-200/60 dark:border-white/10 flex justify-end gap-3 pb-8">
             <button 
               type="button" 
               onClick={handleCancel}

@@ -152,14 +152,14 @@ export default function DashboardHeader({ onSearchClick, onNotificationClick, on
       {/* Profile and Quick Action Utilities */}
       <div className="flex items-center gap-3 relative">
         {/* Global Search Toggle */}
-        <button onClick={onSearchClick} className="w-10 h-10 flex items-center justify-center bg-white dark:bg-slate-900/40 rounded-full text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 shadow-sm border border-slate-100 dark:border-white/10 hover:scale-105 transition-all backdrop-blur-md">
+        <button onClick={onSearchClick} className="w-10 h-10 flex items-center justify-center bg-white dark:bg-slate-900/40 rounded-full text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 shadow-sm border border-slate-100 dark:border-white/10 hover:scale-105 transition-all backdrop-blur-md cursor-pointer">
           <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
           </svg>
         </button>
 
         {/* Notifications Tray */}
-        <button onClick={onNotificationClick} className="w-10 h-10 flex items-center justify-center bg-white dark:bg-slate-900/40 rounded-full text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 shadow-sm border border-slate-100 dark:border-white/10 relative hover:scale-105 transition-all backdrop-blur-md">
+        <button onClick={onNotificationClick} className="w-10 h-10 flex items-center justify-center bg-white dark:bg-slate-900/40 rounded-full text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 shadow-sm border border-slate-100 dark:border-white/10 relative hover:scale-105 transition-all backdrop-blur-md cursor-pointer">
           <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
           </svg>

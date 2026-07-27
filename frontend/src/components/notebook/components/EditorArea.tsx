@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { BlockNoteSchema, defaultBlockSpecs } from "@blocknote/core";
 import { createReactBlockSpec } from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/mantine";
@@ -8,8 +8,6 @@ import "@blocknote/mantine/style.css";
 import { useAppContext } from '../AppContext';
 import { X, Plus, Loader } from 'lucide-react';
 import { customBlocks } from './SlashMenuBlocks';
-import type { SlashMenuItem } from './SlashMenuBlocks';
-import { SlashMenu } from './SlashMenu';
 
 // ─── Mermaid renderer component ─────────────────────────────────────────────
 
@@ -207,12 +205,6 @@ export function EditorArea() {
   const isUpdatingRef = useRef(false);
   const hasMigratedRef = useRef(false);
 
-  // Slash menu state
-  const [slashMenuOpen, setSlashMenuOpen] = useState(false);
-  const [slashMenuPosition, setSlashMenuPosition] = useState({ top: 0, left: 0 });
-  const [slashFilter, setSlashFilter] = useState('');
-  const slashTriggerBlockRef = useRef<string | null>(null);
-
   const editor = useCreateBlockNote({
     schema,
     initialContent: note && note.content && note.content.length > 0 ? note.content : undefined,
@@ -230,102 +222,6 @@ export function EditorArea() {
     observer.observe(root, { attributes: true, attributeFilter: ['class'] });
     return () => observer.disconnect();
   }, []);
-
-  // Handle slash menu item selection
-  const handleSlashMenuSelect = useCallback((item: SlashMenuItem) => {
-    if (!slashTriggerBlockRef.current) return;
-
-    const blockId = slashTriggerBlockRef.current;
-    const block = editor.getBlock(blockId);
-    if (!block) return;
-
-    // Replace the current block with the new block type
-    editor.updateBlock(blockId, {
-      type: item.blockType as any,
-      props: item.props || {},
-    } as any);
-
-    // Close the menu
-    setSlashMenuOpen(false);
-    slashTriggerBlockRef.current = null;
-    setSlashFilter('');
-
-    // Focus the editor
-    editor._tiptapEditor.commands.focus();
-  }, [editor]);
-
-  // Listen for "/" key to trigger slash menu
-  useEffect(() => {
-    if (!editor) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't trigger if slash menu is already open
-      if (slashMenuOpen) return;
-
-      if (e.key === '/') {
-        setTimeout(() => {
-          const block = editor.getTextCursorPosition().block;
-          if (!block) return;
-
-          // Get cursor position for menu placement
-          const DOMBlock = editor._tiptapEditor.view.dom.querySelector(`[data-id="${block.id}"]`);
-          if (DOMBlock) {
-            const rect = DOMBlock.getBoundingClientRect();
-            setSlashMenuPosition({
-              top: rect.bottom + window.scrollY + 8,
-              left: rect.left + window.scrollX,
-            });
-          }
-
-          slashTriggerBlockRef.current = block.id;
-          setSlashFilter('');
-          setSlashMenuOpen(true);
-        }, 10);
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [editor, slashMenuOpen]);
-
-  // Update filter when typing in slash command block
-  useEffect(() => {
-    if (!editor || !slashMenuOpen || !slashTriggerBlockRef.current) return;
-
-    const updateFilter = () => {
-      const block = editor.getBlock(slashTriggerBlockRef.current!);
-      if (!block) {
-        setSlashMenuOpen(false);
-        return;
-      }
-
-      let text = '';
-      if (typeof (block as any).content === 'string') {
-        text = (block as any).content;
-      } else if (Array.isArray((block as any).content)) {
-        text = (block as any).content
-          .map((c: any) => (typeof c === 'string' ? c : c.text ?? ''))
-          .join('');
-      }
-
-      // Extract filter after "/"
-      const slashIndex = text.lastIndexOf('/');
-      if (slashIndex !== -1) {
-        setSlashFilter(text.slice(slashIndex + 1));
-      } else {
-        setSlashMenuOpen(false);
-      }
-    };
-
-    // Use MutationObserver to watch for content changes
-    const observer = new MutationObserver(updateFilter);
-    const editorEl = editor._tiptapEditor.view.dom;
-    observer.observe(editorEl, { childList: true, subtree: true, characterData: true });
-
-    return () => observer.disconnect();
-  }, [editor, slashMenuOpen]);
 
   // Migrate codeBlocks containing Mermaid syntax → mermaid blocks (once per note load)
   useEffect(() => {
@@ -506,18 +402,6 @@ export function EditorArea() {
           className="min-h-[500px]"
         />
       </div>
-
-      {/* Custom Slash Menu */}
-      <SlashMenu
-        isOpen={slashMenuOpen}
-        position={slashMenuPosition}
-        filter={slashFilter}
-        onSelect={handleSlashMenuSelect}
-        onClose={() => {
-          setSlashMenuOpen(false);
-          slashTriggerBlockRef.current = null;
-        }}
-      />
 
       {/* Styling tweaks */}
       <style>{`
