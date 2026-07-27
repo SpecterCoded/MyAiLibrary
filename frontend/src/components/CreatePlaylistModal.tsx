@@ -2,10 +2,12 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ToastContainer, type ToastMessage } from './FileExplorer/Toast';
 import { logActivity } from '../utils/activityLogger';
+import FloatingDragHandle from './FloatingDragHandle';
 
 interface CreatePlaylistModalProps {
   isOpen: boolean;
   onClose: () => void;
+  isFloating?: boolean;
 }
 
 interface Subfolder {
@@ -14,7 +16,7 @@ interface Subfolder {
   isDefault?: boolean;
 }
 
-const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({ isOpen, onClose }) => {
+const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({ isOpen, onClose, isFloating = false }) => {
   const [playlistName, setPlaylistName] = useState('');
   const [playlistDescription, setPlaylistDescription] = useState('');
   const [subfolders, setSubfolders] = useState<Subfolder[]>([
@@ -185,16 +187,18 @@ const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({ isOpen, onClo
           filter: { duration: 0.24, ease: [0.16, 1, 0.3, 1] },
         }}
       >
-        
         {/* Header */}
         <div className="create-playlist-modal__header flex justify-between items-start mb-6 shrink-0">
           <div>
             <h2 className="text-2xl font-bold text-slate-800">Create New Playlist</h2>
             <p className="text-slate-500 text-sm mt-1">Organize your content into a playlist to keep everything in one place.</p>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"/></svg>
-          </button>
+          <div className="ml-4 flex shrink-0 items-center gap-1.5">
+            {isFloating && <FloatingDragHandle />}
+            <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+          </div>
         </div>
 
         <div className="create-playlist-modal__body min-h-0">

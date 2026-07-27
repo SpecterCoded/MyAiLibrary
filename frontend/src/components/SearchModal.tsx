@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { logActivity } from '../utils/activityLogger';
+import FloatingDragHandle from './FloatingDragHandle';
 
 // Helper component to replicate the exact coral match highlight from 985a5bff8e08f5768ac5cbe06b13027c_3.webp
 const Highlight = ({ text }: { text: string }) => (
@@ -19,7 +20,13 @@ interface SearchItem {
 }
 
 
-const CommandSearchModal: React.FC<{ isOpen: boolean, onClose: () => void }> = ({ isOpen, onClose }) => {
+interface CommandSearchModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  isFloating?: boolean;
+}
+
+const CommandSearchModal: React.FC<CommandSearchModalProps> = ({ isOpen, onClose, isFloating = false }) => {
   const [shouldRender, setShouldRender] = useState(isOpen);
   const [animate, setAnimate] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -348,7 +355,7 @@ const CommandSearchModal: React.FC<{ isOpen: boolean, onClose: () => void }> = (
   }
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-start justify-center p-4 pt-[12vh]">
+    <div className={`fixed inset-0 z-[100] flex justify-center p-4 ${isFloating ? 'items-center' : 'items-start pt-[12vh]'}`}>
       {/* Backdrop */}
       <motion.div
         className="absolute inset-0"
@@ -373,7 +380,6 @@ const CommandSearchModal: React.FC<{ isOpen: boolean, onClose: () => void }> = (
           filter: { duration: 0.2, ease: [0.16, 1, 0.3, 1] },
         }}
       >
-        
         {/* 1. Top Search Bar */}
         <div id="search-modal-header" className="flex items-center justify-between px-6 py-4.5 border-b border-[#F1EFEA]">
           <div className="flex items-center gap-3 flex-1">
@@ -401,9 +407,12 @@ const CommandSearchModal: React.FC<{ isOpen: boolean, onClose: () => void }> = (
               />
             </div>
           </div>
-          <button onClick={onClose} className="w-7 h-7 flex items-center justify-center bg-stone-100 hover:bg-stone-200 text-stone-500 rounded-full transition-colors">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
-          </button>
+          <div className="ml-3 flex shrink-0 items-center gap-1.5">
+            {isFloating && <FloatingDragHandle />}
+            <button onClick={onClose} className="w-7 h-7 flex items-center justify-center bg-stone-100 hover:bg-stone-200 text-stone-500 rounded-full transition-colors">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+          </div>
         </div>
 
         {/* 2. Filter Pills */}

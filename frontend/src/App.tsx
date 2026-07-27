@@ -1026,9 +1026,38 @@ export default function App() {
     return () => window.removeEventListener('app-navigate', handleAppNavigate);
   }, [currentView, isPrimaryWorkspaceWindow]);
 
-  const toggleSearchModal = () => setIsSearchModalOpen(!isSearchModalOpen);
-  const toggleCreatePlaylistModal = () => setIsCreatePlaylistModalOpen(!isCreatePlaylistModalOpen);
-  const toggleImportModal = () => setIsImportModalOpen(!isImportModalOpen);
+  useEffect(() => {
+    if (!window.desktop?.onFloatingToolAction || !isPrimaryWorkspaceWindow) return;
+    return window.desktop.onFloatingToolAction((action) => {
+      if (action.type === 'refresh-playlists') {
+        window.dispatchEvent(new Event('refresh-playlists'));
+        return;
+      }
+      window.dispatchEvent(new CustomEvent('app-navigate', { detail: action.detail }));
+    });
+  }, [isPrimaryWorkspaceWindow]);
+
+  const toggleSearchModal = () => {
+    if (window.desktop) {
+      void window.desktop.openFloatingTool('search');
+      return;
+    }
+    setIsSearchModalOpen((open) => !open);
+  };
+  const toggleCreatePlaylistModal = () => {
+    if (window.desktop) {
+      void window.desktop.openFloatingTool('create-playlist');
+      return;
+    }
+    setIsCreatePlaylistModalOpen((open) => !open);
+  };
+  const toggleImportModal = () => {
+    if (window.desktop) {
+      void window.desktop.openFloatingTool('import-content');
+      return;
+    }
+    setIsImportModalOpen((open) => !open);
+  };
   const toggleNotificationPanel = () => setIsNotificationPanelOpen(!isNotificationPanelOpen);
   const toggleActivityLogPanel = () => setIsActivityLogOpen(!isActivityLogOpen);
 
@@ -1056,7 +1085,7 @@ export default function App() {
 
       if ((event.ctrlKey || event.metaKey) && key === 'k') {
         event.preventDefault();
-        setIsSearchModalOpen(true);
+        toggleSearchModal();
         return;
       }
 

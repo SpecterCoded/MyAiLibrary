@@ -36,6 +36,11 @@ interface WorkspaceTabsStatePayload {
   activeTabId: string
 }
 
+type FloatingToolKind = 'search' | 'create-playlist' | 'import-content'
+type FloatingToolAction =
+  | { type: 'navigate'; detail: Record<string, unknown> }
+  | { type: 'refresh-playlists' }
+
 const ATTACHMENT_VIEWER_CHANNELS = {
   payload: 'attachment-viewer:payload',
   close: 'attachment-viewer:close',
@@ -72,6 +77,16 @@ window.addEventListener(
 )
 
 contextBridge.exposeInMainWorld('desktop', {
+  openFloatingTool: (kind: FloatingToolKind): Promise<boolean> =>
+    ipcRenderer.invoke('desktop:open-floating-tool', kind),
+  closeFloatingTool: (): void => ipcRenderer.send('desktop:close-floating-tool'),
+  sendFloatingToolAction: (action: FloatingToolAction): void =>
+    ipcRenderer.send('desktop:floating-tool-action', action),
+  onFloatingToolAction: (listener: (action: FloatingToolAction) => void): (() => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, action: FloatingToolAction) => listener(action)
+    ipcRenderer.on('desktop:floating-tool-action', wrapped)
+    return () => ipcRenderer.removeListener('desktop:floating-tool-action', wrapped)
+  },
   getWorkspaceWindowContext: (): Promise<{ windowId: string; isPrimary: boolean; tabsState: WorkspaceTabsStatePayload | null } | null> =>
     ipcRenderer.invoke('desktop:get-workspace-window-context'),
   openWorkspaceWindow: (tab: WorkspaceTabPayload): Promise<{ success: boolean; windowId?: string; error?: string }> =>

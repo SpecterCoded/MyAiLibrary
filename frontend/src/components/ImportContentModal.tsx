@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { logActivity } from '../utils/activityLogger';
+import FloatingDragHandle from './FloatingDragHandle';
 import {
   X,
   PlayCircle,
@@ -54,6 +55,7 @@ interface ImportModalProps {
   isOpen: boolean;
   onClose: () => void;
   onNavigateToDownloads: () => void;
+  isFloating?: boolean;
 }
 
 interface Playlist {
@@ -128,7 +130,7 @@ const InstagramLogo = ({ className = "w-5 h-5 text-pink-600" }: { className?: st
   </svg>
 );
 
-export default function ImportContentModal({ isOpen, onClose, onNavigateToDownloads }: ImportModalProps) {
+export default function ImportContentModal({ isOpen, onClose, onNavigateToDownloads, isFloating = false }: ImportModalProps) {
   const [url, setUrl] = useState('');
   const [selectedFolder, setSelectedFolder] = useState('');
   const [youtubeQuality, setYoutubeQuality] = useState('best');
@@ -687,7 +689,7 @@ export default function ImportContentModal({ isOpen, onClose, onNavigateToDownlo
           y: { type: 'spring', stiffness: 420, damping: 33, mass: 0.8 },
           filter: { duration: 0.24, ease: [0.16, 1, 0.3, 1] },
         }}
-        className="relative w-full bg-white dark:bg-slate-900 rounded-[28px] shadow-2xl border border-slate-200/60 dark:border-slate-600/80 overflow-hidden flex flex-col text-slate-900 dark:text-slate-100"
+        className={`relative flex w-full flex-col overflow-hidden rounded-[28px] border border-slate-200/60 bg-white text-slate-900 shadow-2xl dark:border-slate-600/80 dark:bg-slate-900 dark:text-slate-100 ${isFloating ? 'max-h-[calc(100vh-2rem)]' : ''}`}
         style={{ maxWidth: hasQueued ? 680 : 480 }}
         role="dialog"
         aria-modal="true"
@@ -716,14 +718,17 @@ export default function ImportContentModal({ isOpen, onClose, onNavigateToDownlo
                 : 'Import Instagram Media'}
             </h2>
           </div>
-          <button
-            onClick={onClose}
-            disabled={isAdding}
-            className="p-2 rounded-full text-slate-400 dark:text-slate-300 hover:text-slate-700 dark:hover:text-slate-50 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all duration-200"
-            aria-label="Close"
-          >
-            <X size={18} />
-          </button>
+          <div className="ml-4 flex shrink-0 items-center gap-1.5">
+            {isFloating && <FloatingDragHandle />}
+            <button
+              onClick={onClose}
+              disabled={isAdding}
+              className="p-2 rounded-full text-slate-400 dark:text-slate-300 hover:text-slate-700 dark:hover:text-slate-50 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all duration-200"
+              aria-label="Close"
+            >
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
         {/* Tabs */}
@@ -760,7 +765,7 @@ export default function ImportContentModal({ isOpen, onClose, onNavigateToDownlo
           </button>
         </div>
 
-        <div className="flex gap-0 min-h-0">
+        <div className={`flex min-h-0 gap-0 ${isFloating ? 'flex-1 overflow-y-auto' : ''}`}>
           {/* Left: Form Panel */}
           <div className="flex-1 px-8 pb-8 space-y-5 min-w-0">
             {/* URL Input */}

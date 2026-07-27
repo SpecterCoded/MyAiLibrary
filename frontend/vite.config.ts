@@ -44,6 +44,7 @@ export default defineConfig({
       input: {
         main: path.resolve(__dirname, 'index.html'),
         attachmentViewer: path.resolve(__dirname, 'attachment-viewer.html'),
+        floatingTool: path.resolve(__dirname, 'floating-tool.html'),
       },
     },
   },

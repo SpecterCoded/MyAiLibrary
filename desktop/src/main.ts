@@ -23,6 +23,12 @@ let attachmentViewerWindow: BrowserWindow | null = null
 let attachmentViewerReady = false
 let pendingAttachmentViewerPayload: AttachmentViewerPayload | null = null
 const attachmentViewerFilePaths = new Map<string, string>()
+type FloatingToolKind = 'search' | 'create-playlist' | 'import-content'
+type FloatingToolAction =
+  | { type: 'navigate'; detail: Record<string, unknown> }
+  | { type: 'refresh-playlists' }
+const floatingToolWindows = new Map<FloatingToolKind, BrowserWindow>()
+const floatingToolKindsByWebContents = new Map<number, FloatingToolKind>()
 const JOURNALIT_PACKAGE_FILENAME = 'Journalit-Local-1.8.1-Fresh.zip'
 const PRIMARY_WORKSPACE_WINDOW_ID = 'main'
 const MAX_WORKSPACE_WINDOWS = 5
@@ -342,6 +348,13 @@ function workspaceRendererUrl(windowId: string): string {
   return url.toString()
 }
 
+function floatingToolRendererUrl(kind: FloatingToolKind): string {
+  if (!currentRendererUrl) return 'about:blank'
+  const url = new URL('/floating-tool.html', currentRendererUrl)
+  url.searchParams.set('tool', kind)
+  return url.toString()
+}
+
 function sendBackendState(state: BackendState, detail?: string): void {
   splashWindow?.webContents.send('desktop:backend-state', state, detail)
   for (const window of appWindows) {
@@ -398,6 +411,113 @@ function senderIsTrusted(frameUrl: string): boolean {
   } catch {
     return false
   }
+}
+
+function isFloatingToolKind(value: unknown): value is FloatingToolKind {
+  return value === 'search' || value === 'create-playlist' || value === 'import-content'
+}
+
+function normalizeFloatingToolAction(value: unknown): FloatingToolAction | null {
+  if (!value || typeof value !== 'object') return null
+  const candidate = value as Record<string, unknown>
+  if (candidate.type === 'refresh-playlists') return { type: 'refresh-playlists' }
+  if (candidate.type !== 'navigate' || !candidate.detail || typeof candidate.detail !== 'object' || Array.isArray(candidate.detail)) {
+    return null
+  }
+  const detail = candidate.detail as Record<string, unknown>
+  const allowedViews = new Set(['folder', 'audio-player', 'video-player', 'notebooks', 'concepts', 'downloads'])
+  if (typeof detail.view !== 'string' || !allowedViews.has(detail.view)) return null
+  try {
+    if (JSON.stringify(detail).length > 32_768) return null
+  } catch {
+    return null
+  }
+  return { type: 'navigate', detail }
+}
+
+function createFloatingToolWindow(kind: FloatingToolKind, sourceWindow: BrowserWindow | null): BrowserWindow {
+  const sizes: Record<FloatingToolKind, { width: number; height: number; minWidth: number; minHeight: number; title: string }> = {
+    search: { width: 940, height: 720, minWidth: 720, minHeight: 520, title: 'Search MyAiLibrary' },
+    'create-playlist': { width: 760, height: 850, minWidth: 640, minHeight: 620, title: 'Create Playlist' },
+    'import-content': { width: 760, height: 900, minWidth: 520, minHeight: 680, title: 'Import Content' },
+  }
+  const config = sizes[kind]
+  const sourceBounds = sourceWindow && !sourceWindow.isDestroyed() ? sourceWindow.getBounds() : undefined
+  const display = sourceBounds ? screen.getDisplayMatching(sourceBounds) : screen.getPrimaryDisplay()
+  const area = display.workArea
+  const width = Math.min(config.width, area.width)
+  const height = Math.min(config.height, area.height)
+  const centerX = sourceBounds ? sourceBounds.x + Math.round(sourceBounds.width / 2) : area.x + Math.round(area.width / 2)
+  const centerY = sourceBounds ? sourceBounds.y + Math.round(sourceBounds.height / 2) : area.y + Math.round(area.height / 2)
+  const x = Math.min(Math.max(centerX - Math.round(width / 2), area.x), area.x + area.width - width)
+  const y = Math.min(Math.max(centerY - Math.round(height / 2), area.y), area.y + area.height - height)
+  const iconPath = path.join(__dirname, '..', 'assets', 'icon.png')
+  const toolWindow = new BrowserWindow({
+    width,
+    height,
+    minWidth: Math.min(config.minWidth, width),
+    minHeight: Math.min(config.minHeight, height),
+    x,
+    y,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    hasShadow: true,
+    resizable: true,
+    movable: true,
+    minimizable: true,
+    maximizable: false,
+    fullscreenable: false,
+    show: false,
+    skipTaskbar: false,
+    title: config.title,
+    icon: existsSync(iconPath) ? iconPath : undefined,
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      webSecurity: true,
+    },
+  })
+  toolWindow.setMenu(null)
+  toolWindow.setMenuBarVisibility(false)
+  appWindows.add(toolWindow)
+  floatingToolWindows.set(kind, toolWindow)
+  const toolWebContentsId = toolWindow.webContents.id
+  floatingToolKindsByWebContents.set(toolWebContentsId, kind)
+  toolWindow.once('ready-to-show', () => {
+    toolWindow.show()
+    toolWindow.focus()
+  })
+  toolWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  toolWindow.webContents.on('will-navigate', (event, url) => {
+    try {
+      if (new URL(url).origin === allowedRendererOrigin) return
+    } catch {
+      // Only the configured renderer origin is allowed.
+    }
+    event.preventDefault()
+  })
+  toolWindow.on('closed', () => {
+    appWindows.delete(toolWindow)
+    floatingToolKindsByWebContents.delete(toolWebContentsId)
+    if (floatingToolWindows.get(kind) === toolWindow) floatingToolWindows.delete(kind)
+  })
+  void toolWindow.loadURL(floatingToolRendererUrl(kind))
+  return toolWindow
+}
+
+function openFloatingTool(kind: FloatingToolKind, sourceWindow: BrowserWindow | null): void {
+  const existing = floatingToolWindows.get(kind)
+  if (existing && !existing.isDestroyed()) {
+    if (existing.isMinimized()) existing.restore()
+    existing.show()
+    existing.focus()
+    return
+  }
+  createFloatingToolWindow(kind, sourceWindow)
 }
 
 function isValidAttachmentViewerItem(value: unknown): value is AttachmentViewerItem {
@@ -547,6 +667,33 @@ function openAttachmentViewer(payload: AttachmentViewerPayload): void {
 }
 
 function registerIpc(): void {
+  ipcMain.handle('desktop:open-floating-tool', (event, value: unknown) => {
+    if (
+      !senderIsTrusted(event.senderFrame?.url ?? '') ||
+      !workspaceWindowIdsByWebContents.has(event.sender.id) ||
+      !isFloatingToolKind(value)
+    ) return false
+    openFloatingTool(value, BrowserWindow.fromWebContents(event.sender))
+    return true
+  })
+  ipcMain.on('desktop:close-floating-tool', (event) => {
+    const kind = floatingToolKindsByWebContents.get(event.sender.id)
+    if (!kind) return
+    const toolWindow = floatingToolWindows.get(kind)
+    if (toolWindow?.webContents !== event.sender || toolWindow.isDestroyed()) return
+    toolWindow.close()
+  })
+  ipcMain.on('desktop:floating-tool-action', (event, value: unknown) => {
+    const kind = floatingToolKindsByWebContents.get(event.sender.id)
+    const toolWindow = kind ? floatingToolWindows.get(kind) : undefined
+    if (!toolWindow || toolWindow.webContents !== event.sender) return
+    const action = normalizeFloatingToolAction(value)
+    if (!action || !mainWindow || mainWindow.isDestroyed()) return
+    mainWindow.webContents.send('desktop:floating-tool-action', action)
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+  })
   ipcMain.handle('desktop:get-workspace-window-context', (event) => {
     if (!senderIsTrusted(event.senderFrame?.url ?? '')) return null
     const windowId = workspaceWindowIdsByWebContents.get(event.sender.id)
@@ -778,6 +925,7 @@ function applyTitleBarTheme(theme: 'light' | 'dark'): void {
   for (const window of appWindows) {
     if (window.isDestroyed()) continue
     const windowId = workspaceWindowIdsByWebContents.get(window.webContents.id)
+    if (!windowId) continue
     const record = windowId ? workspaceWindowRecords.get(windowId) : undefined
     const isDetachedWorkspaceWindow = record?.primary === false
     window.setTitleBarOverlay({
@@ -797,6 +945,7 @@ function setWindowControlsHidden(hidden: boolean): void {
   }
   for (const window of appWindows) {
     if (window.isDestroyed()) continue
+    if (!workspaceWindowIdsByWebContents.has(window.webContents.id)) continue
     window.setTitleBarOverlay({
       color: '#020617',
       symbolColor: '#020617',

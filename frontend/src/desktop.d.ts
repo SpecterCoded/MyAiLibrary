@@ -56,6 +56,16 @@ declare global {
   }
 
   interface DesktopBridge {
+    openFloatingTool(kind: 'search' | 'create-playlist' | 'import-content'): Promise<boolean>
+    closeFloatingTool(): void
+    sendFloatingToolAction(action:
+      | { type: 'navigate'; detail: Record<string, unknown> }
+      | { type: 'refresh-playlists' }
+    ): void
+    onFloatingToolAction(listener: (action:
+      | { type: 'navigate'; detail: Record<string, unknown> }
+      | { type: 'refresh-playlists' }
+    ) => void): () => void
     getWorkspaceWindowContext(): Promise<{
       windowId: string
       isPrimary: boolean
