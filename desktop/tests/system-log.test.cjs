@@ -5,6 +5,7 @@ const path = require('node:path')
 const test = require('node:test')
 
 const {
+  isBackgroundPollingLogEvent,
   SystemLogService,
   normalizeExternalLogEvent,
 } = require('../dist/system-log.js')
@@ -97,6 +98,82 @@ test('SystemLogService clears only matching retained events', () => {
   } finally {
     rmSync(temporaryRoot, { recursive: true, force: true })
   }
+})
+
+test('SystemLogService retains only the newest 500 events in memory and on disk', () => {
+  const temporaryRoot = mkdtempSync(path.join(os.tmpdir(), 'myailibrary-system-log-cap-'))
+  try {
+    const service = new SystemLogService(temporaryRoot)
+    for (let index = 0; index < 510; index += 1) {
+      service.emit({
+        source: 'backend',
+        level: 'info',
+        category: 'TEST',
+        event: `test.event.${index}`,
+        message: `Event ${index}`,
+      })
+    }
+
+    const snapshot = service.snapshot()
+    assert.equal(snapshot.events.length, 500)
+    assert.equal(snapshot.totalEvents, 500)
+    assert.equal(snapshot.events[0].event, 'test.event.10')
+    assert.equal(snapshot.events[499].event, 'test.event.509')
+
+    const persistedLines = readFileSync(service.currentPath, 'utf8')
+      .split(/\r?\n/)
+      .filter(Boolean)
+    assert.equal(persistedLines.length, 500)
+    assert.equal(JSON.parse(persistedLines[0]).event, 'test.event.10')
+    assert.equal(JSON.parse(persistedLines[499]).event, 'test.event.509')
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true })
+  }
+})
+
+test('background GET polling is excluded without hiding real actions', () => {
+  assert.equal(isBackgroundPollingLogEvent({
+    source: 'backend',
+    category: 'SYSTEM',
+    event: 'api.request_completed',
+    message: 'GET /queue completed with HTTP 200.',
+    phase: '/queue',
+    context: { method: 'GET', path: '/queue' },
+  }), true)
+  assert.equal(isBackgroundPollingLogEvent({
+    source: 'backend',
+    category: 'SYSTEM',
+    event: 'api.request_started',
+    message: 'GET /queue/resource-1 started.',
+    context: { method: 'GET', path: '/queue/resource-1' },
+  }), true)
+  assert.equal(isBackgroundPollingLogEvent({
+    source: 'backend',
+    category: 'SYSTEM',
+    event: 'backend.stderr',
+    message: 'INFO: 127.0.0.1 - "GET /notifications?tab=Inbox HTTP/1.1" 200 OK',
+  }), true)
+  assert.equal(isBackgroundPollingLogEvent({
+    source: 'backend',
+    category: 'SYSTEM',
+    event: 'api.request_completed',
+    message: 'GET /tasks completed with HTTP 200.',
+    context: { method: 'GET', path: '/tasks' },
+  }), true)
+  assert.equal(isBackgroundPollingLogEvent({
+    source: 'backend',
+    category: 'SYSTEM',
+    event: 'api.request_completed',
+    message: 'POST /queue/clear completed with HTTP 200.',
+    context: { method: 'POST', path: '/queue/clear' },
+  }), false)
+  assert.equal(isBackgroundPollingLogEvent({
+    source: 'backend',
+    category: 'SYSTEM',
+    event: 'api.request_completed',
+    message: 'GET /resources completed with HTTP 200.',
+    context: { method: 'GET', path: '/resources' },
+  }), false)
 })
 
 test('backend text severity wins over the stderr transport', () => {

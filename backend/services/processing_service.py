@@ -152,7 +152,7 @@ def _notify_processing_failure(db, user_id, resource_title, failed_step, resourc
     logger.warning("Processing step failed; queue worker will notify the user: %s", failed_step)
 
 
-def reindex_resource(resource_id: str):
+def reindex_resource(resource_id: str, job_id: str | None = None):
     """Rebuild only the changed retrieval state for a resource without re-transcribing.
 
     This preserves unchanged chunk embeddings when possible and only replaces
@@ -165,6 +165,8 @@ def reindex_resource(resource_id: str):
         resource = db.query(Resource).filter(Resource.id == resource_id).first()
         if not resource:
             return
+        from services.processing_progress import update_processing_progress, unit_progress
+        update_processing_progress(db, job_id, "preflight", is_media=resource.type in {"video", "audio", "youtube"})
 
         ensure_resource_content_hash(resource)
         duplicate_embedded_resource = find_duplicate_resource_by_hash(
@@ -192,16 +194,31 @@ def reindex_resource(resource_id: str):
         # - updates ChunkIndex rows incrementally
         from embedding_service import store_resource_embeddings
         logger.info("Rebuilding embeddings incrementally...")
-        store_resource_embeddings(resource_id, resource.transcript or "", resource.user_id, resource_type=resource.type)
+        update_processing_progress(db, job_id, "embedding", is_media=resource.type in {"video", "audio", "youtube"})
+        store_resource_embeddings(
+            resource_id,
+            resource.transcript or "",
+            resource.user_id,
+            resource_type=resource.type,
+            progress_callback=lambda completed, total: update_processing_progress(
+                db,
+                job_id,
+                "embedding",
+                progress=unit_progress(15, 94, completed, total),
+                is_media=resource.type in {"video", "audio", "youtube"},
+            ),
+        )
 
         # 2. Rebuild the lightweight resource search index so summary/transcript
         # search reflects current metadata.
         logger.info("Rebuilding search index...")
+        update_processing_progress(db, job_id, "indexing", is_media=resource.type in {"video", "audio", "youtube"})
         rebuild_resource_search_index(db, resource)
         
         # 3. Mark as ready
         resource.processing_status = "ready"
         resource.is_embedded = "true"
+        update_processing_progress(db, job_id, "complete", progress=100, is_media=resource.type in {"video", "audio", "youtube"})
         
         db.commit()
 
@@ -348,6 +365,9 @@ def process_resource(resource_id: str, job_id: str = None, job_type: str = "full
 
         if not resource:
             return "deleted"
+        from services.processing_progress import update_processing_progress, unit_progress
+        is_media_job = resource.type in {"video", "audio", "youtube"}
+        update_processing_progress(db, job_id, "preflight", is_media=is_media_job)
             
         # Validate only the configured dependencies the selected job will use.
         from models import UserSetting
@@ -378,7 +398,7 @@ def process_resource(resource_id: str, job_id: str = None, job_type: str = "full
                 return "paused"
             return None
 
-        def update_processing_status(next_status: str):
+        def update_processing_status(next_status: str, progress: int | None = None):
             nonlocal active_phase, phase_started_at
             now = time.perf_counter()
             if active_phase != next_status:
@@ -405,6 +425,13 @@ def process_resource(resource_id: str, job_id: str = None, job_type: str = "full
                 )
             resource.processing_status = next_status
             db.commit()
+            update_processing_progress(
+                db,
+                job_id,
+                "complete" if next_status == "ready" else next_status,
+                progress=progress,
+                is_media=is_media_job,
+            )
 
         file_type = resource.type
         logger.info(f"FILE TYPE: {file_type}")
@@ -469,13 +496,13 @@ def process_resource(resource_id: str, job_id: str = None, job_type: str = "full
 
         if job_type == "manual_index" and has_prepared_transcript:
             logger.info("USING EXISTING TRANSCRIPT FOR MANUAL INDEX")
-            update_processing_status("indexing")
+            update_processing_status("preflight")
         elif _is_resume and has_prepared_transcript:
             logger.info("USING EXISTING TRANSCRIPT FOR RESUME")
-            update_processing_status("indexing")
+            update_processing_status(resume_stage or "preflight")
         elif document_embed_only:
-            logger.info("INDEXING")
-            update_processing_status("indexing")
+            logger.info("EXTRACTING TEXT")
+            update_processing_status("extracting_text")
         else:
             logger.info("TRANSCRIBING")
             update_processing_status("transcribing")
@@ -761,7 +788,7 @@ def process_resource(resource_id: str, job_id: str = None, job_type: str = "full
 
                     chaptering_errors: list[str] = []
 
-                    for chapter_data in chapters:
+                    for chapter_index, chapter_data in enumerate(chapters):
                         try:
                             chapter_transcript = build_chapter_transcript(
                                 segments,
@@ -870,6 +897,13 @@ def process_resource(resource_id: str, job_id: str = None, job_type: str = "full
                             error = traceback.format_exc()
                             logger.error("CHAPTER CREATION ERROR:\n" + error)
                             chaptering_errors.append(error)
+                        else:
+                            update_processing_status(
+                                "subchaptering",
+                                progress=unit_progress(
+                                    55, 75, chapter_index + 1, len(chapters)
+                                ),
+                            )
 
                     if chaptering_errors:
                         raise RuntimeError("Chapter or subchapter generation did not complete successfully")
@@ -971,6 +1005,15 @@ def process_resource(resource_id: str, job_id: str = None, job_type: str = "full
                     resource.transcript or "",
                     resource.user_id,
                     resource_type=resource.type,
+                    progress_callback=lambda completed, total: update_processing_status(
+                        "embedding",
+                        progress=unit_progress(
+                            15 if job_type == "manual_index" else (82 if is_media_job else 75),
+                            94 if job_type == "manual_index" or not is_media_job else 95,
+                            completed,
+                            total,
+                        ),
+                    ),
                 )
 
                 logger.info("CHROMA EMBEDDINGS STORED")
@@ -979,6 +1022,7 @@ def process_resource(resource_id: str, job_id: str = None, job_type: str = "full
                 # SEARCH INDEXING
                 # =====================================
 
+                update_processing_status("indexing")
                 rebuild_resource_search_index(db, resource)
 
                 resource.is_embedded = "true"

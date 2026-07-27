@@ -1,4 +1,5 @@
 import unittest
+from contextvars import Context
 from unittest.mock import Mock, patch
 
 from core.logger import _sanitize_value
@@ -48,6 +49,30 @@ class GenerationLoggingTests(unittest.TestCase):
         self.assertNotIn("PRIVATE PROMPT", serialized)
         self.assertNotIn("PRIVATE OUTPUT", serialized)
         self.assertIn("summary_regeneration", serialized)
+
+    def test_stream_generation_trace_can_resume_in_a_different_context(self):
+        observed_correlations = []
+
+        @generation_trace.trace_generation(streaming=True)
+        def sample(feature="answer_stream"):
+            observed_correlations.append(
+                generation_trace.get_current_generation_trace().correlation_id
+            )
+            yield "first"
+            observed_correlations.append(
+                generation_trace.get_current_generation_trace().correlation_id
+            )
+            yield "second"
+
+        stream = sample()
+        capture = _CaptureLogger()
+        with patch.object(generation_trace, "logger", capture):
+            self.assertEqual(Context().run(next, stream), "first")
+            self.assertEqual(Context().run(next, stream), "second")
+            with self.assertRaises(StopIteration):
+                Context().run(next, stream)
+
+        self.assertEqual(len(set(observed_correlations)), 1)
 
     def test_token_metrics_survive_redaction_but_credentials_do_not(self):
         safe = _sanitize_value(

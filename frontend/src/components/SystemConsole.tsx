@@ -14,24 +14,25 @@ import {
   FileSearch,
   FolderOpen,
   Layers3,
-  Maximize2,
-  Minimize2,
   Pause,
   Play,
+  RefreshCw,
   Search,
   Server,
-  Square,
   TerminalSquare,
   Timer,
   X,
   XCircle,
   Zap,
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { DashboardData } from './metrics/types'
 
 type ViewMode = 'stream' | 'runs' | 'performance'
 type LevelFilter = 'all' | SystemLogLevel
 type SourceFilter = 'all' | SystemLogSource
+
+const METRICS_BASELINE_STORAGE_KEY = 'system-console:metrics-baseline'
 
 const LEVEL_ORDER: Record<SystemLogLevel, number> = {
   debug: 0,
@@ -132,8 +133,12 @@ interface PerformanceSummary {
   ragRuns: number
   averageApiLatencyMs: number
   apiRequests: number
+  backgroundApiRequests: number
   averageGenerationLatencyMs: number
   generationRuns: number
+  qualityAssessedRuns: number
+  qualityPassedRuns: number
+  qualityIssueRate: number
   retainedProviderCostUsd: number
   retainedTokenCount: number
   exactBillingCalls: number
@@ -154,18 +159,50 @@ function contextNumber(event: SystemLogEvent, key: string): number {
   return Number.isFinite(value) ? value : 0
 }
 
-function buildPerformanceSummary(events: SystemLogEvent[]): PerformanceSummary {
-  const ragTerminals = events.filter((event) => (
+function isBackgroundPollingRequest(event: SystemLogEvent): boolean {
+  if (event.event !== 'api.request_completed') return false
+  const method = String(event.context?.method || '').toUpperCase()
+  const path = String(event.context?.path || event.phase || '')
+  return method === 'GET' && (
+    path === '/tasks'
+    || path === '/notifications'
+    || path === '/queue'
+    || /^\/queue\/[^/]+$/.test(path)
+  )
+}
+
+// Exported for focused telemetry-window regression tests.
+// eslint-disable-next-line react-refresh/only-export-components
+export function buildPerformanceSummary(
+  events: SystemLogEvent[],
+  dashboard?: DashboardData | null,
+  baselineTimestamp?: string | null,
+): PerformanceSummary {
+  const baselineMs = baselineTimestamp ? Date.parse(baselineTimestamp) : Number.NaN
+  const hasBaseline = Number.isFinite(baselineMs)
+  const isAtOrAfterBaseline = (timestamp?: string | null): boolean => {
+    if (!hasBaseline) return true
+    if (!timestamp) return false
+    const timestampMs = Date.parse(timestamp)
+    return Number.isFinite(timestampMs) && timestampMs >= baselineMs
+  }
+  const retainedEvents = hasBaseline
+    ? events.filter((event) => isAtOrAfterBaseline(event.timestamp))
+    : events
+
+  const ragTerminals = retainedEvents.filter((event) => (
     /^rag\.pipeline_(?:completed|failed)$/.test(event.event)
   ))
   const ragFailures = ragTerminals.filter((event) => event.status === 'failed')
-  const apiTerminals = events.filter((event) => event.event === 'api.request_completed')
-  const generationTerminals = events.filter((event) => (
+  const allApiTerminals = retainedEvents.filter((event) => event.event === 'api.request_completed')
+  const backgroundApiTerminals = allApiTerminals.filter(isBackgroundPollingRequest)
+  const apiTerminals = allApiTerminals.filter((event) => !isBackgroundPollingRequest(event))
+  const generationTerminals = retainedEvents.filter((event) => (
     /^generation\.run_(?:completed|failed)$/.test(event.event)
   ))
 
   const settledByCorrelation = new Map<string, SystemLogEvent>()
-  for (const event of events) {
+  for (const event of retainedEvents) {
     if (
       event.event !== 'provider.usage_settled'
       && event.event !== 'provider.billing_reported'
@@ -177,10 +214,10 @@ function buildPerformanceSummary(events: SystemLogEvent[]): PerformanceSummary {
     }
   }
   const settled = Array.from(settledByCorrelation.values())
-  const unavailableBillingCalls = events.filter((event) => (
+  const unavailableBillingCalls = retainedEvents.filter((event) => (
     event.event === 'provider.billing_unavailable'
   )).length
-  const pendingBillingCalls = events.filter((event) => (
+  const pendingBillingCalls = retainedEvents.filter((event) => (
     event.event === 'provider.billing_pending'
     || event.event === 'provider.usage_pending'
   )).length
@@ -219,7 +256,7 @@ function buildPerformanceSummary(events: SystemLogEvent[]): PerformanceSummary {
   }
 
   const failureCounts = new Map<string, number>()
-  for (const event of events) {
+  for (const event of retainedEvents) {
     if (
       event.status !== 'failed'
       || !(
@@ -232,7 +269,7 @@ function buildPerformanceSummary(events: SystemLogEvent[]): PerformanceSummary {
     failureCounts.set(operation, (failureCounts.get(operation) || 0) + 1)
   }
 
-  return {
+  const localSummary: PerformanceSummary = {
     averageRagLatencyMs: average(
       ragTerminals
         .map((event) => event.durationMs)
@@ -248,12 +285,16 @@ function buildPerformanceSummary(events: SystemLogEvent[]): PerformanceSummary {
         .filter((value): value is number => typeof value === 'number')
     ),
     apiRequests: apiTerminals.length,
+    backgroundApiRequests: backgroundApiTerminals.length,
     averageGenerationLatencyMs: average(
       generationTerminals
         .map((event) => event.durationMs)
         .filter((value): value is number => typeof value === 'number')
     ),
     generationRuns: generationTerminals.length,
+    qualityAssessedRuns: 0,
+    qualityPassedRuns: 0,
+    qualityIssueRate: 0,
     retainedProviderCostUsd: settled.reduce(
       (total, event) => total + contextNumber(event, 'providerCostUsd'),
       0,
@@ -270,6 +311,95 @@ function buildPerformanceSummary(events: SystemLogEvent[]): PerformanceSummary {
       .map(([operation, count]) => ({ operation, count }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 8),
+  }
+
+  if (!dashboard) return localSummary
+
+  const requestEntries = (dashboard.entries || []).filter((entry) => (
+    !entry.type
+    && Number.isFinite(Number(entry.latency_ms))
+    && isAtOrAfterBaseline(entry.ts)
+  ))
+  const requestFailures = requestEntries.filter((entry) => entry.success === false)
+  const qualityAssessed = requestEntries.filter((entry) => typeof entry.response_passed === 'boolean')
+  const qualityPassed = qualityAssessed.filter((entry) => entry.response_passed === true)
+  const usageEntries = (dashboard.ai_usage_entries || []).filter((entry) => (
+    isAtOrAfterBaseline(entry.ts)
+  ))
+  const realDailyMap = new Map<string, DailyCostPoint>()
+  for (let offset = 6; offset >= 0; offset -= 1) {
+    const date = new Date()
+    date.setHours(0, 0, 0, 0)
+    date.setDate(date.getDate() - offset)
+    const key = [
+      date.getFullYear(),
+      String(date.getMonth() + 1).padStart(2, '0'),
+      String(date.getDate()).padStart(2, '0'),
+    ].join('-')
+    realDailyMap.set(key, {
+      key,
+      label: date.toLocaleDateString([], { weekday: 'short' }),
+      cost: 0,
+      tokens: 0,
+      calls: 0,
+    })
+  }
+  for (const entry of usageEntries) {
+    const date = new Date(entry.ts || '')
+    if (Number.isNaN(date.getTime())) continue
+    const key = [
+      date.getFullYear(),
+      String(date.getMonth() + 1).padStart(2, '0'),
+      String(date.getDate()).padStart(2, '0'),
+    ].join('-')
+    const point = realDailyMap.get(key)
+    if (!point) continue
+    const providerCost = Number(entry.provider_cost_usd)
+    const billableCost = Number(entry.billable_cost_usd)
+    point.cost += Number.isFinite(providerCost)
+      ? providerCost
+      : Number.isFinite(billableCost) ? billableCost : 0
+    point.tokens += Math.max(0, Number(entry.total_tokens) || 0)
+    point.calls += 1
+  }
+
+  const usageSummary = hasBaseline ? undefined : dashboard.usage_summary
+  const settledEvents = Number(usageSummary?.settled_events)
+  const pendingEvents = Number(usageSummary?.pending_events)
+  const providerCost = Number(usageSummary?.provider_total_cost_usd)
+  const providerTokens = Number(usageSummary?.provider_total_tokens)
+  const exactBillingCalls = Number.isFinite(settledEvents)
+    ? settledEvents
+    : usageEntries.filter((entry) => entry.is_exact_settled === true).length
+  const realPendingBillingCalls = Number.isFinite(pendingEvents)
+    ? pendingEvents
+    : usageEntries.filter((entry) => entry.metadata?.pending_settlement === true).length
+  const realUnavailableBillingCalls = usageEntries.filter((entry) => (
+    entry.is_exact_settled === true
+    && entry.provider_cost_usd == null
+  )).length
+  return {
+    ...localSummary,
+    averageRagLatencyMs: average(requestEntries.map((entry) => Number(entry.latency_ms) || 0)),
+    ragFailureRate: requestEntries.length > 0
+      ? (requestFailures.length / requestEntries.length) * 100
+      : 0,
+    ragRuns: requestEntries.length,
+    qualityAssessedRuns: qualityAssessed.length,
+    qualityPassedRuns: qualityPassed.length,
+    qualityIssueRate: qualityAssessed.length > 0
+      ? ((qualityAssessed.length - qualityPassed.length) / qualityAssessed.length) * 100
+      : 0,
+    retainedProviderCostUsd: Number.isFinite(providerCost)
+      ? providerCost
+      : usageEntries.reduce((total, entry) => total + (Number(entry.provider_cost_usd) || 0), 0),
+    retainedTokenCount: Number.isFinite(providerTokens)
+      ? providerTokens
+      : usageEntries.reduce((total, entry) => total + (Number(entry.total_tokens) || 0), 0),
+    exactBillingCalls,
+    unavailableBillingCalls: realUnavailableBillingCalls,
+    pendingBillingCalls: realPendingBillingCalls,
+    dailyCosts: Array.from(realDailyMap.values()),
   }
 }
 
@@ -352,6 +482,8 @@ function MetricCard({
   )
 }
 
+const MAX_RETAINED_EVENTS = 500
+
 export default function SystemConsole() {
   const [events, setEvents] = useState<SystemLogEvent[]>([])
   const [totalEvents, setTotalEvents] = useState(0)
@@ -372,10 +504,36 @@ export default function SystemConsole() {
   const [expandedRuns, setExpandedRuns] = useState<Set<string>>(new Set())
   const [backendState, setBackendState] = useState<'starting' | 'ready' | 'stopping' | 'stopped' | 'failed'>('stopped')
   const [toast, setToast] = useState('')
-  const [isMaximized, setIsMaximized] = useState(false)
+  const [dashboardMetrics, setDashboardMetrics] = useState<DashboardData | null>(null)
+  const [metricsLoading, setMetricsLoading] = useState(false)
+  const [metricsError, setMetricsError] = useState('')
+  const [metricsUpdatedAt, setMetricsUpdatedAt] = useState<Date | null>(null)
+  const [metricsBaseline] = useState<string | null>(() => {
+    const stored = localStorage.getItem(METRICS_BASELINE_STORAGE_KEY)
+    return stored && Number.isFinite(Date.parse(stored)) ? stored : null
+  })
   const pausedRef = useRef(false)
   const pendingRef = useRef<SystemLogEvent[]>([])
   const scrollRef = useRef<HTMLDivElement | null>(null)
+
+  const fetchDashboardMetrics = useCallback(async () => {
+    setMetricsLoading(true)
+    try {
+      const token = localStorage.getItem('access_token')
+      const response = await fetch('/api/metrics/dashboard?limit=2000', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (!response.ok) throw new Error(`Metrics request failed with HTTP ${response.status}`)
+      const payload = await response.json() as DashboardData
+      setDashboardMetrics(payload)
+      setMetricsUpdatedAt(new Date())
+      setMetricsError('')
+    } catch (error) {
+      setMetricsError(error instanceof Error ? error.message : 'Unable to load backend metrics')
+    } finally {
+      setMetricsLoading(false)
+    }
+  }, [])
 
   useEffect(() => {
     pausedRef.current = paused
@@ -383,20 +541,21 @@ export default function SystemConsole() {
 
   useEffect(() => {
     let disposed = false
-    void window.systemLogs?.getSnapshot(10_000).then((snapshot) => {
+    void window.systemLogs?.getSnapshot(MAX_RETAINED_EVENTS).then((snapshot) => {
       if (!snapshot || disposed) return
       setEvents(snapshot.events)
       setTotalEvents(snapshot.totalEvents)
       setHistoryTruncated(snapshot.truncated)
     })
     const removeEvent = window.systemLogs?.onEvent((event) => {
-      setTotalEvents((count) => count + 1)
+      setTotalEvents((count) => Math.min(MAX_RETAINED_EVENTS, count + 1))
       if (pausedRef.current) {
         pendingRef.current.push(event)
+        if (pendingRef.current.length > MAX_RETAINED_EVENTS) pendingRef.current.shift()
         setPendingCount(pendingRef.current.length)
         return
       }
-      setEvents((current) => [...current.slice(-9_999), event])
+      setEvents((current) => [...current.slice(-(MAX_RETAINED_EVENTS - 1)), event])
     })
     const removeFilter = window.systemLogs?.onSetFilter((nextLevel) => {
       if (nextLevel === 'error' || nextLevel === 'warning' || nextLevel === 'critical' || nextLevel === 'info' || nextLevel === 'debug') {
@@ -406,7 +565,6 @@ export default function SystemConsole() {
     })
     const removeBackend = window.systemLogs?.onBackendState((state) => setBackendState(state))
     void window.systemLogs?.getBackendState().then(setBackendState)
-    void window.systemLogs?.isMaximized().then(setIsMaximized)
     return () => {
       disposed = true
       removeEvent?.()
@@ -451,7 +609,10 @@ export default function SystemConsole() {
   }, [events, level, source, category, search])
 
   const runs = useMemo(() => buildRuns(filteredEvents), [filteredEvents])
-  const performance = useMemo(() => buildPerformanceSummary(events), [events])
+  const performance = useMemo(
+    () => buildPerformanceSummary(events, dashboardMetrics, metricsBaseline),
+    [dashboardMetrics, events, metricsBaseline],
+  )
   const maxDailyCost = Math.max(
     ...performance.dailyCosts.map((point) => point.cost),
     0.000001,
@@ -465,7 +626,7 @@ export default function SystemConsole() {
     const pending = pendingRef.current
     pendingRef.current = []
     setPendingCount(0)
-    if (pending.length > 0) setEvents((current) => [...current, ...pending].slice(-10_000))
+    if (pending.length > 0) setEvents((current) => [...current, ...pending].slice(-MAX_RETAINED_EVENTS))
   }
 
   const copyEvent = async (event: SystemLogEvent) => {
@@ -481,7 +642,7 @@ export default function SystemConsole() {
   const clearLogs = async (filter?: SystemLogClearFilter) => {
     const result = await window.systemLogs?.clearLogs(filter)
     if (!result?.success) return
-    const snapshot = await window.systemLogs?.getSnapshot(10_000)
+    const snapshot = await window.systemLogs?.getSnapshot(MAX_RETAINED_EVENTS)
     setEvents(snapshot?.events ?? [])
     setTotalEvents(snapshot?.totalEvents ?? 0)
     setHistoryTruncated(snapshot?.truncated ?? false)
@@ -489,7 +650,10 @@ export default function SystemConsole() {
     setPendingCount(0)
     setSelectedEvent(null)
     if (filter?.category) setCategory('all')
-    setToast(result.deleted > 0 ? `Cleared ${result.deleted.toLocaleString()} event${result.deleted === 1 ? '' : 's'}` : 'No matching events to clear')
+    const eventMessage = result.deleted > 0
+      ? `Cleared ${result.deleted.toLocaleString()} event${result.deleted === 1 ? '' : 's'}`
+      : 'No retained events to clear'
+    setToast(eventMessage)
   }
 
   const toggleRun = (runId: string) => {
@@ -503,7 +667,7 @@ export default function SystemConsole() {
 
   return (
     <div className="system-console-root flex h-screen w-screen flex-col overflow-hidden bg-[#080b12] text-slate-200 selection:bg-indigo-500/30">
-      <header className="system-console-header system-console-drag flex h-11 shrink-0 items-center border-b border-white/[0.07] bg-[#0b0f18] pl-4">
+      <header className="system-console-header system-console-drag flex h-11 shrink-0 items-center border-b border-white/[0.07] bg-[#0b0f18] pl-4 pr-[150px]">
         <div className="flex min-w-0 items-center gap-2.5">
           <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 shadow-lg shadow-indigo-950/40">
             <TerminalSquare size={15} className="text-white" />
@@ -521,48 +685,27 @@ export default function SystemConsole() {
             </span>
           </div>
         </div>
-        <div className="ml-auto flex h-full system-console-no-drag">
-          <button onClick={() => window.systemLogs?.minimize()} className="flex w-12 items-center justify-center text-slate-500 transition-colors hover:bg-white/[0.06] hover:text-slate-200" title="Minimize">
-            <Minimize2 size={14} />
-          </button>
-          <button
-            onClick={() => {
-              window.systemLogs?.toggleMaximize()
-              window.setTimeout(() => void window.systemLogs?.isMaximized().then(setIsMaximized), 120)
-            }}
-            className="flex w-12 items-center justify-center text-slate-500 transition-colors hover:bg-white/[0.06] hover:text-slate-200"
-            title={isMaximized ? 'Restore' : 'Maximize'}
-          >
-            {isMaximized ? <Square size={12} /> : <Maximize2 size={13} />}
-          </button>
-          <button onClick={() => window.systemLogs?.close()} className="flex w-12 items-center justify-center text-slate-500 transition-colors hover:bg-rose-500 hover:text-white" title="Close">
-            <X size={16} />
-          </button>
-        </div>
       </header>
 
       <div className="system-console-summary grid shrink-0 grid-cols-4 gap-3 border-b border-white/[0.055] bg-[#090d15] px-5 py-3">
-        <MetricCard label="Events" value={totalEvents.toLocaleString()} detail={historyTruncated ? 'latest 10k shown' : 'retained'} icon={<Activity size={17} />} tone="bg-sky-500/10 text-sky-300" />
+        <MetricCard label="Events" value={totalEvents.toLocaleString()} detail={historyTruncated ? 'latest 500 shown' : 'rolling retention'} icon={<Activity size={17} />} tone="bg-sky-500/10 text-sky-300" />
         <MetricCard label="Active runs" value={activeRuns} detail="in progress" icon={<Zap size={17} />} tone="bg-indigo-500/10 text-indigo-300" />
         <MetricCard label="Warnings" value={warnings} detail="retained" icon={<AlertTriangle size={17} />} tone="bg-amber-500/10 text-amber-300" />
         <MetricCard label="Errors" value={errors} detail="need attention" icon={<XCircle size={17} />} tone="bg-rose-500/10 text-rose-300" />
       </div>
 
       <div className="flex min-h-0 flex-1">
-        <aside className="system-console-sidebar flex w-56 shrink-0 flex-col border-r border-white/[0.065] bg-[#090d15] p-3">
-          <div className="grid grid-cols-3 rounded-lg bg-black/20 p-1">
+        <aside className="system-console-sidebar no-scrollbar flex min-h-0 w-56 shrink-0 flex-col overflow-y-auto border-r border-white/[0.065] bg-[#090d15] p-3">
+          <div className="grid shrink-0 grid-cols-2 rounded-lg bg-black/20 p-1">
             <button onClick={() => setView('stream')} className={`flex items-center justify-center gap-1.5 rounded-md px-2 py-2 text-[11px] font-semibold transition ${view === 'stream' ? 'bg-indigo-500/15 text-indigo-300 shadow-sm' : 'text-slate-500 hover:text-slate-300'}`}>
               <TerminalSquare size={13} /> Stream
             </button>
             <button onClick={() => setView('runs')} className={`flex items-center justify-center gap-1.5 rounded-md px-2 py-2 text-[11px] font-semibold transition ${view === 'runs' ? 'bg-indigo-500/15 text-indigo-300 shadow-sm' : 'text-slate-500 hover:text-slate-300'}`}>
               <Layers3 size={13} /> Runs
             </button>
-            <button onClick={() => setView('performance')} className={`flex items-center justify-center gap-1.5 rounded-md px-1 py-2 text-[10px] font-semibold transition ${view === 'performance' ? 'bg-indigo-500/15 text-indigo-300 shadow-sm' : 'text-slate-500 hover:text-slate-300'}`}>
-              <BarChart3 size={13} /> Metrics
-            </button>
           </div>
 
-          <div className="mt-5">
+          <div className="mt-5 shrink-0">
             <p className="mb-2 px-2 text-[9px] font-bold uppercase tracking-[0.2em] text-slate-600">Severity</p>
             {(['all', 'critical', 'error', 'warning', 'info', 'debug'] as LevelFilter[]).map((item) => {
               const count = item === 'all' ? events.length : events.filter((event) => event.level === item).length
@@ -589,7 +732,7 @@ export default function SystemConsole() {
             })}
           </div>
 
-          <div className="mt-4">
+          <div className="mt-4 shrink-0">
             <p className="mb-2 px-2 text-[9px] font-bold uppercase tracking-[0.2em] text-slate-600">Source</p>
             {(['all', 'desktop', 'backend', 'renderer'] as SourceFilter[]).map((item) => (
               <button key={item} onClick={() => setSource(item)} className={`mb-0.5 flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] font-medium transition ${source === item ? 'bg-white/[0.06] text-slate-100' : 'text-slate-500 hover:bg-white/[0.035] hover:text-slate-300'}`}>
@@ -599,7 +742,7 @@ export default function SystemConsole() {
             ))}
           </div>
 
-          <div className="mt-auto space-y-1 border-t border-white/[0.06] pt-3">
+          <div className="mt-auto shrink-0 space-y-1 border-t border-white/[0.06] pt-3">
             <button onClick={() => void exportLogs()} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-[11px] font-medium text-slate-500 transition hover:bg-white/[0.04] hover:text-slate-200">
               <Download size={13} /> Export sanitized logs
             </button>
@@ -817,17 +960,35 @@ export default function SystemConsole() {
           ) : (
             <div className="min-h-0 flex-1 overflow-y-auto p-5">
               <div className="mx-auto max-w-6xl space-y-4">
-                <div>
-                  <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-indigo-400/70">Retained performance window</p>
-                  <h2 className="mt-1 text-lg font-semibold text-slate-100">Pipeline health and provider spend</h2>
-                  <p className="mt-1 text-[10px] text-slate-600">Calculated locally from the latest {events.length.toLocaleString()} sanitized structured events.</p>
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-indigo-400/70">Live backend performance</p>
+                    <h2 className="mt-1 text-lg font-semibold text-slate-100">Operational health and provider usage</h2>
+                    <p className="mt-1 text-[10px] text-slate-600">
+                      {dashboardMetrics
+                        ? `${metricsBaseline ? `Since reset ${new Date(metricsBaseline).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'All persisted history'} · RAG: ${performance.ragRuns.toLocaleString()} runs · provider usage: ${performance.exactBillingCalls.toLocaleString()} settled calls · HTTP: retained logs${metricsUpdatedAt ? ` · updated ${metricsUpdatedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : ''}`
+                        : metricsError || 'Loading authenticated backend metrics…'}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void fetchDashboardMetrics()}
+                      disabled={metricsLoading}
+                      className="system-console-no-drag flex h-8 items-center gap-2 rounded-lg border border-white/[0.07] bg-white/[0.03] px-3 text-[10px] font-semibold text-slate-400 transition hover:bg-white/[0.06] hover:text-slate-200 disabled:cursor-wait disabled:opacity-60"
+                      title="Refresh backend metrics"
+                    >
+                      <RefreshCw size={12} className={metricsLoading ? 'animate-spin' : ''} />
+                      Refresh
+                    </button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-4 gap-3">
-                  <MetricCard label="Average RAG latency" value={formatDuration(performance.averageRagLatencyMs)} detail={`${performance.ragRuns} runs`} icon={<Timer size={17} />} tone="bg-cyan-500/10 text-cyan-300" />
-                  <MetricCard label="RAG failure rate" value={`${performance.ragFailureRate.toFixed(1)}%`} detail={`${performance.ragRuns} runs`} icon={<AlertTriangle size={17} />} tone={performance.ragFailureRate > 5 ? 'bg-rose-500/10 text-rose-300' : 'bg-emerald-500/10 text-emerald-300'} />
-                  <MetricCard label="Provider cost" value={formatCost(performance.retainedProviderCostUsd)} detail={`${performance.exactBillingCalls} settled`} icon={<DollarSign size={17} />} tone="bg-emerald-500/10 text-emerald-300" />
-                  <MetricCard label="Token burn" value={performance.retainedTokenCount.toLocaleString()} detail="settled tokens" icon={<Zap size={17} />} tone="bg-violet-500/10 text-violet-300" />
+                  <MetricCard label="Average RAG latency" value={formatDuration(performance.averageRagLatencyMs)} detail={`latest telemetry · ${performance.ragRuns} runs`} icon={<Timer size={17} />} tone="bg-cyan-500/10 text-cyan-300" />
+                  <MetricCard label="Operational failure rate" value={`${performance.ragFailureRate.toFixed(1)}%`} detail={`runtime failures · ${performance.ragRuns} runs`} icon={<AlertTriangle size={17} />} tone={performance.ragFailureRate > 5 ? 'bg-rose-500/10 text-rose-300' : 'bg-emerald-500/10 text-emerald-300'} />
+                  <MetricCard label="Provider cost" value={formatCost(performance.retainedProviderCostUsd)} detail={`persisted · ${performance.exactBillingCalls} settled`} icon={<DollarSign size={17} />} tone="bg-emerald-500/10 text-emerald-300" />
+                  <MetricCard label="Token burn" value={performance.retainedTokenCount.toLocaleString()} detail="persisted settled usage" icon={<Zap size={17} />} tone="bg-violet-500/10 text-violet-300" />
                 </div>
 
                 <div className="grid grid-cols-[1.4fr_0.8fr] gap-4">
@@ -862,7 +1023,7 @@ export default function SystemConsole() {
                       {[
                         ['RAG pipeline', formatDuration(performance.averageRagLatencyMs), `${performance.ragRuns} runs`],
                         ['Generation', formatDuration(performance.averageGenerationLatencyMs), `${performance.generationRuns} runs`],
-                        ['API request', formatDuration(performance.averageApiLatencyMs), `${performance.apiRequests} requests`],
+                        ['Product API', formatDuration(performance.averageApiLatencyMs), `${performance.apiRequests} non-poll requests · ${performance.backgroundApiRequests} background polls hidden`],
                       ].map(([label, value, detail]) => (
                         <div key={label} className="rounded-lg border border-white/[0.05] bg-black/15 p-3">
                           <div className="flex items-center justify-between gap-3">
@@ -876,9 +1037,9 @@ export default function SystemConsole() {
                   </section>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-3 gap-4">
                   <section className="rounded-xl border border-white/[0.065] bg-white/[0.02] p-4">
-                    <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-slate-600">Failure concentration</p>
+                    <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-slate-600">Operational failures</p>
                     <div className="mt-3 space-y-2">
                       {performance.failuresByOperation.length === 0 ? (
                         <p className="rounded-lg border border-emerald-500/10 bg-emerald-500/[0.025] p-4 text-[10px] text-emerald-400/70">No terminal failures in the retained event window.</p>
@@ -889,6 +1050,35 @@ export default function SystemConsole() {
                         </div>
                       ))}
                     </div>
+                  </section>
+
+                  <section className="rounded-xl border border-white/[0.065] bg-white/[0.02] p-4">
+                    <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-slate-600">Response quality</p>
+                    {performance.qualityAssessedRuns === 0 ? (
+                      <p className="mt-3 rounded-lg border border-white/[0.05] bg-black/15 p-4 text-[10px] text-slate-500">No assessed responses in the current telemetry window.</p>
+                    ) : (
+                      <>
+                        <div className="mt-3 rounded-lg border border-indigo-500/10 bg-indigo-500/[0.025] p-4">
+                          <div className="flex items-end justify-between gap-3">
+                            <div>
+                              <p className="text-[8px] font-bold uppercase tracking-wider text-indigo-400/70">Quality pass rate</p>
+                              <p className="mt-2 text-2xl font-semibold text-indigo-300">{(100 - performance.qualityIssueRate).toFixed(1)}%</p>
+                            </div>
+                            <p className="text-right text-[8px] leading-4 text-slate-600">{performance.qualityAssessedRuns} assessed<br />not runtime failures</p>
+                          </div>
+                        </div>
+                        <div className="mt-2 grid grid-cols-2 gap-2">
+                          <div className="rounded-lg border border-emerald-500/10 bg-emerald-500/[0.025] p-3">
+                            <p className="text-[8px] uppercase text-emerald-500/70">Passed</p>
+                            <p className="mt-1 text-lg font-semibold text-emerald-300">{performance.qualityPassedRuns}</p>
+                          </div>
+                          <div className="rounded-lg border border-amber-500/10 bg-amber-500/[0.025] p-3">
+                            <p className="text-[8px] uppercase text-amber-500/70">Needs review</p>
+                            <p className="mt-1 text-lg font-semibold text-amber-300">{performance.qualityAssessedRuns - performance.qualityPassedRuns}</p>
+                          </div>
+                        </div>
+                      </>
+                    )}
                   </section>
 
                   <section className="rounded-xl border border-white/[0.065] bg-white/[0.02] p-4">
@@ -921,7 +1111,7 @@ export default function SystemConsole() {
       <footer className="system-console-footer flex h-7 shrink-0 items-center gap-4 border-t border-white/[0.06] bg-[#090d15] px-4 font-mono text-[8px] uppercase tracking-wider text-slate-700">
         <span>{filteredEvents.length.toLocaleString()} visible</span>
         <span>safe metadata policy</span>
-        <span>14-day / 100 MB retention</span>
+        <span>Latest 500 events retained</span>
         <span className="ml-auto flex items-center gap-1.5 text-emerald-500/70"><span className="h-1 w-1 rounded-full bg-emerald-400" /> live IPC</span>
       </footer>
 

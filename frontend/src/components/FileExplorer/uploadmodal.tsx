@@ -149,23 +149,23 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, initi
             aria-modal="true"
             aria-labelledby="modal-title"
             tabIndex={-1}
-            className={`w-full max-w-lg bg-white border border-slate-100 shadow-lg rounded-lg relative max-h-[95vh] overflow-y-auto outline-none p-4 md:p-6 transition-transform duration-300 ${isOpen ? "scale-100" : "scale-95"}`}
-         >
-            <div className="flex items-start pb-3 border-b border-slate-300">
-               <div>
-                  <h3 id="modal-title" className="text-slate-900 text-lg font-semibold flex-1">
-                     Upload Files
-                  </h3>
-                  <p className="text-slate-600 text-sm mt-1.5">Confirm upload (Only PDF, Image, Audio, Video, DOCX, Markdown)</p>
+            className={`w-full max-w-lg bg-white dark:bg-[var(--dk-surface-1)] border border-slate-100 dark:border-white/10 shadow-lg dark:shadow-2xl rounded-lg relative max-h-[95vh] overflow-y-auto outline-none p-4 md:p-6 transition-transform duration-300 ${isOpen ? "scale-100" : "scale-95"}`}
+          >
+             <div className="flex items-start pb-3 border-b border-slate-300 dark:border-white/10">
+                <div>
+                   <h3 id="modal-title" className="text-slate-900 dark:text-[var(--dk-ink)] text-lg font-semibold flex-1">
+                      Upload Files
+                   </h3>
+                   <p className="text-slate-600 dark:text-[var(--dk-ink-muted)] text-sm mt-1.5">Confirm upload (Only PDF, Image, Audio, Video, DOCX, Markdown)</p>
                </div>
 
                <button
                   type="button"
                   aria-label="Close modal"
                   onClick={onClose}
-                  className="ml-auto flex items-center focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded"
-               >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="size-3 cursor-pointer fill-slate-500 hover:fill-red-600" aria-hidden="true" viewBox="0 0 329.269 329">
+                   className="ml-auto flex items-center focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded"
+                >
+                   <svg xmlns="http://www.w3.org/2000/svg" className="size-3 cursor-pointer fill-slate-500 dark:fill-[var(--dk-ink-muted)] hover:fill-red-600 dark:hover:fill-red-400" aria-hidden="true" viewBox="0 0 329.269 329">
                      <path d="M194.8 164.77 323.013 36.555c8.343-8.34 8.343-21.825 0-30.164-8.34-8.34-21.825-8.34-30.164 0L164.633 134.605 36.422 6.391c-8.344-8.34-21.824-8.34-30.164 0-8.344 8.34-8.344 21.824 0 30.164l128.21 128.215L6.259 292.984c-8.344 8.34-8.344 21.825 0 30.164a21.27 21.27 0 0 0 15.082 6.25c5.46 0 10.922-2.09 15.082-6.25l128.21-128.214 128.216 128.214a21.27 21.27 0 0 0 15.082 6.25c5.46 0 10.922-2.09 15.082-6.25 8.343-8.34 8.343-21.824 0-30.164zm0 0" />
                   </svg>
                </button>
@@ -176,10 +176,10 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, initi
                        onDragOver={(e) => { e.preventDefault(); setIsDraggingOverZone(true); }}
                        onDragLeave={() => setIsDraggingOverZone(false)}
                        onDrop={handleDrop}
-                       className={`rounded-md border-2 border-dashed mt-6 transition-all duration-300 group ${isDraggingOverZone ? 'border-blue-500 bg-blue-50' : 'border-slate-300 hover:border-blue-500 hover:bg-blue-50'}`}
-                    >
-                       <div className="p-4 min-h-[160px] flex flex-col items-center justify-center text-center pointer-events-none">
-                          <svg xmlns="http://www.w3.org/2000/svg" className={`size-10 mb-4 transition-colors ${isDraggingOverZone ? 'fill-blue-500' : 'fill-slate-400 group-hover:fill-blue-500'}`}
+                       className={`rounded-md border-2 border-dashed mt-6 transition-all duration-300 group ${isDraggingOverZone ? 'border-blue-500 bg-blue-50 dark:border-blue-400 dark:bg-blue-500/10' : 'border-slate-300 bg-white hover:border-blue-500 hover:bg-blue-50 dark:border-white/15 dark:bg-[var(--dk-surface-2)] dark:hover:border-blue-400 dark:hover:bg-blue-500/10'}`}
+                     >
+                        <div className="p-4 min-h-[160px] flex flex-col items-center justify-center text-center pointer-events-none">
+                           <svg xmlns="http://www.w3.org/2000/svg" className={`size-10 mb-4 transition-colors ${isDraggingOverZone ? 'fill-blue-500 dark:fill-blue-400' : 'fill-slate-400 dark:fill-[var(--dk-ink-faint)] group-hover:fill-blue-500 dark:group-hover:fill-blue-400'}`}
                              viewBox="0 0 32 32" aria-hidden="true">
                              <path
                                 d="M23.75 11.044a7.99 7.99 0 0 0-15.5-.009A8 8 0 0 0 9 27h3a1 1 0 0 0 0-2H9a6 6 0 0 1-.035-12 1.038 1.038 0 0 0 1.1-.854 5.991 5.991 0 0 1 11.862 0A1.08 1.08 0 0 0 23 13a6 6 0 0 1 0 12h-3a1 1 0 0 0 0 2h3a8 8 0 0 0 .75-15.956z"
@@ -189,9 +189,9 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, initi
                                 data-original="#000000" />
                           </svg>
 
-                          <span className="flex justify-center flex-wrap gap-1 text-sm text-slate-600">
-                             Drag & Drop or
-                             <label className="text-blue-700 cursor-pointer pointer-events-auto">
+                           <span className="flex justify-center flex-wrap gap-1 text-sm text-slate-600 dark:text-[var(--dk-ink-muted)]">
+                              Drag & Drop or
+                              <label className="text-blue-700 dark:text-blue-400 cursor-pointer pointer-events-auto">
                                 <span>Choose files</span>
                                 <input type="file" className="sr-only" multiple accept="video/*,audio/*,image/*,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.md" onChange={handleFileChange} />
                              </label>
@@ -201,13 +201,13 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, initi
                     </div>
 
                {errorMessage && (
-                  <p className="text-red-500 text-xs mt-3 text-center font-medium bg-red-50 p-2 rounded border border-red-100">{errorMessage}</p>
+                   <p className="text-red-500 dark:text-red-300 text-xs mt-3 text-center font-medium bg-red-50 dark:bg-red-500/10 p-2 rounded border border-red-100 dark:border-red-500/20">{errorMessage}</p>
                )}
 
                {files.map((f, index) => (
-                  <div key={index} className="flex flex-col bg-gray-50 p-4 rounded-md mt-4 animate-fadeInDown">
+                   <div key={index} className="flex flex-col bg-gray-50 dark:bg-[var(--dk-surface-2)] p-4 rounded-md mt-4 animate-fadeInDown">
                      <div className="flex">
-                        <div className="flex items-center gap-1 text-xs text-slate-600 flex-1">
+                         <div className="flex items-center gap-1 text-xs text-slate-600 dark:text-[var(--dk-ink-soft)] flex-1">
                            <span>{f.name} <span className="ml-2">{(f.size / 1024 / 1024).toFixed(2)} MB</span></span>
                         </div>
                         <button
@@ -215,7 +215,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, initi
                            aria-label="remove file"
                            disabled={isUploading}
                            onClick={() => handleRemoveFile(index)}
-                           className="text-slate-400 hover:text-red-600 transition-colors disabled:opacity-50"
+                            className="text-slate-400 dark:text-[var(--dk-ink-faint)] hover:text-red-600 dark:hover:text-red-400 transition-colors disabled:opacity-50"
                         >
                            <svg xmlns="http://www.w3.org/2000/svg" className="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -223,14 +223,14 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, initi
                         </button>
                      </div>
 
-                     <div className="bg-gray-200 rounded-full w-full h-2 my-2.5 overflow-hidden">
+                      <div className="bg-gray-200 dark:bg-[var(--dk-surface-3)] rounded-full w-full h-2 my-2.5 overflow-hidden">
                         <div 
                            className={`h-full bg-blue-600 transition-all duration-500 ${isUploading ? 'animate-pulse' : ''}`} 
                            style={{ width: isUploading ? "100%" : "0%" }}
                         ></div>
                      </div>
 
-                     <p className="text-xs text-slate-600 flex-1">{isUploading ? "Uploading..." : "Ready to upload"}</p>
+                      <p className="text-xs text-slate-600 dark:text-[var(--dk-ink-muted)] flex-1">{isUploading ? "Uploading..." : "Ready to upload"}</p>
                   </div>
                ))}
             </div>
@@ -240,7 +240,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, initi
                   type="button"
                   onClick={onClose}
                   disabled={isUploading}
-                  className="px-3.5 py-2 text-slate-900 text-sm font-semibold w-full rounded-md cursor-pointer bg-white border border-slate-300 transition-colors hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50"
+                  className="px-3.5 py-2 text-slate-900 dark:text-[var(--dk-ink)] text-sm font-semibold w-full rounded-md cursor-pointer bg-white dark:bg-[var(--dk-surface-2)] border border-slate-300 dark:border-white/15 transition-colors hover:bg-slate-50 dark:hover:bg-[var(--dk-surface-3)] focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50"
                >
                   Cancel
                </button>

@@ -234,11 +234,17 @@ export function Sidebar({ className }: SidebarProps) {
                 <button
                   onClick={(e) => { e.stopPropagation(); addFolder(); }}
                   title="New Folder"
-                  className="p-0.5 rounded hover:bg-[#EFEFED]"
+                  className="p-0.5 rounded text-[#9A9A97] transition-colors hover:bg-indigo-50 hover:text-indigo-600 dark:hover:bg-indigo-500/15 dark:hover:text-indigo-300"
                 >
-                  <FolderPlus size={14} className="text-[#9A9A97] hover:text-[#37352F]" />
+                  <FolderPlus size={14} />
                 </button>
-                <button onClick={(e) => { e.stopPropagation(); addNote(); }} title="New Note" className="p-0.5 rounded hover:bg-[#EFEFED]"><PlusCircle size={14} className="text-[#9A9A97] hover:text-[#37352F]" /></button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); addNote(); }}
+                  title="New Note"
+                  className="p-0.5 rounded text-[#9A9A97] transition-colors hover:bg-indigo-50 hover:text-indigo-600 dark:hover:bg-indigo-500/15 dark:hover:text-indigo-300"
+                >
+                  <PlusCircle size={14} />
+                </button>
              </div>
           </div>
           
@@ -336,10 +342,12 @@ function SidebarItem({
     <div
       className={`
         flex items-center group py-[5px] rounded-md cursor-pointer select-none transition-colors duration-150
-        ${active ? 'bg-[#EFEFED] font-medium' : 'hover:bg-[#EFEFED]/60'}
+        ${active
+          ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-200 font-medium'
+          : 'hover:bg-indigo-50/70 hover:text-indigo-700 dark:hover:bg-indigo-500/10 dark:hover:text-indigo-200'}
         ${isDragging ? 'opacity-40' : 'opacity-100'}
-        ${dragOver && canAcceptDrop ? 'ring-2 ring-inset ring-[#37352F] bg-[#F0EEE8] shadow-inner' : ''}
-        ${active ? 'border-l-2 border-[#37352F]' : 'border-l-2 border-transparent'}
+        ${dragOver && canAcceptDrop ? 'ring-2 ring-inset ring-indigo-500/60 bg-indigo-50/80 dark:bg-indigo-500/15 shadow-inner' : ''}
+        ${active ? 'border-l-2 border-indigo-500 dark:border-indigo-400' : 'border-l-2 border-transparent'}
       `}
       style={{ paddingLeft: `${8 + indent * 14}px`, paddingRight: '8px' }}
       onClick={onClick}
@@ -448,7 +456,7 @@ function SidebarItem({
           {onRename && (
             <button
               title="Rename"
-              className="p-0.5 rounded hover:bg-[#E5E3DC] text-[#9A9A97] hover:text-[#37352F] transition-colors"
+              className="p-0.5 rounded text-[#9A9A97] transition-colors hover:bg-indigo-100 hover:text-indigo-700 dark:hover:bg-indigo-400/15 dark:hover:text-indigo-200"
               onClick={(e) => {
                 e.stopPropagation();
                 setIsEditing(true);

@@ -3,6 +3,7 @@ export interface RAGSource {
   excerpt: string;
   rerank_score?: number | null;
   hybrid_score?: number | null;
+  similarity_score?: number | null;
   resource_id?: string | null;
   resource_title?: string | null;
   resource_path?: string | null;
@@ -28,4 +29,10 @@ export interface RAGResponseDetails {
   modulesExecuted?: string[];
   reasoning?: string | null;
   contextPreview?: string | null;
+  chatMode?: 'global' | 'library_rag' | 'resource_rag' | string;
+  finishReason?: string | null;
+  completionStatus?: 'complete' | 'incomplete' | 'interrupted' | 'stopped' | 'blocked' | string;
+  continuationCount?: number;
+  canContinue?: boolean;
+  assistantMessageId?: string | null;
 }

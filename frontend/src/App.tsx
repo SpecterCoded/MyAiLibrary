@@ -86,7 +86,7 @@ const getWorkspaceTabTitle = (kind: WorkspaceTabKind, params: WorkspaceTabParams
     downloads: 'Downloads',
     notebooks: 'Notebooks',
     concepts: 'Knowledge',
-    chat: 'Ask AI',
+    chat: 'Chat',
     metrics: 'Metrics',
     settings: 'Settings',
   } as Partial<Record<WorkspaceTabKind, string>>)[kind] || 'Home';
@@ -1070,19 +1070,6 @@ export default function App() {
         !!target?.closest('[contenteditable="true"]');
 
       const key = event.key.toLowerCase();
-      const isBackendLogShortcut =
-        (event.ctrlKey || event.metaKey) &&
-        !event.altKey &&
-        ((!event.shiftKey && (key === 't' || event.code === 'KeyT')) ||
-          (event.shiftKey && (key === 'l' || event.code === 'KeyL')));
-
-      if (isBackendLogShortcut) {
-        event.preventDefault();
-        event.stopPropagation();
-        void window.desktop?.openSystemConsole();
-        return;
-      }
-
       if ((event.ctrlKey || event.metaKey) && key === 'k') {
         event.preventDefault();
         toggleSearchModal();
@@ -1468,7 +1455,8 @@ export default function App() {
   );
 
   return (
-    <AnimatePresence mode="wait">
+    <>
+      <AnimatePresence mode="wait">
       {loadingAuth || !workspaceWindowContextLoaded ? (
         <LogoLoading
           key="auth-loading"
@@ -1543,6 +1531,7 @@ export default function App() {
           {workspaceContent}
         </DashboardLayout>
       )}
+      </AnimatePresence>
 
       <AnimatePresence key="update-notifications">
         {isAuthenticated && isPrimaryWorkspaceWindow && availableUpdateVersion && dismissedAvailableVersion !== availableUpdateVersion && (
@@ -1665,7 +1654,7 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
-    </AnimatePresence>
+    </>
   );
 }
 

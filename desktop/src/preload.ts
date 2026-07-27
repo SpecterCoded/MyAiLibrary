@@ -58,25 +58,6 @@ const DESKTOP_ATTACHMENTS_CHANNELS = {
   openViewer: 'desktop-attachments:open-viewer',
 } as const
 
-function isBackendLogShortcut(event: KeyboardEvent): boolean {
-  if (!(event.ctrlKey || event.metaKey) || event.altKey) return false
-  const key = event.key.toLowerCase()
-  const isCtrlT = !event.shiftKey && (key === 't' || event.code === 'KeyT')
-  const isLegacyShortcut = event.shiftKey && (key === 'l' || event.code === 'KeyL')
-  return isCtrlT || isLegacyShortcut
-}
-
-window.addEventListener(
-  'keydown',
-  (event) => {
-    if (!isBackendLogShortcut(event)) return
-    event.preventDefault()
-    event.stopImmediatePropagation()
-    void ipcRenderer.invoke('desktop:open-system-console')
-  },
-  { capture: true },
-)
-
 contextBridge.exposeInMainWorld('desktop', {
   openFloatingTool: (kind: FloatingToolKind): Promise<boolean> =>
     ipcRenderer.invoke('desktop:open-floating-tool', kind),
@@ -119,7 +100,7 @@ contextBridge.exposeInMainWorld('desktop', {
   openUpdateLogs: (): Promise<boolean> => ipcRenderer.invoke('desktop:open-update-logs'),
   getAppInfo: (): Promise<Record<string, unknown> | null> => ipcRenderer.invoke('desktop:get-app-info'),
   openSystemConsole: (): Promise<boolean> => ipcRenderer.invoke('desktop:open-system-console'),
-  openBackendLogTerminal: (): Promise<boolean> => ipcRenderer.invoke('desktop:open-system-console'),
+  openBackendLogTerminal: (): Promise<boolean> => ipcRenderer.invoke('desktop:open-backend-log-terminal'),
   logSystemEvent: (event: SystemLogEventInput): void => ipcRenderer.send('system-log:renderer-event', event),
   getSystemTheme: (): Promise<'light' | 'dark'> => ipcRenderer.invoke('desktop:get-system-theme'),
   setTitleBarTheme: (theme: 'light' | 'dark'): Promise<boolean> => ipcRenderer.invoke('desktop:set-titlebar-theme', theme),

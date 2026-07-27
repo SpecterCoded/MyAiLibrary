@@ -32,11 +32,13 @@ function getSourceScore(source: RAGSource): number {
   const raw = source as any;
   const score =
     source.rerank_score ??
-    source.hybrid_score ??
+    source.similarity_score ??
     raw.confidence ??
     raw.score ??
     raw.similarity ??
+    raw.similarity_score ??
     raw.relevance_score ??
+    source.hybrid_score ??
     null;
   if (score == null || !Number.isFinite(score)) return 0;
   return score;

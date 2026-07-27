@@ -302,17 +302,21 @@ def _merge_related_documents(db, resource: Resource, analysis: dict[str, Any]) -
     return output[:SIMILAR_DOCUMENT_LIMIT]
 
 
-def run_document_intelligence(resource_id: str) -> str:
+def run_document_intelligence(resource_id: str, job_id: str | None = None) -> str:
     db = SessionLocal()
     started = time.perf_counter()
     try:
         resource = db.query(Resource).filter(Resource.id == resource_id, Resource.is_deleted == 0).first()
+        from services.processing_progress import update_processing_progress
+        update_processing_progress(db, job_id, "preflight", progress=5, is_media=False)
         if not resource or not should_enable_document_intelligence(resource):
+            update_processing_progress(db, job_id, "complete", progress=100, is_media=False)
             return "skipped"
 
         insight = get_or_create_document_insight(db, resource.id)
         content_hash = build_document_analysis_hash(resource)
         if insight.status == "completed" and insight.content_hash == content_hash:
+            update_processing_progress(db, job_id, "complete", progress=100, is_media=False)
             return "cached"
 
         insight.status = "processing"
@@ -328,9 +332,14 @@ def run_document_intelligence(resource_id: str) -> str:
             db.commit()
             return "failed"
 
+        update_processing_progress(db, job_id, "analysis", progress=15, is_media=False)
         analysis, usage = _generate_document_analysis(resource, source_text)
+        update_processing_progress(
+            db, job_id, "related_document_matching", progress=75, is_media=False
+        )
         related_documents = _merge_related_documents(db, resource, analysis)
 
+        update_processing_progress(db, job_id, "persistence", progress=95, is_media=False)
         insight.content_hash = content_hash
         insight.short_summary = analysis.get("short_summary")
         insight.detailed_summary = analysis.get("detailed_summary")
@@ -358,6 +367,7 @@ def run_document_intelligence(resource_id: str) -> str:
         insight.status = "completed"
         insight.updated_at = utc_now()
         db.commit()
+        update_processing_progress(db, job_id, "complete", progress=100, is_media=False)
 
         _append_structured_event(
             {

@@ -27,6 +27,7 @@ _SAFE_CONTEXT_KEYS = {
     "concise",
     "globeMode",
     "mode",
+    "chatMode",
     "reasonCode",
     "classification",
     "retrievalMode",
@@ -67,6 +68,11 @@ _SAFE_CONTEXT_KEYS = {
     "outputType",
     "workflowNodeCount",
     "workflowEdgeCount",
+    "finishReason",
+    "completionStatus",
+    "continuationCount",
+    "outputCharacterCount",
+    "canContinue",
 }
 
 
@@ -113,6 +119,13 @@ class RagPipelineTrace:
             "chatHistoryPresent": chat_history_present,
             "concise": concise,
             "globeMode": globe_mode,
+            "chatMode": (
+                "global"
+                if globe_mode
+                else "resource_rag"
+                if resource_scoped
+                else "library_rag"
+            ),
         }
 
     @property
@@ -137,6 +150,22 @@ class RagPipelineTrace:
             context=self._base_context,
         )
 
+    def mode_selected(self, chat_mode: str) -> None:
+        logger.info(
+            f"Chat mode selected: {chat_mode}.",
+            event="rag.chat_mode_selected",
+            operation="rag_pipeline",
+            phase="mode_selection",
+            status="completed",
+            correlation_id=self.correlation_id,
+            context=_safe_context(
+                {
+                    **self._base_context,
+                    "chatMode": chat_mode,
+                }
+            ),
+        )
+
     def begin_phase(
         self,
         phase: str,
@@ -149,7 +178,7 @@ class RagPipelineTrace:
             phase=phase,
             status="running",
             correlation_id=self.correlation_id,
-            context=_safe_context(context),
+            context=_safe_context({**self._base_context, **(context or {})}),
         )
         return perf_counter()
 
@@ -167,7 +196,7 @@ class RagPipelineTrace:
             status="completed",
             correlation_id=self.correlation_id,
             duration_ms=max(0.0, (perf_counter() - started_at) * 1000),
-            context=_safe_context(context),
+            context=_safe_context({**self._base_context, **(context or {})}),
         )
 
     def fail_phase(self, phase: str, started_at: float, error: BaseException) -> None:
@@ -200,7 +229,7 @@ class RagPipelineTrace:
             status="stopped",
             correlation_id=self.correlation_id,
             duration_ms=max(0.0, (perf_counter() - started_at) * 1000),
-            context={"reasonCode": reason_code},
+            context=_safe_context({**self._base_context, "reasonCode": reason_code}),
         )
 
     def skip_phase(
@@ -217,7 +246,9 @@ class RagPipelineTrace:
             phase=phase,
             status="stopped",
             correlation_id=self.correlation_id,
-            context=_safe_context({"reasonCode": reason_code, **(context or {})}),
+            context=_safe_context(
+                {**self._base_context, "reasonCode": reason_code, **(context or {})}
+            ),
         )
 
     @contextmanager
@@ -255,7 +286,7 @@ class RagPipelineTrace:
             status="completed",
             correlation_id=self.correlation_id,
             duration_ms=max(0.0, (perf_counter() - self.started_at) * 1000),
-            context=_safe_context(context),
+            context=_safe_context({**self._base_context, **(context or {})}),
         )
 
     def stop(self, reason_code: str) -> None:
@@ -285,10 +316,11 @@ class RagPipelineTrace:
             status="failed",
             correlation_id=self.correlation_id,
             duration_ms=max(0.0, (perf_counter() - self.started_at) * 1000),
-            context={
+            context=_safe_context({
+                **self._base_context,
                 "errorType": type(error).__name__,
                 "errorCode": getattr(error, "code", type(error).__name__),
-            },
+            }),
         )
 
 
@@ -337,19 +369,34 @@ def trace_rag_pipeline(*, streaming: bool):
             trace = _trace_from_call(func, args, kwargs, True)
 
             def generate():
-                token = trace.bind()
-                trace.start()
+                iterator = iter(func(*args, **kwargs))
+
+                def run_bound(callback):
+                    token = trace.bind()
+                    try:
+                        return callback()
+                    finally:
+                        trace.reset(token)
+
+                run_bound(trace.start)
                 try:
-                    yield from func(*args, **kwargs)
-                    trace.finish()
+                    while True:
+                        try:
+                            item = run_bound(lambda: next(iterator))
+                        except StopIteration:
+                            break
+                        yield item
                 except GeneratorExit:
-                    trace.stop("consumer_disconnected")
+                    close = getattr(iterator, "close", None)
+                    if callable(close):
+                        run_bound(close)
+                    run_bound(lambda: trace.stop("consumer_disconnected"))
                     raise
                 except BaseException as error:
-                    trace.fail(error)
+                    run_bound(lambda: trace.fail(error))
                     raise
-                finally:
-                    trace.reset(token)
+                else:
+                    run_bound(trace.finish)
 
             return generate()
 

@@ -28,6 +28,19 @@ _STOP_WORDS = {
 }
 
 _user_client_cache: dict[str, tuple[OpenAI, str, float]] = {}
+CHAT_MAX_OUTPUT_TOKENS = max(1, int(os.getenv("CHAT_MAX_OUTPUT_TOKENS", "4096")))
+CHAT_MAX_AUTO_CONTINUATIONS = max(
+    0, int(os.getenv("CHAT_MAX_AUTO_CONTINUATIONS", "2"))
+)
+
+
+def _longest_boundary_overlap(existing: str, continuation: str, limit: int = 512) -> int:
+    """Return the exact suffix/prefix overlap without inspecting logged content."""
+    maximum = min(len(existing), len(continuation), limit)
+    for size in range(maximum, 0, -1):
+        if existing[-size:] == continuation[:size]:
+            return size
+    return 0
 
 
 def _classify_api_error(error: Exception) -> str:
@@ -644,6 +657,7 @@ def generate_answer_stream(
     user_id: str | None = None,
     resource_id: str | None = None,
     feature: str = "rag_answer_stream",
+    stream_state: dict | None = None,
 ):
     """
     Stream a detailed and comprehensive answer using the provided context and chat history.
@@ -740,75 +754,157 @@ Question:
 {question}
 """
 
-    try:
-        response, _model = _create_chat_completion(
-            user_id,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            stream=True,
-        )
-    except Exception as e:
-        trace = get_current_generation_trace()
-        if trace:
-            trace.fail(e)
-        yield {"type": "error", "message": _classify_api_error(e)}
-        return
-
-    buffer = ""
-    full_output = ""
-    request_id = None
-    trace = get_current_generation_trace()
-    stream_phase = (
-        trace.phase("provider_stream", {"model": _model})
-        if trace
-        else nullcontext({})
+    state = stream_state if stream_state is not None else {}
+    state.update(
+        {
+            "finish_reason": None,
+            "completion_status": "streaming",
+            "continuation_count": 0,
+            "can_continue": False,
+            "output_character_count": 0,
+        }
     )
-    with stream_phase:
-        for chunk in response:
-            if request_id is None:
-                request_id = getattr(chunk, "id", None)
-            if chunk.choices[0].delta.content:
-                buffer += chunk.choices[0].delta.content
-                full_output += chunk.choices[0].delta.content
-                if len(buffer) > 20:
-                    yield buffer[:-20]
-                    buffer = buffer[-20:]
-                
-    if buffer:
-        import re
-        cleaned_tail = re.sub(r'\s*(undefined|null|none)[\s\.\!\?]*$', '', buffer, flags=re.IGNORECASE)
-        # Normalize citation bracket variants to [N] format
-        cleaned_tail = re.sub(r'\[\s*Doc\s+(\d+)\s*\]', r'[\1]', cleaned_tail)
-        cleaned_tail = re.sub(r'\(\s*Doc\s+(\d+)\s*\)', r'[\1]', cleaned_tail)
-        cleaned_tail = re.sub(r'\(\s*Chunk\s+(\d+)\s*\)', r'[\1]', cleaned_tail)
-        cleaned_tail = re.sub(r'\[\s*[Cc]hunk\s+(\d+)\s*\]', r'[\1]', cleaned_tail)
-        if cleaned_tail:
-            yield cleaned_tail
-            full_output = full_output[:-len(buffer)] + cleaned_tail
-    try:
-        if trace:
-            with trace.phase("usage_accounting", {"model": _model}):
-                metrics = record_stream_completion_usage(
-                    user_id=user_id,
-                    resource_id=resource_id,
-                    feature=feature,
-                    model=_model,
-                    request_id=str(request_id) if request_id else None,
-                    metadata={"globe_on": globe_on},
-                    correlation_id=trace.correlation_id,
-                )
-            trace.usage_received(metrics)
-        else:
-            record_stream_completion_usage(
-                user_id=user_id,
-                resource_id=resource_id,
-                feature=feature,
-                model=_model,
-                request_id=str(request_id) if request_id else None,
-                metadata={"globe_on": globe_on},
+    full_output = ""
+    trace = get_current_generation_trace()
+    provider_messages = [{"role": "user", "content": prompt}]
+    finish_reason = None
+    continuation_count = 0
+    chat_mode = "global" if globe_on else ("resource_rag" if resource_id else "library_rag")
+
+    while True:
+        try:
+            response, model = _create_chat_completion(
+                user_id,
+                messages=provider_messages,
+                temperature=0.3,
+                stream=True,
+                max_tokens=CHAT_MAX_OUTPUT_TOKENS,
             )
-    except Exception:
-        pass
+        except Exception as error:
+            raise RuntimeError(_classify_api_error(error)) from error
+
+        request_id = None
+        segment = ""
+        prefix_pending = ""
+        prefix_resolved = continuation_count == 0
+        stream_phase = (
+            trace.phase(
+                "provider_stream",
+                {
+                    "model": model,
+                    "chatMode": chat_mode,
+                    "continuationCount": continuation_count,
+                },
+            )
+            if trace
+            else nullcontext({})
+        )
+        with stream_phase:
+            for chunk in response:
+                if request_id is None:
+                    request_id = getattr(chunk, "id", None)
+                choices = getattr(chunk, "choices", None) or []
+                if not choices:
+                    continue
+                choice = choices[0]
+                chunk_finish = getattr(choice, "finish_reason", None)
+                if chunk_finish is not None:
+                    finish_reason = str(chunk_finish)
+                delta = getattr(choice, "delta", None)
+                content = getattr(delta, "content", None) if delta else None
+                if not content:
+                    continue
+                segment += content
+                if not prefix_resolved:
+                    prefix_pending += content
+                    if len(prefix_pending) < 512:
+                        continue
+                    overlap = _longest_boundary_overlap(full_output, prefix_pending)
+                    content = prefix_pending[overlap:]
+                    prefix_pending = ""
+                    prefix_resolved = True
+                if content:
+                    full_output += content
+                    yield content
+
+        if not prefix_resolved:
+            overlap = _longest_boundary_overlap(full_output, prefix_pending)
+            remaining = prefix_pending[overlap:]
+            if remaining:
+                full_output += remaining
+                yield remaining
+
+        try:
+            metrics_kwargs = {
+                "user_id": user_id,
+                "resource_id": resource_id,
+                "feature": feature,
+                "model": model,
+                "request_id": str(request_id) if request_id else None,
+                "metadata": {
+                    "globe_on": globe_on,
+                    "chat_mode": chat_mode,
+                    "finish_reason": finish_reason,
+                    "continuation_count": continuation_count,
+                },
+            }
+            if trace:
+                with trace.phase("usage_accounting", {"model": model}):
+                    metrics = record_stream_completion_usage(
+                        **metrics_kwargs,
+                        correlation_id=trace.correlation_id,
+                    )
+                trace.usage_received(metrics)
+            else:
+                record_stream_completion_usage(**metrics_kwargs)
+        except Exception:
+            pass
+
+        if finish_reason != "length" or continuation_count >= CHAT_MAX_AUTO_CONTINUATIONS:
+            break
+        continuation_count += 1
+        provider_messages.extend(
+            [
+                {"role": "assistant", "content": segment},
+                {
+                    "role": "user",
+                    "content": (
+                        "Continue exactly where the answer stopped. Do not repeat the "
+                        "ending or restart any section. Return only the continuation."
+                    ),
+                },
+            ]
+        )
+
+    completion_status = (
+        "complete"
+        if finish_reason in {"stop", "tool_calls", "function_call"}
+        else "incomplete"
+        if finish_reason == "length"
+        else "blocked"
+        if finish_reason == "content_filter"
+        else "interrupted"
+    )
+    state.update(
+        {
+            "finish_reason": finish_reason or "unknown",
+            "completion_status": completion_status,
+            "continuation_count": continuation_count,
+            "can_continue": finish_reason == "length",
+            "output_character_count": len(full_output),
+        }
+    )
+    if trace:
+        trace.stream_completed(
+            {
+                "chatMode": chat_mode,
+                "finishReason": state["finish_reason"],
+                "completionStatus": completion_status,
+                "continuationCount": continuation_count,
+                "outputCharacterCount": len(full_output),
+                "canContinue": state["can_continue"],
+            }
+        )
 
 
 # =========================

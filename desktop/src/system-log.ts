@@ -7,7 +7,6 @@ import {
   readdirSync,
   renameSync,
   statSync,
-  truncateSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
@@ -69,7 +68,8 @@ const ROTATED_LOG_PREFIX = 'system-events-'
 const MAX_CURRENT_FILE_BYTES = 10 * 1024 * 1024
 const MAX_TOTAL_BYTES = 100 * 1024 * 1024
 const MAX_RETENTION_MS = 14 * 24 * 60 * 60 * 1000
-const DEFAULT_SNAPSHOT_LIMIT = 5_000
+export const MAX_RETAINED_EVENTS = 500
+const DEFAULT_SNAPSHOT_LIMIT = MAX_RETAINED_EVENTS
 const MAX_CONTEXT_DEPTH = 5
 const MAX_CONTEXT_KEYS = 60
 const MAX_ARRAY_ITEMS = 40
@@ -169,12 +169,37 @@ function parseEvent(line: string): SystemLogEvent | null {
   }
 }
 
+function isBackgroundPollingPath(value: string): boolean {
+  const withoutQuery = value.split('?', 1)[0]
+  const normalized = withoutQuery.length > 1
+    ? withoutQuery.replace(/\/+$/, '')
+    : withoutQuery
+  return (
+    normalized === '/tasks'
+    || normalized === '/notifications'
+    || normalized === '/queue'
+    || normalized.startsWith('/queue/')
+  )
+}
+
+export function isBackgroundPollingLogEvent(
+  event: SystemLogEventInput,
+): boolean {
+  const contextMethod = String(event.context?.method || '').toUpperCase()
+  const contextPath = String(event.context?.path || event.phase || '')
+  if (contextMethod === 'GET' && isBackgroundPollingPath(contextPath)) return true
+
+  const requestMatch = event.message.match(/\bGET\s+([^\s"'?]+)/i)
+  return Boolean(requestMatch?.[1] && isBackgroundPollingPath(requestMatch[1]))
+}
+
 export class SystemLogService {
   readonly sessionId = randomUUID()
   readonly startedAt = new Date().toISOString()
   readonly logDir: string
   readonly currentPath: string
   private readonly listeners = new Set<SystemLogListener>()
+  private retainedEvents: SystemLogEvent[] = []
 
   constructor(dataDir: string) {
     this.logDir = path.join(dataDir, 'logs')
@@ -182,6 +207,10 @@ export class SystemLogService {
     mkdirSync(this.logDir, { recursive: true })
     if (!existsSync(this.currentPath)) writeFileSync(this.currentPath, '', 'utf8')
     this.pruneHistory()
+    this.retainedEvents = this.readPersistedEvents()
+      .filter((event) => !isBackgroundPollingLogEvent(event))
+      .slice(-MAX_RETAINED_EVENTS)
+    this.rewriteRetainedEvents()
   }
 
   emit(input: SystemLogEventInput): SystemLogEvent {
@@ -207,9 +236,17 @@ export class SystemLogService {
       context: context && Object.keys(context).length > 0 ? context : undefined,
     }
 
+    this.retainedEvents.push(event)
+    const exceededLimit = this.retainedEvents.length > MAX_RETAINED_EVENTS
+    if (exceededLimit) this.retainedEvents.shift()
+
     try {
-      this.rotateIfNeeded()
-      appendFileSync(this.currentPath, `${JSON.stringify(event)}\n`, 'utf8')
+      if (exceededLimit) {
+        this.rewriteRetainedEvents()
+      } else {
+        this.rotateIfNeeded()
+        appendFileSync(this.currentPath, `${JSON.stringify(event)}\n`, 'utf8')
+      }
     } catch {
       // Disk diagnostics must never disrupt the application.
     }
@@ -229,7 +266,7 @@ export class SystemLogService {
   }
 
   snapshot(limit = DEFAULT_SNAPSHOT_LIMIT): SystemLogSnapshot {
-    const safeLimit = Math.min(10_000, Math.max(100, Math.floor(limit)))
+    const safeLimit = Math.min(MAX_RETAINED_EVENTS, Math.max(1, Math.floor(limit)))
     const events = this.readAllEvents()
     const selected = events.slice(-safeLimit)
     return {
@@ -263,25 +300,8 @@ export class SystemLogService {
     const deletedCount = events.length - remainingEvents.length
     if (deletedCount === 0) return 0
 
-    for (const filePath of this.historyFiles()) {
-      try {
-        if (filePath === this.currentPath) truncateSync(filePath, 0)
-        else unlinkSync(filePath)
-      } catch {
-        // A best-effort clear is safer than breaking the app over a locked file.
-      }
-    }
-    try {
-      if (remainingEvents.length > 0) {
-        writeFileSync(
-          this.currentPath,
-          `${remainingEvents.map((event) => JSON.stringify(event)).join('\n')}\n`,
-          'utf8',
-        )
-      }
-    } catch {
-      // A locked diagnostics file must never disrupt the application.
-    }
+    this.retainedEvents = remainingEvents.slice(-MAX_RETAINED_EVENTS)
+    this.rewriteRetainedEvents()
     this.emit({
       source: 'desktop',
       level: 'info',
@@ -314,6 +334,10 @@ export class SystemLogService {
   }
 
   private readAllEvents(): SystemLogEvent[] {
+    return [...this.retainedEvents]
+  }
+
+  private readPersistedEvents(): SystemLogEvent[] {
     const events: SystemLogEvent[] = []
     const files = this.historyFiles()
       .map((filePath) => ({ filePath, modified: statSync(filePath).mtimeMs }))
@@ -332,6 +356,25 @@ export class SystemLogService {
       }
     }
     return events.sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp))
+  }
+
+  private rewriteRetainedEvents(): void {
+    for (const filePath of this.historyFiles()) {
+      if (filePath === this.currentPath) continue
+      try {
+        unlinkSync(filePath)
+      } catch {
+        // A locked rotated file can be retried on the next compaction.
+      }
+    }
+    try {
+      const content = this.retainedEvents
+        .map((event) => JSON.stringify(event))
+        .join('\n')
+      writeFileSync(this.currentPath, content ? `${content}\n` : '', 'utf8')
+    } catch {
+      // Disk diagnostics must never disrupt the application.
+    }
   }
 
   private historyFiles(): string[] {

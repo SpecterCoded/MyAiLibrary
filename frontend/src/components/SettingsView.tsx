@@ -3397,7 +3397,23 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
                           disabled={!window.desktop}
                           className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-indigo-600 dark:hover:bg-indigo-700"
                         >
-                          <TerminalSquare className="h-4 w-4" /> Open System Console
+                          <TerminalSquare className="h-4 w-4" />
+                          Open System Console
+                          <kbd className="ml-1 rounded border border-white/20 bg-white/10 px-1.5 py-0.5 font-mono text-[10px] leading-none">
+                            Ctrl+Shift+L
+                          </kbd>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void window.desktop?.openBackendLogTerminal()}
+                          disabled={!window.desktop}
+                          className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/20 dark:bg-white/5 dark:text-slate-300 dark:hover:bg-white/10"
+                        >
+                          <TerminalSquare className="h-4 w-4" />
+                          Open Backend Terminal
+                          <kbd className="ml-1 rounded border border-white/20 bg-white/10 px-1.5 py-0.5 font-mono text-[10px] leading-none">
+                            Ctrl+T
+                          </kbd>
                         </button>
                         <button
                           type="button"

@@ -454,16 +454,25 @@ export function formatCompactNumber(value: number | null | undefined, suffix = '
 
 export function formatCurrency(value: number | null | undefined, currency = 'USD'): string {
   if (!isNumber(value)) return 'n/a';
+  const fractionDigits = value !== 0 && Math.abs(value) < 0.01
+    ? 6
+    : Math.abs(value) < 1 ? 4 : 2;
   try {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency,
-      minimumFractionDigits: value < 1 ? 4 : 2,
-      maximumFractionDigits: value < 1 ? 4 : 2,
+      minimumFractionDigits: fractionDigits,
+      maximumFractionDigits: fractionDigits,
     }).format(value);
   } catch {
-    return `${currency} ${value.toFixed(value < 1 ? 4 : 2)}`;
+    return `${currency} ${value.toFixed(fractionDigits)}`;
   }
+}
+
+export function formatUsageEntryCost(entry: AiUsageEntry): string {
+  if (entry.provider_cost_usd != null) return formatCurrency(entry.provider_cost_usd);
+  if (entry.billable_cost_usd != null) return formatCurrency(entry.billable_cost_usd);
+  return entry.metadata?.pending_settlement ? 'pending' : 'n/a';
 }
 
 export function formatPercent(value: number | null | undefined): string {

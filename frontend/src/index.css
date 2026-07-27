@@ -271,7 +271,7 @@ html.light .system-console-toast {
   top: 0;
   right: 0;
   left: 0;
-  height: 40px;
+  height: 44px;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -351,7 +351,7 @@ html.light .system-console-toast {
 
 .detached-workspace-content {
   position: absolute;
-  inset: 40px 0 0;
+  inset: 44px 0 0;
   display: flex;
   width: 100%;
   height: auto !important;
@@ -2020,7 +2020,7 @@ html:not(.dark) #search-modal-footer kbd {
   }
 }
 
-/* The custom workspace titlebar uses 40px of vertical space. Treat restored
+/* The custom workspace titlebar uses 44px of vertical space. Treat restored
    Electron windows as compact a little earlier so Home still breathes. */
 @media (max-height: 960px) {
   .home-view {
@@ -2059,6 +2059,96 @@ html:not(.dark) #search-modal-footer kbd {
   .home-empty-state {
     height: clamp(330px, 44vh, 395px);
     min-height: clamp(330px, 44vh, 395px);
+  }
+}
+
+/* Chat composer: visible at rest, with a restrained moving accent on interaction. */
+.chat-composer-shell {
+  --chat-composer-accent-a: rgba(79, 70, 229, 0.82);
+  --chat-composer-accent-b: rgba(14, 165, 233, 0.68);
+  position: relative;
+  isolation: isolate;
+  border-color: rgba(100, 116, 139, 0.28) !important;
+  box-shadow:
+    0 8px 28px rgba(15, 23, 42, 0.09),
+    0 0 0 1px rgba(255, 255, 255, 0.78) inset;
+  transition:
+    border-color 220ms ease,
+    box-shadow 220ms ease;
+}
+
+.chat-composer-shell::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  z-index: 1;
+  padding: 1px;
+  border-radius: inherit;
+  pointer-events: none;
+  background: conic-gradient(
+    from var(--chat-composer-angle),
+    transparent 0deg,
+    transparent 205deg,
+    var(--chat-composer-accent-a) 242deg,
+    var(--chat-composer-accent-b) 278deg,
+    transparent 318deg,
+    transparent 360deg
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0.5;
+  animation: chat-composer-border-orbit 5.5s linear infinite;
+  transition: opacity 220ms ease;
+}
+
+.chat-composer-shell:hover,
+.chat-composer-shell:focus-within {
+  border-color: rgba(79, 70, 229, 0.42) !important;
+  box-shadow:
+    0 10px 32px rgba(15, 23, 42, 0.12),
+    0 0 0 3px rgba(79, 70, 229, 0.08);
+}
+
+.chat-composer-shell:hover::before,
+.chat-composer-shell:focus-within::before {
+  opacity: 1;
+}
+
+.dark .chat-composer-shell {
+  --chat-composer-accent-a: rgba(129, 140, 248, 0.95);
+  --chat-composer-accent-b: rgba(34, 211, 238, 0.78);
+  border-color: rgba(148, 163, 184, 0.3) !important;
+  box-shadow:
+    0 10px 34px rgba(0, 0, 0, 0.34),
+    0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+}
+
+.dark .chat-composer-shell:hover,
+.dark .chat-composer-shell:focus-within {
+  border-color: rgba(129, 140, 248, 0.55) !important;
+  box-shadow:
+    0 12px 38px rgba(0, 0, 0, 0.42),
+    0 0 0 3px rgba(99, 102, 241, 0.14);
+}
+
+@property --chat-composer-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@keyframes chat-composer-border-orbit {
+  to {
+    --chat-composer-angle: 360deg;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-composer-shell::before {
+    animation: none;
   }
 }
 

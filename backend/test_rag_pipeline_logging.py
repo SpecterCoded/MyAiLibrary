@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from contextvars import Context
 from unittest.mock import patch
 
 from services import pipeline_logger
@@ -27,6 +28,7 @@ class RagPipelineLoggingTests(unittest.TestCase):
         )
         with patch.object(pipeline_logger.logger, "info") as info:
             trace.start()
+            trace.mode_selected("resource_rag")
             with trace.phase(
                 "dense_retrieval",
                 {
@@ -52,6 +54,8 @@ class RagPipelineLoggingTests(unittest.TestCase):
         self.assertNotIn("PRIVATE ANSWER", rendered)
         self.assertNotIn("PRIVATE CONTEXT", rendered)
         self.assertIn("candidateCount", rendered)
+        self.assertIn("rag.chat_mode_selected", rendered)
+        self.assertIn("resource_rag", rendered)
 
     def test_sync_decorator_never_logs_question_text(self):
         @trace_rag_pipeline(streaming=False)
@@ -94,6 +98,25 @@ class RagPipelineLoggingTests(unittest.TestCase):
 
         self.assertEqual(exception.call_count, 1)
         self.assertNotIn("PRIVATE STREAM QUERY", repr(exception.call_args_list))
+
+    def test_stream_trace_can_resume_in_a_different_context(self):
+        observed_correlations = []
+
+        @trace_rag_pipeline(streaming=True)
+        def sample_stream(user_id: str, question: str):
+            observed_correlations.append(get_current_rag_trace().correlation_id)
+            yield "first"
+            observed_correlations.append(get_current_rag_trace().correlation_id)
+            yield "second"
+
+        generator = sample_stream("user-1", "PRIVATE STREAM QUERY")
+        with patch.object(pipeline_logger.logger, "info"):
+            self.assertEqual(Context().run(next, generator), "first")
+            self.assertEqual(Context().run(next, generator), "second")
+            with self.assertRaises(StopIteration):
+                Context().run(next, generator)
+
+        self.assertEqual(len(set(observed_correlations)), 1)
 
     def test_planner_executor_emits_internal_retrieval_phases(self):
         private_content = "PRIVATE CHUNK CONTENT"
@@ -158,6 +181,7 @@ class RagPipelineLoggingTests(unittest.TestCase):
             self.assertIn(phase, rendered)
         self.assertNotIn("PRIVATE QUERY", rendered)
         self.assertNotIn(private_content, rendered)
+
 
 
 if __name__ == "__main__":

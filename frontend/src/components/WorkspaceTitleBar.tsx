@@ -82,14 +82,14 @@ export default function WorkspaceTitleBar({
 
   return (
     <>
-      <div className="workspace-titlebar flex h-10 shrink-0 items-stretch border-b border-slate-200/70 bg-[#f5f8fd] text-slate-700 dark:border-white/10 dark:bg-[#0f141d] dark:text-slate-200">
+      <div className="workspace-titlebar flex h-11 shrink-0 items-stretch border-b border-slate-200/70 bg-[#f5f8fd] text-slate-700 dark:border-white/10 dark:bg-[#0f141d] dark:text-slate-200">
         <div className="workspace-drag-region flex min-w-0 flex-1 items-end gap-1 pl-0 pr-[150px]">
           <LayoutGroup id="workspace-tabs">
           <Reorder.Group
           axis="x"
           values={tabIds}
           onReorder={onReorderTabs}
-          className="workspace-tabs no-scrollbar flex min-w-0 flex-1 items-end gap-1 overflow-x-auto"
+          className="workspace-tabs no-scrollbar flex h-full min-w-0 flex-1 items-end gap-1 overflow-x-auto"
         >
           {tabs.map((tab) => {
             const active = tab.id === activeTabId;
@@ -110,7 +110,7 @@ export default function WorkspaceTitleBar({
                     suppressClickRef.current = false;
                   }, 0);
                 }}
-                className="workspace-tab min-w-[132px] max-w-[360px] flex-[1_1_0] list-none"
+                className="workspace-tab h-full min-w-[132px] max-w-[360px] flex-[1_1_0] list-none"
               >
               <button
                 type="button"
@@ -119,7 +119,7 @@ export default function WorkspaceTitleBar({
                   onSelectTab(tab.id);
                 }}
                 onContextMenu={(event) => openContextMenu(event, tab)}
-                className={`group relative isolate flex h-10 w-full items-center justify-between gap-2 rounded-t-[10px] border border-transparent px-3 text-left text-[12px] font-semibold transition-colors ${
+                className={`group relative isolate flex h-full w-full items-center justify-between gap-2 rounded-t-[10px] border border-transparent px-3 text-left text-[12px] font-semibold transition-colors ${
                   active
                     ? 'text-slate-950 dark:text-white'
                     : 'bg-transparent text-slate-500 hover:bg-white/55 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-white/7 dark:hover:text-slate-100'
@@ -129,7 +129,7 @@ export default function WorkspaceTitleBar({
                 {active && (
                   <motion.span
                     layoutId="workspace-active-tab-highlight"
-                    className="pointer-events-none absolute inset-0 z-0 rounded-t-[10px] border border-slate-200/80 border-b-transparent bg-white shadow-[0_1px_8px_rgba(15,23,42,0.08)] dark:border-white/10 dark:border-b-transparent dark:bg-[#25272b] dark:shadow-none"
+                    className="pointer-events-none absolute inset-x-0 top-0 -bottom-px z-0 rounded-t-[10px] border border-slate-200/80 border-b-transparent bg-white shadow-[0_1px_8px_rgba(15,23,42,0.08)] dark:border-white/10 dark:border-b-transparent dark:bg-[#25272b] dark:shadow-none"
                     transition={prefersReducedMotion
                       ? { duration: 0 }
                       : { type: 'spring', stiffness: 560, damping: 42, mass: 0.55 }}

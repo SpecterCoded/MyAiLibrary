@@ -1,10 +1,12 @@
 import { randomBytes } from 'node:crypto'
+import { spawn } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { app, autoUpdater as nativeAutoUpdater, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, screen, session, shell, Tray } from 'electron'
 import { BackendRuntime, BackendState, startBackend, stopBackend } from './backend-process'
 import { createAndVerifyUpdateBackup } from './update-backup'
 import {
+  isBackgroundPollingLogEvent,
   normalizeExternalLogEvent,
   SystemLogService,
   type SystemLogClearFilter,
@@ -31,6 +33,7 @@ const attachmentViewerFilePaths = new Map<string, string>()
 let systemLogWindow: BrowserWindow | null = null
 let systemLogService: SystemLogService | null = null
 let currentBackendState: BackendState = 'stopped'
+let lastBackendTerminalLaunchAt = 0
 type FloatingToolKind = 'search' | 'create-playlist' | 'import-content'
 type FloatingToolAction =
   | { type: 'navigate'; detail: Record<string, unknown> }
@@ -43,10 +46,11 @@ const MAX_WORKSPACE_WINDOWS = 5
 const MAX_WORKSPACE_TABS = 5
 const PRIMARY_WORKSPACE_WIDTH = 1600
 const PRIMARY_WORKSPACE_HEIGHT = 960
-const DETACHED_WORKSPACE_MIN_WIDTH = 800
-const DETACHED_WORKSPACE_MIN_HEIGHT = 600
-const DETACHED_FILE_EXPLORER_MIN_WIDTH = 1220
-const DETACHED_FILE_EXPLORER_MIN_HEIGHT = 815
+const DETACHED_WORKSPACE_MIN_WIDTH = 1220
+const DETACHED_WORKSPACE_MIN_HEIGHT = 815
+const SYSTEM_LOG_MIN_WIDTH = 1100
+const SYSTEM_LOG_MIN_HEIGHT = 720
+const WINDOW_CONTROL_OVERLAY_HEIGHT = 43
 const WORKSPACE_WINDOW_REGISTRY_VERSION = 1
 const workspaceWindowsById = new Map<string, BrowserWindow>()
 const workspaceWindowIdsByWebContents = new Map<number, string>()
@@ -398,14 +402,12 @@ function scheduleWorkspaceWindowRegistrySave(): void {
   workspaceRegistrySaveTimer = setTimeout(persistWorkspaceWindowRegistry, 250)
 }
 
-function detachedWorkspaceMinimumSize(record: WorkspaceWindowRecord): { width: number; height: number } {
-  const containsFileExplorer = record.tabsState?.tabs.some((tab) => tab.kind === 'folder') ?? false
-  return containsFileExplorer
-    ? { width: DETACHED_FILE_EXPLORER_MIN_WIDTH, height: DETACHED_FILE_EXPLORER_MIN_HEIGHT }
-    : { width: DETACHED_WORKSPACE_MIN_WIDTH, height: DETACHED_WORKSPACE_MIN_HEIGHT }
+function detachedWorkspaceMinimumSize(): { width: number; height: number } {
+  return { width: DETACHED_WORKSPACE_MIN_WIDTH, height: DETACHED_WORKSPACE_MIN_HEIGHT }
 }
 
 function emitSystemLog(event: SystemLogEventInput): void {
+  if (isBackgroundPollingLogEvent(event)) return
   systemLogService?.emit(event)
 }
 
@@ -1067,7 +1069,7 @@ function registerIpc(): void {
     senderIsTrusted(event.senderFrame?.url ?? '') ? openSystemConsole() : false
   ))
   ipcMain.handle('desktop:open-backend-log-terminal', (event) => (
-    senderIsTrusted(event.senderFrame?.url ?? '') ? openSystemConsole() : false
+    senderIsTrusted(event.senderFrame?.url ?? '') ? openBackendLogTerminal() : false
   ))
   ipcMain.on('system-log:renderer-event', (event, value: unknown) => {
     if (!senderIsTrusted(event.senderFrame?.url ?? '')) return
@@ -1209,6 +1211,11 @@ function applyTitleBarTheme(theme: 'light' | 'dark'): void {
   currentTitleBarTheme = theme
   if (systemLogWindow && !systemLogWindow.isDestroyed()) {
     systemLogWindow.setBackgroundColor(theme === 'dark' ? '#1e1f22' : '#f5f8fd')
+    systemLogWindow.setTitleBarOverlay({
+      color: theme === 'dark' ? '#1e1f22' : '#f5f8fd',
+      symbolColor: theme === 'dark' ? '#f8fafc' : '#0f172a',
+      height: WINDOW_CONTROL_OVERLAY_HEIGHT,
+    })
     systemLogWindow.webContents.send(SYSTEM_LOG_CHANNELS.themeChanged, theme)
   }
   if (windowControlsHidden) return
@@ -1216,12 +1223,12 @@ function applyTitleBarTheme(theme: 'light' | 'dark'): void {
     if (window.isDestroyed()) continue
     const windowId = workspaceWindowIdsByWebContents.get(window.webContents.id)
     if (!windowId) continue
-    const record = windowId ? workspaceWindowRecords.get(windowId) : undefined
-    const isDetachedWorkspaceWindow = record?.primary === false
     window.setTitleBarOverlay({
-      color: isDetachedWorkspaceWindow ? '#00000000' : (theme === 'dark' ? '#0f141d' : '#f5f8fd'),
+      // Let the active renderer surface show through so startup loaders and
+      // light/dark workspace titlebars cannot drift from the native controls.
+      color: '#00000000',
       symbolColor: theme === 'dark' ? '#f8fafc' : '#0f172a',
-      height: 40,
+      height: WINDOW_CONTROL_OVERLAY_HEIGHT,
     })
     window.setBackgroundColor(theme === 'dark' ? '#090b10' : '#f5f8fd')
   }
@@ -1239,7 +1246,7 @@ function setWindowControlsHidden(hidden: boolean): void {
     window.setTitleBarOverlay({
       color: '#020617',
       symbolColor: '#020617',
-      height: 40,
+      height: WINDOW_CONTROL_OVERLAY_HEIGHT,
     })
     window.setBackgroundColor('#020617')
   }
@@ -1250,9 +1257,14 @@ function createSystemLogWindow(initialLevel?: string): BrowserWindow {
   const viewer = new BrowserWindow({
     width: 1180,
     height: 760,
-    minWidth: 900,
-    minHeight: 600,
-    frame: false,
+    minWidth: SYSTEM_LOG_MIN_WIDTH,
+    minHeight: SYSTEM_LOG_MIN_HEIGHT,
+    titleBarStyle: 'hidden',
+    titleBarOverlay: {
+      color: currentTitleBarTheme === 'dark' ? '#1e1f22' : '#f5f8fd',
+      symbolColor: currentTitleBarTheme === 'dark' ? '#f8fafc' : '#0f172a',
+      height: WINDOW_CONTROL_OVERLAY_HEIGHT,
+    },
     show: false,
     resizable: true,
     maximizable: true,
@@ -1291,7 +1303,12 @@ function createSystemLogWindow(initialLevel?: string): BrowserWindow {
   viewer.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   viewer.webContents.on('will-navigate', (event) => event.preventDefault())
 
-  if (app.isPackaged) {
+  if (currentRendererUrl) {
+    const url = new URL('/diagnostics.html', currentRendererUrl)
+    if (initialLevel) url.searchParams.set('level', initialLevel)
+    url.searchParams.set('theme', currentTitleBarTheme)
+    void viewer.loadURL(url.toString())
+  } else if (app.isPackaged) {
     void viewer.loadFile(path.join(process.resourcesPath, 'ui', 'diagnostics.html'), {
       query: {
         ...(initialLevel ? { level: initialLevel } : {}),
@@ -1329,37 +1346,153 @@ function openSystemConsole(initialLevel?: string): boolean {
   return true
 }
 
-function isBackendLogInputShortcut(input: Electron.Input): boolean {
-  if (input.type !== 'keyDown') return false
-  if (!input.control && !input.meta) return false
-  if (input.alt) return false
-  const key = (input.key || '').toLowerCase()
-  const code = input.code || ''
-  const isT = key === 't' || code === 'KeyT'
-  const isLegacyLogShortcut = input.shift && (key === 'l' || code === 'KeyL')
-  return (!input.shift && isT) || isLegacyLogShortcut
+function openBackendLogTerminal(): boolean {
+  const now = Date.now()
+  if (now - lastBackendTerminalLaunchAt < 750) return true
+  lastBackendTerminalLaunchAt = now
+
+  const logPath = backend?.logPath ?? path.join(desktopDataRoot(), 'logs', 'backend.log')
+  mkdirSync(path.dirname(logPath), { recursive: true })
+  if (!existsSync(logPath)) writeFileSync(logPath, '', 'utf8')
+
+  if (process.platform !== 'win32') {
+    shell.showItemInFolder(logPath)
+    return false
+  }
+
+  const escapedLogPath = logPath.replace(/'/g, "''")
+  const escapedLogDir = path.dirname(logPath).replace(/'/g, "''")
+  const command = [
+    "$Host.UI.RawUI.WindowTitle = 'MyAiLibrary Backend Terminal'",
+    "$ErrorActionPreference = 'Continue'",
+    `Set-Location -LiteralPath '${escapedLogDir}'`,
+    "Write-Host 'MyAiLibrary Backend Terminal' -ForegroundColor Magenta",
+    `Write-Host 'Live output: ${escapedLogPath}' -ForegroundColor DarkGray`,
+    "Write-Host 'Background polling hidden: GET /queue, /tasks, /notifications' -ForegroundColor DarkGray",
+    "Write-Host 'Press Ctrl+C to stop following the log.' -ForegroundColor DarkGray",
+    "Write-Host ''",
+    `Get-Content -LiteralPath '${escapedLogPath}' -Tail 0 -Wait | Where-Object { $_ -notmatch '(?i)(?:\\bGET\\b.*?/(?:queue|tasks|notifications)\\b|/(?:queue|tasks|notifications)\\b.*?\\bGET\\b)' }`,
+  ].join('; ')
+  const encodedCommand = Buffer.from(command, 'utf16le').toString('base64')
+  const powershellArgs = [
+    '-NoLogo',
+    '-NoProfile',
+    '-NoExit',
+    '-EncodedCommand',
+    encodedCommand,
+  ]
+  const windowsTerminalAlias = path.join(
+    process.env.LOCALAPPDATA || '',
+    'Microsoft',
+    'WindowsApps',
+    'wt.exe',
+  )
+  const terminalExecutable = existsSync(windowsTerminalAlias)
+    ? windowsTerminalAlias
+    : 'wt.exe'
+
+  const reportLaunchFailure = (error: Error) => {
+    emitSystemLog({
+      source: 'desktop',
+      level: 'error',
+      category: 'SHORTCUTS',
+      event: 'backend_terminal.open_failed',
+      message: error.message,
+      status: 'failed',
+    })
+    shell.showItemInFolder(logPath)
+  }
+
+  const launchClassicConsole = () => {
+    try {
+      const fallback = spawn(
+        'cmd.exe',
+        ['/d', '/c', 'start', '""', 'powershell.exe', ...powershellArgs],
+        {
+          detached: true,
+          windowsHide: false,
+          stdio: 'ignore',
+        },
+      )
+      fallback.once('error', reportLaunchFailure)
+      fallback.unref()
+    } catch (error) {
+      reportLaunchFailure(
+        error instanceof Error ? error : new Error('Backend terminal could not be opened.'),
+      )
+    }
+  }
+
+  try {
+    const terminal = spawn(
+      terminalExecutable,
+      [
+        '-w', 'new',
+        'new-tab',
+        '--title', 'MyAiLibrary Backend Terminal',
+        'powershell.exe',
+        ...powershellArgs,
+      ],
+      {
+        windowsHide: false,
+        stdio: 'ignore',
+      },
+    )
+    terminal.once('error', () => launchClassicConsole())
+    terminal.unref()
+    emitSystemLog({
+      source: 'desktop',
+      level: 'info',
+      category: 'SHORTCUTS',
+      event: 'backend_terminal.opened',
+      message: 'Backend log terminal opened.',
+      status: 'completed',
+    })
+    return true
+  } catch (error) {
+    emitSystemLog({
+      source: 'desktop',
+      level: 'error',
+      category: 'SHORTCUTS',
+      event: 'backend_terminal.open_failed',
+      message: error instanceof Error ? error.message : 'Backend log terminal could not be opened.',
+      status: 'failed',
+    })
+    shell.showItemInFolder(logPath)
+    return false
+  }
 }
 
-function registerBackendLogShortcut(): void {
-  const shortcuts = ['CommandOrControl+T', 'Control+T', 'CommandOrControl+Shift+L']
+function requestedDesktopShortcut(input: Electron.Input): 'system-console' | 'backend-terminal' | null {
+  if (input.type !== 'keyDown') return null
+  if (!input.control && !input.meta) return null
+  if (input.alt) return null
+  const key = (input.key || '').toLowerCase()
+  const code = input.code || ''
+  if (input.shift && (key === 'l' || code === 'KeyL')) return 'system-console'
+  if (!input.shift && (key === 't' || code === 'KeyT')) return 'backend-terminal'
+  return null
+}
+
+function registerDesktopShortcuts(): void {
+  const shortcuts = [
+    { accelerator: 'CommandOrControl+Shift+L', action: openSystemConsole, label: 'System Console' },
+    { accelerator: 'CommandOrControl+T', action: openBackendLogTerminal, label: 'backend terminal' },
+  ]
   for (const shortcut of shortcuts) {
-    globalShortcut.unregister(shortcut)
-  }
-  const registrations = shortcuts.map((shortcut) => (
-    globalShortcut.register(shortcut, () => {
-      openSystemConsole()
-    })
-  ))
-  if (!registrations.some(Boolean)) {
+    globalShortcut.unregister(shortcut.accelerator)
+    const registered = globalShortcut.register(shortcut.accelerator, shortcut.action)
+    if (registered) continue
     emitSystemLog({
       source: 'desktop',
       level: 'warning',
       category: 'SHORTCUTS',
-      event: 'system_console.shortcut_registration_failed',
-      message: 'The System Console keyboard shortcut could not be registered.',
+      event: 'desktop.shortcut_registration_failed',
+      message: `The ${shortcut.label} keyboard shortcut could not be registered.`,
       operation: 'application_boot',
       phase: 'shortcut_registration',
       status: 'failed',
+      context: { accelerator: shortcut.accelerator },
     })
   }
 }
@@ -1402,7 +1535,7 @@ function createSplash(): BrowserWindow {
 
 function createWorkspaceWindow(record: WorkspaceWindowRecord): BrowserWindow {
   const iconPath = path.join(__dirname, '..', 'assets', 'icon.png')
-  const minimum = detachedWorkspaceMinimumSize(record)
+  const minimum = detachedWorkspaceMinimumSize()
   const bounds = clampWorkspaceBounds(record.bounds, record.primary, minimum)
   const window = new BrowserWindow({
     ...bounds,
@@ -1418,9 +1551,9 @@ function createWorkspaceWindow(record: WorkspaceWindowRecord): BrowserWindow {
     title: 'MyAiLibrary',
     titleBarStyle: 'hidden',
       titleBarOverlay: {
-        color: record.primary ? (currentTitleBarTheme === 'dark' ? '#0f141d' : '#f5f8fd') : '#00000000',
+        color: '#00000000',
         symbolColor: currentTitleBarTheme === 'dark' ? '#f8fafc' : '#0f172a',
-        height: 40,
+        height: WINDOW_CONTROL_OVERLAY_HEIGHT,
       },
     autoHideMenuBar: true,
     webPreferences: {
@@ -1479,10 +1612,11 @@ function createWorkspaceWindow(record: WorkspaceWindowRecord): BrowserWindow {
     }
   })
   window.webContents.on('before-input-event', (event, input) => {
-    if (isBackendLogInputShortcut(input)) {
-      event.preventDefault()
-      openSystemConsole()
-    }
+    const shortcut = requestedDesktopShortcut(input)
+    if (!shortcut) return
+    event.preventDefault()
+    if (shortcut === 'system-console') openSystemConsole()
+    else openBackendLogTerminal()
   })
   if (record.maximized) window.once('ready-to-show', () => window.maximize())
   return window
@@ -1734,7 +1868,7 @@ app.whenReady().then(async () => {
   })
   nativeAutoUpdater.on('before-quit-for-update', () => { quitting = true })
   registerIpc()
-  registerBackendLogShortcut()
+  registerDesktopShortcuts()
   createTray()
   await bootApplication()
 })
@@ -1742,7 +1876,6 @@ app.whenReady().then(async () => {
 app.on('will-quit', () => {
   globalShortcut.unregister('CommandOrControl+Shift+L')
   globalShortcut.unregister('CommandOrControl+T')
-  globalShortcut.unregister('Control+T')
   tray?.destroy()
   tray = null
 })

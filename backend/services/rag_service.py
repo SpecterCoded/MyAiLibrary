@@ -1,7 +1,7 @@
 import re
 from time import perf_counter
 from typing import List, Dict
-from embedding_service import build_context, extract_rich_sources
+from embedding_service import build_context, extract_rich_sources, get_result_similarity_score
 from core.activity_log import log_user_activity
 from .query_rewrite_service import rewrite_query, generate_query_variants
 from .hybrid_service import search_resource_hybrid
@@ -164,6 +164,7 @@ def _build_provisional_sources(results: list[dict]) -> list[dict]:
                 "excerpt": excerpt or "Source preview unavailable.",
                 "rerank_score": result.get("rerank_score"),
                 "hybrid_score": result.get("hybrid_score"),
+                "similarity_score": get_result_similarity_score(result),
                 "resource_id": metadata.get("resource_id"),
                 "resource_title": metadata.get("resource_title") or "Source",
                 "resource_path": metadata.get("resource_path") or "",
@@ -462,6 +463,9 @@ def run_rag_pipeline(
     if trace is None:
         raise RuntimeError("RAG trace was not initialized")
     pipeline_started = perf_counter()
+    trace.mode_selected(
+        "global" if globe_on else ("resource_rag" if resource_id else "library_rag")
+    )
 
     log_user_activity(db, user_id, 'ai_chat', 'RAG query', question[:100])
     # Globe mode: bypass the entire RAG pipeline — pure LLM, like ChatGPT
@@ -1017,7 +1021,8 @@ def run_rag_pipeline_stream(
     chat_history: List[Dict] = None,
     final_history_str: str = None,
     n_results: int = 5,
-    globe_on: bool = False
+    globe_on: bool = False,
+    selected_resource_ids: List[str] = None,
 ):
     """
     Streaming version of the RAG pipeline.
@@ -1034,6 +1039,25 @@ def run_rag_pipeline_stream(
         raise RuntimeError("RAG trace was not initialized")
     full_answer = ""
     pipeline_started = perf_counter()
+    chat_mode = (
+        "global" if globe_on else ("resource_rag" if resource_id else "library_rag")
+    )
+    stream_state = {
+        "finish_reason": "stop",
+        "completion_status": "complete",
+        "continuation_count": 0,
+        "can_continue": False,
+    }
+    trace.mode_selected(chat_mode)
+
+    def terminal_fields() -> dict:
+        return {
+            "chat_mode": chat_mode,
+            "finish_reason": stream_state.get("finish_reason", "unknown"),
+            "completion_status": stream_state.get("completion_status", "interrupted"),
+            "continuation_count": stream_state.get("continuation_count", 0),
+            "can_continue": bool(stream_state.get("can_continue", False)),
+        }
 
     # Globe mode: bypass the entire RAG pipeline — pure LLM streaming, like ChatGPT
     if globe_on:
@@ -1053,7 +1077,12 @@ def run_rag_pipeline_stream(
                 globe_on=True,
                 user_id=user_id,
                 resource_id=resource_id,
-                feature="media_global_chat_stream",
+                feature=(
+                    "media_global_chat_stream"
+                    if resource_id
+                    else "global_chat_stream"
+                ),
+                stream_state=stream_state,
             ):
                 full_answer += token
                 buffer += token
@@ -1075,6 +1104,38 @@ def run_rag_pipeline_stream(
             ],
             "globe_mode",
         )
+        if log_query:
+            try:
+                log_query(
+                    query=question,
+                    latency_ms=(perf_counter() - pipeline_started) * 1000,
+                    cache_hit=False,
+                    chunks_retrieved=0,
+                    confidence_score=1.0,
+                    confidence_label="globe",
+                    complexity_level="globe",
+                    resource_id=resource_id or "",
+                    user_id=user_id or "",
+                    response_passed=True,
+                    hallucination_checked=False,
+                    hallucination_check_status="skipped",
+                    rerank_executed=False,
+                )
+            except Exception:
+                pass
+        trace.finish({
+            "mode": "globe",
+            "chatMode": chat_mode,
+            "finishReason": stream_state.get("finish_reason"),
+            "completionStatus": stream_state.get("completion_status"),
+            "continuationCount": stream_state.get("continuation_count"),
+            "outputCharacterCount": len(full_answer),
+            "canContinue": stream_state.get("can_continue"),
+            "confidence": 1.0,
+            "confidenceLabel": "globe",
+            "sourceCount": 0,
+            "hallucinationCount": 0,
+        })
         yield {
             "type": "final",
             "answer": full_answer,
@@ -1082,31 +1143,9 @@ def run_rag_pipeline_stream(
             "hallucinations": [],
             "confidence": 1.0,
             "confidence_label": "globe",
+            **terminal_fields(),
         }
-        if log_query:
-            log_query(
-                query=question,
-                latency_ms=(perf_counter() - pipeline_started) * 1000,
-                cache_hit=False,
-                chunks_retrieved=0,
-                confidence_score=1.0,
-                confidence_label="globe",
-                complexity_level="globe",
-                resource_id=resource_id or "",
-                user_id=user_id or "",
-                response_passed=True,
-                hallucination_checked=False,
-                hallucination_check_status="skipped",
-                rerank_executed=False,
-            )
-        trace.finish({
-            "mode": "globe",
-            "confidence": 1.0,
-            "confidenceLabel": "globe",
-            "sourceCount": 0,
-            "hallucinationCount": 0,
-        })
-        yield {"type": "done"}
+        yield {"type": "done", **terminal_fields()}
         return
 
     try:
@@ -1126,6 +1165,11 @@ def run_rag_pipeline_stream(
                         Resource.is_deleted == 0,
                     ).all()
                 ]
+                if selected_resource_ids:
+                    selected = set(selected_resource_ids)
+                    available_resource_ids = [
+                        item for item in available_resource_ids if item in selected
+                    ]
 
             # 1. Query Rewrite (for cache key)
             retrieval_agent = RetrievalAgent()
@@ -1197,22 +1241,17 @@ def run_rag_pipeline_stream(
                 with trace.phase("cached_response_stream"):
                     for i in range(0, len(cached["answer"]), chunk_size):
                         yield {"type": "token", "content": cached["answer"][i:i+chunk_size]}
-                yield {
-                    "type": "final",
-                    "answer": cached["answer"],
-                    "sources": cached["sources"],
-                    "hallucinations": [],
-                    "confidence": cached["confidence"],
-                    "confidence_label": "cached"
-                }
                 if log_planner_execution:
-                    log_planner_execution(
-                        rewritten_question, plan.model_dump(mode="json"),
-                        (perf_counter() - pipeline_started) * 1000,
-                        plan.retrieval_mode.value, ["semantic_cache"],
-                        ["retrieval", "multi_query", "rerank", "context_compression", "hallucination_check"],
-                        plan.reasoning, cached["confidence"], True, user_id, resource_id,
-                    )
+                    try:
+                        log_planner_execution(
+                            rewritten_question, plan.model_dump(mode="json"),
+                            (perf_counter() - pipeline_started) * 1000,
+                            plan.retrieval_mode.value, ["semantic_cache"],
+                            ["retrieval", "multi_query", "rerank", "context_compression", "hallucination_check"],
+                            plan.reasoning, cached["confidence"], True, user_id, resource_id,
+                        )
+                    except Exception:
+                        pass
                 if log_query:
                     try:
                         log_retrieval_stats(
@@ -1248,6 +1287,12 @@ def run_rag_pipeline_stream(
                 _skip_trace_phases(trace, _POST_CACHE_RAG_PHASES, "semantic_cache_hit")
                 trace.finish({
                     "mode": "cached",
+                    "chatMode": chat_mode,
+                    "finishReason": stream_state.get("finish_reason"),
+                    "completionStatus": stream_state.get("completion_status"),
+                    "continuationCount": 0,
+                    "outputCharacterCount": len(cached["answer"]),
+                    "canContinue": False,
                     "cacheHit": True,
                     "cacheAccepted": True,
                     "confidence": cached["confidence"],
@@ -1255,6 +1300,16 @@ def run_rag_pipeline_stream(
                     "sourceCount": len(cached.get("sources", [])),
                     "hallucinationCount": 0,
                 })
+                yield {
+                    "type": "final",
+                    "answer": cached["answer"],
+                    "sources": cached["sources"],
+                    "hallucinations": [],
+                    "confidence": cached["confidence"],
+                    "confidence_label": "cached",
+                    **terminal_fields(),
+                }
+                yield {"type": "done", **terminal_fields()}
                 return
         finally:
             db.close()
@@ -1301,6 +1356,7 @@ def run_rag_pipeline_stream(
         THRESHOLD = 30
 
         with trace.phase("answer_generation", {"chunkCount": len(reranked_results)}):
+            stream_state = {}
             answer_stream = retrieval_agent.execute_workflow_node(
                 workflow, agent_memory, "answer",
                 question, context, final_history_str,
@@ -1309,6 +1365,7 @@ def run_rag_pipeline_stream(
                 user_id=user_id,
                 resource_id=resource_id,
                 feature="media_rag_answer_stream" if resource_id else "global_rag_answer_stream",
+                stream_state=stream_state,
             )
             for token in answer_stream:
                 full_answer += token
@@ -1462,19 +1519,6 @@ def run_rag_pipeline_stream(
         latency_ms = (perf_counter() - pipeline_started) * 1000
         log_user_activity(db, user_id, 'ai_chat', 'RAG complete', f'Confidence: {confidence:.2f} ({confidence_label}), {len(hallucinations)} hallucinations, {latency_ms:.0f}ms')
 
-        yield {
-            "type": "final",
-            "answer": full_answer,
-            "sources": sources,
-            "hallucinations": hallucinations,
-            "confidence": confidence,
-            "confidence_label": confidence_label,
-            "retrieval_strategy": execution_report.retrieval_strategy.value if execution_report.retrieval_strategy else None,
-            "processing_time_ms": (perf_counter() - pipeline_started) * 1000,
-            "modules_executed": execution_report.modules_executed,
-            "reasoning": plan.reasoning,
-        }
-
         # 6. Save to cache
         try:
             with trace.phase(
@@ -1497,14 +1541,17 @@ def run_rag_pipeline_stream(
             pass
 
         if log_planner_execution:
-            log_planner_execution(
-                rewritten_question, plan.model_dump(mode="json"),
-                (perf_counter() - pipeline_started) * 1000,
-                plan.retrieval_mode.value,
-                execution_report.modules_executed,
-                execution_report.modules_skipped,
-                plan.reasoning, confidence, False, user_id, resource_id,
-            )
+            try:
+                log_planner_execution(
+                    rewritten_question, plan.model_dump(mode="json"),
+                    (perf_counter() - pipeline_started) * 1000,
+                    plan.retrieval_mode.value,
+                    execution_report.modules_executed,
+                    execution_report.modules_skipped,
+                    plan.reasoning, confidence, False, user_id, resource_id,
+                )
+            except Exception:
+                pass
 
         if log_query:
             try:
@@ -1549,6 +1596,12 @@ def run_rag_pipeline_stream(
 
         trace.finish({
             "mode": "retrieval",
+            "chatMode": chat_mode,
+            "finishReason": stream_state.get("finish_reason"),
+            "completionStatus": stream_state.get("completion_status"),
+            "continuationCount": stream_state.get("continuation_count"),
+            "outputCharacterCount": len(full_answer),
+            "canContinue": stream_state.get("can_continue"),
             "classification": plan.query_classification.value,
             "retrievalMode": plan.retrieval_mode.value,
             "chunkCount": len(reranked_results),
@@ -1560,8 +1613,26 @@ def run_rag_pipeline_stream(
             "modulesExecuted": execution_report.modules_executed,
             "modulesSkipped": execution_report.modules_skipped,
         })
+        yield {
+            "type": "final",
+            "answer": full_answer,
+            "sources": sources,
+            "hallucinations": hallucinations,
+            "confidence": confidence,
+            "confidence_label": confidence_label,
+            "retrieval_strategy": execution_report.retrieval_strategy.value if execution_report.retrieval_strategy else None,
+            "processing_time_ms": (perf_counter() - pipeline_started) * 1000,
+            "modules_executed": execution_report.modules_executed,
+            "reasoning": plan.reasoning,
+            **terminal_fields(),
+        }
+        yield {"type": "done", **terminal_fields()}
     except Exception as e:
         trace.fail(e)
-        yield {"type": "error", "message": str(e)}
-    finally:
-        yield {"type": "done"}
+        error_fields = {
+            **terminal_fields(),
+            "completion_status": "interrupted",
+            "can_continue": bool(full_answer),
+        }
+        yield {"type": "error", "message": str(e), **error_fields}
+        yield {"type": "done", **error_fields}

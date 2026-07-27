@@ -45,6 +45,12 @@ _SAFE_CONTEXT_KEYS = {
     "errorType",
     "errorCode",
     "reasonCode",
+    "chatMode",
+    "finishReason",
+    "completionStatus",
+    "continuationCount",
+    "outputCharacterCount",
+    "canContinue",
 }
 
 
@@ -75,12 +81,14 @@ class GenerationTrace:
         feature: str,
         streaming: bool,
         resource_scoped: bool,
+        chat_mode: str | None = None,
     ) -> None:
         self.correlation_id = str(uuid4())
         self.parent_request_id = get_request_correlation_id()
         self.feature = feature or "generation"
         self.streaming = streaming
         self.resource_scoped = resource_scoped
+        self.chat_mode = chat_mode
         self.started_at = perf_counter()
         self.finished = False
         normalized = self.feature.lower()
@@ -110,6 +118,7 @@ class GenerationTrace:
                     "streaming": self.streaming,
                     "resourceScoped": self.resource_scoped,
                     "parentRequestId": self.parent_request_id,
+                    "chatMode": self.chat_mode,
                 }
             ),
         )
@@ -126,7 +135,13 @@ class GenerationTrace:
             phase=phase,
             status="running",
             correlation_id=self.correlation_id,
-            context=_safe_context({"feature": self.feature, **(context or {})}),
+            context=_safe_context(
+                {
+                    "feature": self.feature,
+                    "chatMode": self.chat_mode,
+                    **(context or {}),
+                }
+            ),
         )
         return perf_counter()
 
@@ -144,7 +159,13 @@ class GenerationTrace:
             status="completed",
             correlation_id=self.correlation_id,
             duration_ms=max(0.0, (perf_counter() - started_at) * 1000),
-            context=_safe_context({"feature": self.feature, **(context or {})}),
+            context=_safe_context(
+                {
+                    "feature": self.feature,
+                    "chatMode": self.chat_mode,
+                    **(context or {}),
+                }
+            ),
         )
 
     def fail_phase(
@@ -224,6 +245,7 @@ class GenerationTrace:
                     "generationMode": self.generation_mode,
                     "outputType": type(result).__name__ if result is not None else None,
                     "outputItemCount": output_item_count,
+                    "chatMode": self.chat_mode,
                 }
             ),
         )
@@ -246,6 +268,7 @@ class GenerationTrace:
                     "generationMode": self.generation_mode,
                     "errorType": type(error).__name__,
                     "errorCode": getattr(error, "code", type(error).__name__),
+                    "chatMode": self.chat_mode,
                 }
             ),
         )
@@ -267,6 +290,7 @@ class GenerationTrace:
                     "feature": self.feature,
                     "generationMode": self.generation_mode,
                     "reasonCode": reason_code,
+                    "chatMode": self.chat_mode,
                 }
             ),
         )
@@ -280,6 +304,22 @@ class GenerationTrace:
             status="waiting" if metrics.get("pendingSettlement") else "completed",
             correlation_id=self.correlation_id,
             context=_safe_context({"feature": self.feature, **metrics}),
+        )
+
+    def stream_completed(self, details: dict[str, Any]) -> None:
+        """Record content-free provider termination metadata."""
+        logger.info(
+            "Provider stream completed.",
+            event="generation.provider_stream_completed",
+            operation="generation_pipeline",
+            phase="provider_stream",
+            status=(
+                "completed"
+                if details.get("completionStatus") == "complete"
+                else "stopped"
+            ),
+            correlation_id=self.correlation_id,
+            context=_safe_context({"feature": self.feature, **details}),
         )
 
 
@@ -299,21 +339,44 @@ def trace_generation(*, streaming: bool = False):
                     feature=feature,
                     streaming=True,
                     resource_scoped=bool(bound.arguments.get("resource_id")),
+                    chat_mode=(
+                        "global"
+                        if bound.arguments.get("globe_on")
+                        else "resource_rag"
+                        if bound.arguments.get("resource_id")
+                        else "library_rag"
+                    ) if any(
+                        marker in feature.lower() for marker in ("chat", "answer")
+                    ) else None,
                 )
-                token = trace.bind()
-                trace.start()
+                iterator = iter(function(*args, **kwargs))
+
+                def run_bound(callback):
+                    token = trace.bind()
+                    try:
+                        return callback()
+                    finally:
+                        trace.reset(token)
+
+                run_bound(trace.start)
                 try:
-                    yield from function(*args, **kwargs)
+                    while True:
+                        try:
+                            item = run_bound(lambda: next(iterator))
+                        except StopIteration:
+                            break
+                        yield item
                 except GeneratorExit:
-                    trace.stop("consumer_disconnected")
+                    close = getattr(iterator, "close", None)
+                    if callable(close):
+                        run_bound(close)
+                    run_bound(lambda: trace.stop("consumer_disconnected"))
                     raise
                 except BaseException as error:
-                    trace.fail(error)
+                    run_bound(lambda: trace.fail(error))
                     raise
                 else:
-                    trace.finish()
-                finally:
-                    trace.reset(token)
+                    run_bound(trace.finish)
 
             stream_wrapper.__signature__ = function_signature
             return stream_wrapper
@@ -327,6 +390,15 @@ def trace_generation(*, streaming: bool = False):
                 feature=feature,
                 streaming=False,
                 resource_scoped=bool(bound.arguments.get("resource_id")),
+                chat_mode=(
+                    "global"
+                    if bound.arguments.get("globe_on")
+                    else "resource_rag"
+                    if bound.arguments.get("resource_id")
+                    else "library_rag"
+                ) if any(
+                    marker in feature.lower() for marker in ("chat", "answer")
+                ) else None,
             )
             token = trace.bind()
             trace.start()

@@ -692,6 +692,7 @@ def store_resource_embeddings(
     user_id: str,
     storage_root: str | None = None,
     resource_type: str | None = None,
+    progress_callback=None,
 ):
     from database import SessionLocal
     from models import ChunkIndex
@@ -724,6 +725,8 @@ def store_resource_embeddings(
         logger.info(
             f"REINDEX NO-OP: {json.dumps({'resource_id': resource_id, 'chunk_count': len(chunk_records), 'reason': 'unchanged_retrieval_state'}, ensure_ascii=False)}"
         )
+        if progress_callback:
+            progress_callback(0, 0)
         db.close()
         return True
 
@@ -888,6 +891,8 @@ def store_resource_embeddings(
         except concurrent.futures.TimeoutError:
             logger.error(f"ChromaDB add timed out for chunk {record['chunk_index']}, skipping")
             continue
+        if progress_callback:
+            progress_callback(record_idx + 1, len(changed_records))
 
     logger.info(f"STORE EMBEDDINGS: Loop complete. embedded={embedded_count} reused={reused_count}")
     log_user_activity(db, user_id, 'ai_features', 'Chunks created', f'{len(chunk_records)} chunks from transcript')
@@ -1152,6 +1157,35 @@ def find_chunk_timestamp(resource_id: str, chunk_content: str) -> float:
     return best_time
 
 
+def get_result_similarity_score(result: dict) -> float | None:
+    """Return a displayable 0..1 relevance score from retrieval evidence.
+
+    Reranker scores are preferred. When a retrieval plan intentionally skips
+    reranking, convert the vector distance using the same 1.5 cutoff enforced
+    by resource retrieval so media Ask AI source cards still show a real match
+    percentage instead of an invented rank-based value.
+    """
+    for key in ("rerank_score", "similarity_score", "relevance_score"):
+        value = result.get(key)
+        if value is None:
+            continue
+        try:
+            return max(0.0, min(1.0, float(value)))
+        except (TypeError, ValueError):
+            continue
+
+    distance = result.get("distance")
+    if distance is None:
+        distance = result.get("chroma_distance")
+    if distance is None:
+        return None
+    try:
+        normalized = 1.0 - (float(distance) / 1.5)
+    except (TypeError, ValueError):
+        return None
+    return max(0.0, min(1.0, normalized))
+
+
 def extract_rich_sources(
     reranked_results: list[dict],
     answer: str = None,
@@ -1231,6 +1265,7 @@ def extract_rich_sources(
                 "excerpt": excerpt,
                 "rerank_score": res.get("rerank_score"),
                 "hybrid_score": res.get("hybrid_score"),
+                "similarity_score": get_result_similarity_score(res),
                 "resource_id": resource_id,
                 "resource_title": resource_title,
                 "resource_path": resource_path,

@@ -4,6 +4,23 @@ type RendererLogInput = Omit<SystemLogEventInput, 'source'>
 
 let diagnosticsInstalled = false
 
+export function createDuplicateMessageGuard(windowMs: number): (message: string, now?: number) => boolean {
+  const lastLoggedAt = new Map<string, number>()
+  return (message: string, now = Date.now()): boolean => {
+    const previous = lastLoggedAt.get(message)
+    if (previous != null && now - previous < windowMs) return false
+    lastLoggedAt.set(message, now)
+    return true
+  }
+}
+
+const shouldLogConsoleWarning = createDuplicateMessageGuard(30_000)
+
+export function isExpectedRequestCancellation(error: unknown, signal?: AbortSignal | null): boolean {
+  return signal?.aborted === true
+    || (error instanceof Error && error.name === 'AbortError')
+}
+
 export function logRendererEvent(input: RendererLogInput): void {
   window.desktop?.logSystemEvent({
     ...input,
@@ -92,6 +109,9 @@ export function installRendererDiagnostics(): () => void {
       }
       return response
     } catch (error) {
+      const requestSignal = init?.signal || (input instanceof Request ? input.signal : undefined)
+      if (isExpectedRequestCancellation(error, requestSignal)) throw error
+
       logRendererEvent({
         level: 'error',
         category: 'NETWORK',
@@ -116,12 +136,18 @@ export function installRendererDiagnostics(): () => void {
   const reactWarningPattern = /(?:encountered two children with the same key|each child in a list should have a unique ["']key["'] prop)/i
   console.warn = (...args: unknown[]) => {
     originalWarn(...args)
+    const message = typeof args[0] === 'string' ? args[0] : 'Renderer console warning.'
+    if (!shouldLogConsoleWarning(message)) return
+    const ownerStack = captureOwnerStack()
     logRendererEvent({
       level: 'warning',
       category: 'RENDERER',
       event: 'renderer.console_warning',
-      message: typeof args[0] === 'string' ? args[0] : 'Renderer console warning.',
-      context: { argumentTypes: args.map((value) => value instanceof Error ? value.name : typeof value) },
+      message,
+      context: {
+        argumentTypes: args.map((value) => value instanceof Error ? value.name : typeof value),
+        ...(ownerStack ? { reactOwnerStack: ownerStack } : {}),
+      },
     })
   }
   console.error = (...args: unknown[]) => {

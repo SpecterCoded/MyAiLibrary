@@ -6,6 +6,7 @@ import InlineCitationContent, { hasInlineCitationMarkers } from "../rag/InlineCi
 import TypewriterMessage from "../chat/TypewriterMessage";
 import { SavedContentLoader, SavedContentReveal, holdSavedContentLoader } from "../common/SavedContentLoader";
 import type { RAGResponseDetails } from "../rag/types";
+import { consumeSSEStream } from "../../lib/sseStream";
 
 interface AskAiTabProps {
   isActive?: boolean;
@@ -108,6 +109,12 @@ export default function AskAiTab({ isActive, initialQuestion, onClearInitialQues
     modulesExecuted: Array.isArray(payload.modules_executed) ? payload.modules_executed : undefined,
     reasoning: typeof payload.reasoning === "string" ? payload.reasoning : null,
     contextPreview: typeof payload.context === "string" ? payload.context : null,
+    chatMode: payload.chat_mode,
+    finishReason: payload.finish_reason ?? "stop",
+    completionStatus: payload.completion_status ?? "complete",
+    continuationCount: payload.continuation_count ?? 0,
+    canContinue: Boolean(payload.can_continue),
+    assistantMessageId: payload.assistant_message_id ?? null,
   });
 
   const SUGGESTIONS_PER_PAGE = 4;
@@ -329,10 +336,13 @@ export default function AskAiTab({ isActive, initialQuestion, onClearInitialQues
   const handleRegenerate = (msg: ChatMessage) => {
     // Regenerate in-place: reset the existing AI message then stream into it
     if (!msg.query || loading || !resourceId || !token) return;
+    const regeneratedMessageId = `${msg.id}-regen-${Date.now()}`;
     setMessages((prev) => prev.map((m) =>
-      m.id === msg.id ? { ...m, text: "", sources: [], details: undefined } : m
+      m.id === msg.id
+        ? { ...m, id: regeneratedMessageId, text: "", sources: [], details: undefined }
+        : m
     ));
-    handleSendMessage(msg.query, msg.id);
+    handleSendMessage(msg.query, regeneratedMessageId);
   };
 
   const exportMsgToMarkdown = (msg: ChatMessage) => {
@@ -469,10 +479,6 @@ export default function AskAiTab({ isActive, initialQuestion, onClearInitialQues
         throw new Error("Streaming response body is unavailable.");
       }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
       const updateAiMessage = (updater: (current: ChatMessage) => ChatMessage) => {
         setMessages((prev) => prev.map((msg) => (
           msg.id === aiMessageId ? updater(msg) : msg
@@ -509,28 +515,9 @@ export default function AskAiTab({ isActive, initialQuestion, onClearInitialQues
           return;
         }
 
-        if (payload.type === "error") {
-          throw new Error(payload.message || "Streaming request failed.");
-        }
       };
 
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        const events = buffer.split("\n\n");
-        buffer = events.pop() || "";
-
-        for (const eventChunk of events) {
-          const dataLine = eventChunk
-            .split("\n")
-            .find((line) => line.startsWith("data: "));
-          if (!dataLine) continue;
-          const payload = JSON.parse(dataLine.slice(6));
-          processEvent(payload);
-        }
-      }
+      await consumeSSEStream(response.body, processEvent);
     } catch (err: any) {
       console.error(err);
       setError(err.message || "Something went wrong.");
@@ -538,10 +525,51 @@ export default function AskAiTab({ isActive, initialQuestion, onClearInitialQues
         msg.id === aiMessageId
           ? {
             ...msg,
-            text: err.message || "I couldn't contact my server because it might still be initializing. Please try again.",
+            text: msg.text || err.message || "I couldn't contact my server because it might still be initializing. Please try again.",
+            details: {
+              ...msg.details,
+              completionStatus: "interrupted",
+              canContinue: Boolean(msg.text),
+            },
           }
           : msg
       )));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleContinueAnswer = async (messageId: string) => {
+    if (loading || !sessionId || !token) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`/chat/sessions/${sessionId}/continue-stream`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}` },
+      });
+      if (!response.ok) throw new Error(`Continuation failed with status ${response.status}`);
+      if (!response.body) throw new Error("Streaming response body is unavailable.");
+      const result = await consumeSSEStream(response.body, (payload) => {
+        if (payload.type !== "token") return;
+        setMessages(prev => prev.map(message => message.id !== messageId ? message : {
+          ...message,
+          text: (message.text || "") + String(payload.content || ""),
+        }));
+      });
+      const finalPayload = result.final as any;
+      setMessages(prev => prev.map(message => message.id !== messageId ? message : {
+        ...message,
+        text: finalPayload.answer || message.text,
+        sources: finalPayload.sources || message.sources,
+        details: buildResponseDetails(finalPayload, message.query || ""),
+      }));
+    } catch (err: any) {
+      setError(err.message || "The answer was interrupted.");
+      setMessages(prev => prev.map(message => message.id !== messageId ? message : {
+        ...message,
+        details: { ...message.details, completionStatus: "interrupted", canContinue: true },
+      }));
     } finally {
       setLoading(false);
     }
@@ -776,6 +804,22 @@ export default function AskAiTab({ isActive, initialQuestion, onClearInitialQues
                           )}
                         />
                       </div>
+                      {(m.details?.completionStatus === "interrupted" || m.details?.completionStatus === "stopped") && (
+                        <p className="mt-3 text-xs font-medium text-amber-600 dark:text-amber-300/80">
+                          {m.details.completionStatus === "stopped" ? "Answer stopped" : "Answer interrupted"} — partial response preserved.
+                        </p>
+                      )}
+                      {m.details?.canContinue && messages[messages.length - 1]?.id === m.id && (
+                        <button
+                          type="button"
+                          disabled={loading}
+                          onClick={() => handleContinueAnswer(m.id)}
+                          className="mt-4 inline-flex items-center gap-2 rounded-xl bg-indigo-500/10 px-3 py-2 text-xs font-semibold text-indigo-500 transition-colors hover:bg-indigo-500/20 disabled:opacity-50"
+                        >
+                          <RefreshCw size={13} />
+                          Continue answer
+                        </button>
+                      )}
                       {m.sources && m.sources.length > 0 && (
                         <SourceList sources={m.sources} theme={document.documentElement.classList.contains("dark") ? "dark" : "light"} />
                       )}

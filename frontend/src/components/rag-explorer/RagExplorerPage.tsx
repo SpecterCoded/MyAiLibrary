@@ -147,7 +147,19 @@ export default function App({ theme, setTheme, isActive = true }: RagExplorerPag
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isActionLoading, setIsActionLoading] = useState(false);
-  const [dockJobs, setDockJobs] = useState<{ id: string; title: string; status: string; detail?: string }[]>([]);
+  const [dockJobs, setDockJobs] = useState<{
+    id: string;
+    title: string;
+    status: string;
+    detail?: string;
+    progress?: number;
+    currentStage?: string | null;
+    progressMode?: 'determinate' | 'indeterminate' | 'terminal';
+  }[]>([]);
+  const dockJobsRef = useRef(dockJobs);
+  useEffect(() => {
+    dockJobsRef.current = dockJobs;
+  }, [dockJobs]);
   const [confirmModal, setConfirmModal] = useState<{ message: string; onConfirm: () => void } | null>(null);
   const [contentAnimationKey, setContentAnimationKey] = useState(0);
   const wasActiveRef = useRef(false);
@@ -331,19 +343,30 @@ export default function App({ theme, setTheme, isActive = true }: RagExplorerPag
     if (dockJobs.length === 0) return;
     const interval = setInterval(async () => {
       const updated = await Promise.all(
-        dockJobs.map(async (job) => {
+        dockJobsRef.current.map(async (job) => {
           if (job.status === 'completed' || job.status === 'failed') return job;
           try {
             const token = localStorage.getItem('access_token');
             const res = await fetch(`/queue/${job.id}`, { headers: { Authorization: `Bearer ${token}` } });
             if (!res.ok) return job;
             const data = await res.json();
-            return { ...job, status: data.job_status ?? data.status ?? job.status, detail: data.detail_status };
+            const incoming = Math.max(0, Math.min(100, Number(data.progress ?? 0)));
+            return {
+              ...job,
+              status: data.job_status ?? data.status ?? job.status,
+              detail: data.detail_status,
+              progress: data.job_status === 'completed'
+                ? 100
+                : Math.max(job.progress ?? 0, incoming),
+              currentStage: data.current_stage,
+              progressMode: data.progress_mode,
+            };
           } catch {
             return job;
           }
         })
       );
+      dockJobsRef.current = updated;
       setDockJobs(updated);
     }, 3000);
     return () => clearInterval(interval);
@@ -1191,33 +1214,59 @@ export default function App({ theme, setTheme, isActive = true }: RagExplorerPag
             </button>
           </div>
           <div className="max-h-48 overflow-y-auto">
-            {dockJobs.map((job) => (
-              <div key={job.id} className="flex items-center justify-between px-4 py-2.5 border-b border-border last:border-0 hover:bg-surface transition-colors">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className={`w-2 h-2 rounded-full shrink-0 ${
-                    job.status === 'completed' ? 'bg-emerald-400'
-                    : job.status === 'failed' ? 'bg-rose-400'
-                    : 'bg-amber-400 animate-pulse'
-                  }`} />
-                  <span className="text-sm text-ink truncate">{job.title}</span>
+            {dockJobs.map((job) => {
+              const progress = Math.max(0, Math.min(100, job.progress ?? 0));
+              const indeterminate = job.progressMode === 'indeterminate'
+                && job.status !== 'completed'
+                && job.status !== 'failed';
+              return (
+                <div key={job.id} className="px-4 py-2.5 border-b border-border last:border-0 hover:bg-surface transition-colors">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className={`w-2 h-2 rounded-full shrink-0 ${
+                        job.status === 'completed' ? 'bg-emerald-400'
+                        : job.status === 'failed' ? 'bg-rose-400'
+                        : 'bg-amber-400 animate-pulse'
+                      }`} />
+                      <span className="text-sm text-ink truncate">{job.title}</span>
+                    </div>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <span className={`text-xs font-mono ${
+                        job.status === 'completed' ? 'text-emerald-400'
+                        : job.status === 'failed' ? 'text-rose-400'
+                        : 'text-amber-400'
+                      }`}>
+                        {job.detail ? job.detail.toUpperCase() : job.status.toUpperCase()} · {progress}%
+                      </span>
+                      <button
+                        onClick={() => removeDockJob(job.id)}
+                        className="text-ink-faint hover:text-ink transition-colors"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mt-2 h-1 overflow-hidden rounded-full bg-border">
+                    <div
+                      className={`relative h-full overflow-hidden rounded-full transition-[width] duration-500 ${
+                        job.status === 'failed'
+                          ? 'bg-rose-500'
+                          : 'bg-brand'
+                      }`}
+                      style={{ width: `${progress}%` }}
+                    >
+                      {indeterminate && (
+                        <motion.span
+                          className="absolute inset-y-0 w-1/2 bg-gradient-to-r from-transparent via-white/70 to-transparent"
+                          animate={{ x: ['-120%', '240%'] }}
+                          transition={{ duration: 1.25, repeat: Infinity, ease: 'linear' }}
+                        />
+                      )}
+                    </div>
+                  </div>
                 </div>
-                <div className="flex items-center gap-3 shrink-0">
-                  <span className={`text-xs font-mono ${
-                    job.status === 'completed' ? 'text-emerald-400'
-                    : job.status === 'failed' ? 'text-rose-400'
-                    : 'text-amber-400'
-                  }`}>
-                    {job.detail ? job.detail.toUpperCase() : job.status.toUpperCase()}
-                  </span>
-                  <button
-                    onClick={() => removeDockJob(job.id)}
-                    className="text-ink-faint hover:text-ink transition-colors"
-                  >
-                    <X size={12} />
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

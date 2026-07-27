@@ -220,6 +220,7 @@ class WorkflowExecutor:
         user_id: str | None = None,
         resource_id: str | None = None,
         feature: str = "rag_answer_stream",
+        stream_state: dict | None = None,
     ):
         from services.llm_service import generate_answer_stream
         return generate_answer_stream(
@@ -230,6 +231,7 @@ class WorkflowExecutor:
             user_id=user_id,
             resource_id=resource_id,
             feature=feature,
+            stream_state=stream_state,
         )
 
     @staticmethod

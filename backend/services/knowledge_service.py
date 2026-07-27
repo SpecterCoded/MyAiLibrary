@@ -859,6 +859,7 @@ def _update_stage(
     run.checkpoint_json = _json(checkpoint)
     run.metrics_json = _json(metrics)
     run.current_stage = stage
+    progress = max(int(run.progress or 0), int(job.progress or 0), int(progress))
     run.progress = progress
     job.current_stage = stage
     job.progress = progress

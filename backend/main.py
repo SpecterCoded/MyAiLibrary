@@ -4940,7 +4940,6 @@ def pause_queue_job(
         raise HTTPException(status_code=404, detail="Job not found")
     if job.status in ["queued", "waiting", "retrying_connection", "waiting_for_connection", "processing"]:
         job.status = "paused"
-        job.current_stage = "paused"
         db.commit()
         return {"message": "Job paused"}
     raise HTTPException(status_code=400, detail="Job cannot be paused")
@@ -4972,7 +4971,6 @@ def resume_queue_job(
         )
         job.status = "waiting" if blocker else "queued"
         job.blocked_by_job_id = blocker.id if blocker else None
-        job.current_stage = "waiting_for_prerequisite" if blocker else "queued"
         db.commit()
         return {"message": "Job resumed", "status": job.status}
     raise HTTPException(status_code=400, detail="Job is not paused")
@@ -5008,8 +5006,6 @@ def retry_queue_job(
     )
     job.status = "waiting" if blocker else "queued"
     job.blocked_by_job_id = blocker.id if blocker else None
-    job.current_stage = "waiting_for_prerequisite" if blocker else "queued"
-    job.progress = 0
     job.started_at = None
     job.finished_at = None
     job.error_message = None
@@ -5018,8 +5014,6 @@ def retry_queue_job(
         run = db.query(KnowledgeRun).filter(KnowledgeRun.job_id == job.id).first()
         if run:
             run.status = job.status
-            run.current_stage = job.current_stage
-            run.progress = 0
             run.error_message = None
             run.finished_at = None
         state = db.query(ResourceKnowledgeState).filter(
@@ -6462,6 +6456,88 @@ class ResourceChatRequest(BaseModel):
     globe_on: bool = False
 
 
+def _stream_message_details(event: dict, scope: dict) -> dict:
+    is_final = event.get("type") == "final"
+    return {
+        "confidence": event.get("confidence"),
+        "confidenceLabel": event.get("confidence_label"),
+        "hallucinationCount": (
+            len(event.get("hallucinations", []))
+            if event.get("hallucinations") is not None
+            else None
+        ),
+        "hallucinationCheckPassed": (
+            len(event.get("hallucinations", [])) == 0
+            if event.get("hallucinations") is not None
+            else None
+        ),
+        "sourceCount": (
+            len(event.get("sources", []))
+            if event.get("sources") is not None
+            else None
+        ),
+        "retrievalStrategy": event.get("retrieval_strategy"),
+        "processingTimeMs": event.get("processing_time_ms"),
+        "modulesExecuted": event.get("modules_executed"),
+        "reasoning": event.get("reasoning"),
+        "chatMode": event.get("chat_mode") or scope.get("chatMode"),
+        "finishReason": event.get("finish_reason") or ("stop" if is_final else "unknown"),
+        "completionStatus": event.get("completion_status") or (
+            "complete" if is_final else "interrupted"
+        ),
+        "continuationCount": event.get("continuation_count", 0),
+        "canContinue": bool(event.get("can_continue", False)),
+        **scope,
+    }
+
+
+def _load_chat_message_details(raw_details: str | None) -> dict | None:
+    if not raw_details:
+        return None
+    details = json.loads(raw_details)
+    # Older streaming payloads occasionally omitted terminal fields. They were
+    # persisted through the old fallback as "interrupted" even though a final
+    # event, full metadata, and canContinue=false had already been received.
+    if (
+        details.get("completionStatus") == "interrupted"
+        and details.get("canContinue") is False
+        and details.get("finishReason") in (None, "unknown")
+        and details.get("processingTimeMs") is not None
+    ):
+        details["completionStatus"] = "complete"
+        details["finishReason"] = "stop"
+    return details
+
+
+def _persist_stream_message(
+    *,
+    session_id: str,
+    answer: str,
+    sources: list,
+    details: dict,
+    message_id: str | None = None,
+) -> str:
+    persisted_id = message_id or str(uuid4())
+    with SessionLocal() as stream_db:
+        message = (
+            stream_db.query(ChatMessage).filter(ChatMessage.id == persisted_id).first()
+            if message_id
+            else None
+        )
+        if message is None:
+            message = ChatMessage(
+                id=persisted_id,
+                session_id=session_id,
+                role="assistant",
+            )
+            stream_db.add(message)
+        message.content = answer
+        message.sources_json = json.dumps(sources) if sources else None
+        message.details_json = json.dumps(details) if details else None
+        stream_db.commit()
+    return persisted_id
+
+
 class ResourceChatResponse(BaseModel):
     question: str
     answer: str
@@ -6621,7 +6697,7 @@ def get_chat_messages(
             "role": m.role,
             "content": m.content,
             "sources": json.loads(m.sources_json) if m.sources_json else None,
-            "details": json.loads(m.details_json) if m.details_json else None,
+            "details": _load_chat_message_details(m.details_json),
             "created_at": m.created_at.isoformat() if m.created_at else None,
         }
         for m in messages
@@ -6999,6 +7075,14 @@ def resource_chat_stream(
         full_answer = ""
         collected_sources = []
         collected_details = {}
+        persisted = False
+        assistant_message_id = str(uuid4())
+        terminal_sent = False
+        scope = {
+            "chatMode": "global" if payload.globe_on else "resource_rag",
+            "resourceId": resource_id,
+            "globeOn": bool(payload.globe_on),
+        }
         try:
             for event in run_rag_pipeline_stream(
                 user_id=current_user.id,
@@ -7021,41 +7105,59 @@ def resource_chat_stream(
                     full_answer = event.get("answer", full_answer)
                     if event.get("sources"):
                         collected_sources = event["sources"]
-                    collected_details = {
-                        "confidence": event.get("confidence"),
-                        "confidenceLabel": event.get("confidence_label"),
-                        "hallucinationCount": len(event.get("hallucinations", [])) if event.get("hallucinations") else None,
-                        "hallucinationCheckPassed": len(event.get("hallucinations", [])) == 0 if event.get("hallucinations") is not None else None,
-                        "sourceCount": len(event.get("sources", [])) if event.get("sources") else None,
-                        "retrievalStrategy": event.get("retrieval_strategy"),
-                        "processingTimeMs": event.get("processing_time_ms"),
-                        "modulesExecuted": event.get("modules_executed"),
-                        "reasoning": event.get("reasoning"),
-                    }
+                    collected_details = _stream_message_details(event, scope)
+                    _persist_stream_message(
+                        session_id=payload.session_id,
+                        answer=full_answer,
+                        sources=collected_sources,
+                        details=collected_details,
+                        message_id=assistant_message_id,
+                    )
+                    persisted = True
+                    event["assistant_message_id"] = assistant_message_id
                     yield f"data: {json.dumps(event)}\n\n"
                 elif event["type"] == "error":
+                    if full_answer and not persisted:
+                        collected_details = _stream_message_details(event, scope)
+                        collected_details.update(
+                            {"completionStatus": "interrupted", "canContinue": True}
+                        )
+                        _persist_stream_message(
+                            session_id=payload.session_id,
+                            answer=full_answer,
+                            sources=collected_sources,
+                            details=collected_details,
+                            message_id=assistant_message_id,
+                        )
+                        persisted = True
                     yield f"data: {json.dumps(event)}\n\n"
                 elif event["type"] == "done":
-                    pass
+                    terminal_sent = True
+                    event["assistant_message_id"] = assistant_message_id
+                    yield f"data: {json.dumps(event)}\n\n"
 
         except Exception as e:
             import traceback
             traceback.print_exc()
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
-
         finally:
-            if full_answer:
-                with SessionLocal() as stream_db:
-                    assistant_message = ChatMessage(
-                        id=str(uuid4()),
-                        session_id=payload.session_id,
-                        role="assistant",
-                        content=full_answer,
-                        sources_json=json.dumps(collected_sources) if collected_sources else None,
-                        details_json=json.dumps(collected_details) if collected_details else None
-                    )
-                    stream_db.add(assistant_message)
-                    stream_db.commit()
+            if full_answer and not persisted:
+                interrupted = {
+                    **collected_details,
+                    **scope,
+                    "completionStatus": "interrupted",
+                    "finishReason": collected_details.get("finishReason", "unknown"),
+                    "canContinue": True,
+                }
+                _persist_stream_message(
+                    session_id=payload.session_id,
+                    answer=full_answer,
+                    sources=collected_sources,
+                    details=interrupted,
+                    message_id=assistant_message_id,
+                )
+        if not terminal_sent:
+            yield f"data: {json.dumps({'type': 'done', 'chat_mode': scope['chatMode'], 'completion_status': 'interrupted', 'finish_reason': 'unknown', 'continuation_count': 0, 'can_continue': bool(full_answer), 'assistant_message_id': assistant_message_id})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
@@ -9427,6 +9529,15 @@ def api_chat_stream(
         full_answer = ""
         collected_sources = []
         collected_details = {}
+        persisted = False
+        assistant_message_id = str(uuid4())
+        terminal_sent = False
+        scope = {
+            "chatMode": "global" if payload.globe_on else "library_rag",
+            "selectedResourceIds": list(payload.selected_resource_ids),
+            "crossLibrarySearch": bool(payload.cross_library_search),
+            "globeOn": bool(payload.globe_on),
+        }
         try:
             for event in run_rag_pipeline_stream(
                 user_id=current_user.id,
@@ -9436,6 +9547,9 @@ def api_chat_stream(
                 final_history_str=chat_history_str or None,
                 n_results=5,
                 globe_on=payload.globe_on,
+                selected_resource_ids=(
+                    [] if payload.cross_library_search else payload.selected_resource_ids
+                ),
             ):
                 if event["type"] == "token":
                     full_answer += event["content"]
@@ -9449,22 +9563,37 @@ def api_chat_stream(
                     full_answer = event.get("answer", full_answer)
                     if event.get("sources"):
                         collected_sources = event["sources"]
-                    collected_details = {
-                        "confidence": event.get("confidence"),
-                        "confidenceLabel": event.get("confidence_label"),
-                        "hallucinationCount": len(event.get("hallucinations", [])) if event.get("hallucinations") else None,
-                        "hallucinationCheckPassed": len(event.get("hallucinations", [])) == 0 if event.get("hallucinations") is not None else None,
-                        "sourceCount": len(event.get("sources", [])) if event.get("sources") else None,
-                        "retrievalStrategy": event.get("retrieval_strategy"),
-                        "processingTimeMs": event.get("processing_time_ms"),
-                        "modulesExecuted": event.get("modules_executed"),
-                        "reasoning": event.get("reasoning"),
-                    }
+                    collected_details = _stream_message_details(event, scope)
+                    if payload.session_id:
+                        _persist_stream_message(
+                            session_id=payload.session_id,
+                            answer=full_answer,
+                            sources=collected_sources,
+                            details=collected_details,
+                            message_id=assistant_message_id,
+                        )
+                        persisted = True
+                    event["assistant_message_id"] = assistant_message_id
                     yield f"data: {json.dumps(event)}\n\n"
                 elif event["type"] == "error":
+                    if full_answer and payload.session_id and not persisted:
+                        collected_details = _stream_message_details(event, scope)
+                        collected_details.update(
+                            {"completionStatus": "interrupted", "canContinue": True}
+                        )
+                        _persist_stream_message(
+                            session_id=payload.session_id,
+                            answer=full_answer,
+                            sources=collected_sources,
+                            details=collected_details,
+                            message_id=assistant_message_id,
+                        )
+                        persisted = True
                     yield f"data: {json.dumps(event)}\n\n"
                 elif event["type"] == "done":
-                    pass
+                    terminal_sent = True
+                    event["assistant_message_id"] = assistant_message_id
+                    yield f"data: {json.dumps(event)}\n\n"
 
         except Exception as e:
             import traceback
@@ -9472,18 +9601,227 @@ def api_chat_stream(
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
 
         finally:
-            if full_answer and payload.session_id:
-                with SessionLocal() as stream_db:
-                    assistant_message = ChatMessage(
-                        id=str(uuid4()),
-                        session_id=payload.session_id,
-                        role="assistant",
-                        content=full_answer,
-                        sources_json=json.dumps(collected_sources) if collected_sources else None,
-                        details_json=json.dumps(collected_details) if collected_details else None,
+            if full_answer and payload.session_id and not persisted:
+                interrupted = {
+                    **collected_details,
+                    **scope,
+                    "completionStatus": "interrupted",
+                    "finishReason": collected_details.get("finishReason", "unknown"),
+                    "canContinue": True,
+                }
+                _persist_stream_message(
+                    session_id=payload.session_id,
+                    answer=full_answer,
+                    sources=collected_sources,
+                    details=interrupted,
+                    message_id=assistant_message_id,
+                )
+        if not terminal_sent:
+            yield f"data: {json.dumps({'type': 'done', 'chat_mode': scope['chatMode'], 'completion_status': 'interrupted', 'finish_reason': 'unknown', 'continuation_count': 0, 'can_continue': bool(full_answer), 'assistant_message_id': assistant_message_id})}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@app.post("/chat/sessions/{session_id}/continue-stream")
+def continue_chat_stream(
+    session_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Continue the latest incomplete assistant message without adding a user row."""
+    from services.rag_service import run_rag_pipeline_stream
+    from services.llm_service import _longest_boundary_overlap
+
+    session = (
+        db.query(ChatSession)
+        .filter(ChatSession.id == session_id, ChatSession.user_id == current_user.id)
+        .first()
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+
+    messages = (
+        db.query(ChatMessage)
+        .filter(ChatMessage.session_id == session_id)
+        .order_by(ChatMessage.created_at.asc())
+        .all()
+    )
+    assistant = next((item for item in reversed(messages) if item.role == "assistant"), None)
+    if not assistant:
+        raise HTTPException(status_code=409, detail="No assistant answer is available to continue")
+    try:
+        previous_details = json.loads(assistant.details_json or "{}")
+    except (TypeError, ValueError):
+        previous_details = {}
+    try:
+        previous_sources = json.loads(assistant.sources_json or "[]")
+        if not isinstance(previous_sources, list):
+            previous_sources = []
+    except (TypeError, ValueError):
+        previous_sources = []
+    if not previous_details.get("canContinue"):
+        raise HTTPException(status_code=409, detail="The latest answer is already complete")
+
+    chat_mode = previous_details.get("chatMode") or (
+        "resource_rag" if session.resource_id else "library_rag"
+    )
+    resource_id = previous_details.get("resourceId") or session.resource_id
+    if resource_id and not _get_owned_resource(db, resource_id, current_user.id):
+        raise HTTPException(status_code=404, detail="Resource not found")
+
+    prior_answer = assistant.content or ""
+    recent = messages[-10:]
+    history = [{"role": item.role, "content": item.content} for item in recent]
+    history_text = "\n".join(
+        f"{'User' if item.role == 'user' else 'Assistant'}: {item.content}"
+        for item in recent
+    )
+    continuation_prompt = (
+        "Continue the preceding assistant answer exactly where it stopped. "
+        "Do not repeat its ending, restart a section, or add a preface. "
+        "Preserve the existing Markdown structure and formatting. If the answer "
+        "stopped inside a sentence, list, table, quote, or code block, resume "
+        "that same structure directly."
+    )
+
+    def event_generator():
+        addition = ""
+        sources = list(previous_sources)
+        details = dict(previous_details)
+        terminal_sent = False
+        persisted = False
+        prefix_pending = ""
+        prefix_resolved = False
+
+        def merge_sources(incoming):
+            merged = []
+            seen = set()
+            for source in [*previous_sources, *(incoming if isinstance(incoming, list) else [])]:
+                if not isinstance(source, dict):
+                    continue
+                identity = (
+                    str(source.get("resource_id") or source.get("resource_path") or ""),
+                    str(source.get("chunk_id") or source.get("chunk_index") or ""),
+                    str(source.get("start_time") or ""),
+                    str(source.get("excerpt") or "")[:160],
+                )
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                merged.append(source)
+            return merged
+
+        try:
+            for event in run_rag_pipeline_stream(
+                user_id=current_user.id,
+                resource_id=resource_id if chat_mode == "resource_rag" else None,
+                question=continuation_prompt,
+                chat_history=history,
+                final_history_str=history_text,
+                n_results=12 if chat_mode == "resource_rag" else 5,
+                globe_on=chat_mode == "global",
+                selected_resource_ids=(
+                    []
+                    if previous_details.get("crossLibrarySearch")
+                    else previous_details.get("selectedResourceIds") or []
+                ),
+            ):
+                event_type = event.get("type")
+                if event_type == "token":
+                    content = event.get("content", "")
+                    if not prefix_resolved:
+                        prefix_pending += content
+                        overlap = _longest_boundary_overlap(prior_answer, prefix_pending)
+                        if overlap == len(prefix_pending) and len(prefix_pending) < 512:
+                            continue
+                        content = prefix_pending[overlap:]
+                        prefix_pending = ""
+                        prefix_resolved = True
+                    if content:
+                        addition += content
+                        event["content"] = content
+                        yield f"data: {json.dumps(event)}\n\n"
+                elif event_type == "sources":
+                    sources = merge_sources(event.get("sources", []))
+                    event["sources"] = sources
+                    yield f"data: {json.dumps(event)}\n\n"
+                elif event_type == "final":
+                    generated = event.get("answer", addition)
+                    overlap = _longest_boundary_overlap(prior_answer, generated)
+                    combined = prior_answer + generated[overlap:]
+                    event["answer"] = combined
+                    sources = merge_sources(event.get("sources", sources))
+                    event["sources"] = sources
+                    scope = {
+                        "chatMode": chat_mode,
+                        "resourceId": resource_id,
+                        "selectedResourceIds": previous_details.get(
+                            "selectedResourceIds", []
+                        ),
+                        "crossLibrarySearch": bool(
+                            previous_details.get("crossLibrarySearch", False)
+                        ),
+                        "globeOn": chat_mode == "global",
+                    }
+                    details = _stream_message_details(event, scope)
+                    details["continuationCount"] = int(
+                        previous_details.get("continuationCount", 0)
+                    ) + 1 + int(event.get("continuation_count", 0))
+                    _persist_stream_message(
+                        session_id=session_id,
+                        answer=combined,
+                        sources=sources,
+                        details=details,
+                        message_id=assistant.id,
                     )
-                    stream_db.add(assistant_message)
-                    stream_db.commit()
+                    persisted = True
+                    event["assistant_message_id"] = assistant.id
+                    yield f"data: {json.dumps(event)}\n\n"
+                elif event_type == "error":
+                    if addition and not persisted:
+                        details.update(
+                            {
+                                "completionStatus": "interrupted",
+                                "finishReason": event.get("finish_reason", "unknown"),
+                                "canContinue": True,
+                            }
+                        )
+                        _persist_stream_message(
+                            session_id=session_id,
+                            answer=prior_answer + addition,
+                            sources=sources,
+                            details=details,
+                            message_id=assistant.id,
+                        )
+                        persisted = True
+                    yield f"data: {json.dumps(event)}\n\n"
+                elif event_type == "metadata":
+                    yield f"data: {json.dumps(event)}\n\n"
+                elif event_type == "done":
+                    terminal_sent = True
+                    event["assistant_message_id"] = assistant.id
+                    yield f"data: {json.dumps(event)}\n\n"
+        except Exception as error:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(error)})}\n\n"
+        finally:
+            if addition and not persisted:
+                interrupted = prior_answer + addition
+                details.update(
+                    {
+                        "completionStatus": "interrupted",
+                        "finishReason": "unknown",
+                        "canContinue": True,
+                    }
+                )
+                _persist_stream_message(
+                    session_id=session_id,
+                    answer=interrupted,
+                    sources=sources,
+                    details=details,
+                    message_id=assistant.id,
+                )
+        if not terminal_sent:
+            yield f"data: {json.dumps({'type': 'done', 'chat_mode': chat_mode, 'completion_status': 'interrupted', 'finish_reason': 'unknown', 'continuation_count': details.get('continuationCount', 0), 'can_continue': True, 'assistant_message_id': assistant.id})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 

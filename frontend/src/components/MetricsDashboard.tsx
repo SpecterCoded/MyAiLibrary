@@ -28,6 +28,7 @@ import {
   formatDuration,
   formatFeatureLabel,
   formatCurrency,
+  formatUsageEntryCost,
   formatLocalDateTime,
   formatPercent,
   formatRelativeTime,
@@ -498,7 +499,10 @@ export default function MetricsDashboard() {
                         <MetricChip label="Prompt" value={formatCompactNumber(entry.prompt_tokens || 0)} />
                         <MetricChip label="Output" value={formatCompactNumber(entry.completion_tokens || 0)} />
                         <MetricChip label="Total" value={formatCompactNumber(entry.total_tokens || 0)} />
-                        <MetricChip label="Units" value={entry.unit_tokens ? ((entry.total_tokens || 0) / entry.unit_tokens).toFixed(2) : 'n/a'} />
+                        <MetricChip
+                          label="Cost"
+                          value={formatUsageEntryCost(entry)}
+                        />
                       </div>
                     </div>
                   ))}

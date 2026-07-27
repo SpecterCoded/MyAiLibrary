@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useEffect, useRef, type RefObject, type ReactNode } from 'react';
+import { useState, useEffect, useRef, type RefObject } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, Plus, PanelLeft, Share, Sparkles, BarChart2,
@@ -18,6 +18,8 @@ import { VideoPlayer } from '../FileExplorer/VideoPlayer';
 import SourceList from '../rag/SourceList';
 import InlineCitationContent from '../rag/InlineCitationContent';
 import type { RAGResponseDetails, RAGSource } from '../rag/types';
+import TypewriterMessage from './TypewriterMessage';
+import { consumeSSEStream } from '../../lib/sseStream';
 
 
 // --- TYPES ---
@@ -347,6 +349,7 @@ export default function ChatApp({ user }: ChatAppProps) {
   const [chats, setChats] = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isAnswerStreaming, setIsAnswerStreaming] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState<'newest' | 'oldest'>('newest');
   const [isGlobeOn, setIsGlobeOn] = useState(false);
@@ -357,6 +360,64 @@ export default function ChatApp({ user }: ChatAppProps) {
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [activePlayerSource, setActivePlayerSource] = useState<Source | null>(null);
+  const [isPlayerDrawerOpen, setIsPlayerDrawerOpen] = useState(false);
+  const [isDrawerMediaMounted, setIsDrawerMediaMounted] = useState(false);
+  const playerDrawerCloseFrameRef = useRef<number | null>(null);
+  const playerDrawerMediaFrameRef = useRef<number | null>(null);
+
+  const handleOpenPlayerDrawer = (source: Source) => {
+    if (playerDrawerCloseFrameRef.current !== null) {
+      cancelAnimationFrame(playerDrawerCloseFrameRef.current);
+      playerDrawerCloseFrameRef.current = null;
+    }
+    if (playerDrawerMediaFrameRef.current !== null) {
+      cancelAnimationFrame(playerDrawerMediaFrameRef.current);
+      playerDrawerMediaFrameRef.current = null;
+    }
+
+    setIsDrawerMediaMounted(false);
+    setActivePlayerSource(source);
+
+    if (isPlayerDrawerOpen) {
+      // The shell is already stationary. Give React one frame to replace the
+      // source before mounting the new hardware-backed media surface.
+      playerDrawerMediaFrameRef.current = requestAnimationFrame(() => {
+        setIsDrawerMediaMounted(true);
+        playerDrawerMediaFrameRef.current = null;
+      });
+      return;
+    }
+
+    setIsPlayerDrawerOpen(true);
+  };
+
+  const handleClosePlayerDrawer = () => {
+    if (playerDrawerMediaFrameRef.current !== null) {
+      cancelAnimationFrame(playerDrawerMediaFrameRef.current);
+      playerDrawerMediaFrameRef.current = null;
+    }
+    if (playerDrawerCloseFrameRef.current !== null) {
+      cancelAnimationFrame(playerDrawerCloseFrameRef.current);
+    }
+
+    // Remove the video compositor surface before moving the drawer. Starting
+    // the exit on the following frame prevents the player teardown from
+    // interrupting the transform animation.
+    setIsDrawerMediaMounted(false);
+    playerDrawerCloseFrameRef.current = requestAnimationFrame(() => {
+      setIsPlayerDrawerOpen(false);
+      playerDrawerCloseFrameRef.current = null;
+    });
+  };
+
+  useEffect(() => () => {
+    if (playerDrawerCloseFrameRef.current !== null) {
+      cancelAnimationFrame(playerDrawerCloseFrameRef.current);
+    }
+    if (playerDrawerMediaFrameRef.current !== null) {
+      cancelAnimationFrame(playerDrawerMediaFrameRef.current);
+    }
+  }, []);
 
   // --- Dynamic suggestion cards from user's library ---
   const [dynamicSuggestions, setDynamicSuggestions] = useState<any[] | null>(null);
@@ -790,6 +851,7 @@ export default function ChatApp({ user }: ChatAppProps) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
+    setIsAnswerStreaming(false);
     setIsGenerating(false);
   };
 
@@ -1627,6 +1689,7 @@ export default function ChatApp({ user }: ChatAppProps) {
     };
 
     const aiMsgId = (Date.now() + 1).toString();
+    const abortController = new AbortController();
 
     try {
       if (!sessionId) {
@@ -1661,8 +1724,8 @@ export default function ChatApp({ user }: ChatAppProps) {
       saveChatsToStorage(updatedChats);
       setCurrentView('chat');
       setIsGenerating(true);
+      setIsAnswerStreaming(true);
 
-      const abortController = new AbortController();
       abortControllerRef.current = abortController;
 
       // Gather relevant structured history to feed the backend
@@ -1721,30 +1784,16 @@ export default function ChatApp({ user }: ChatAppProps) {
         throw new Error("Streaming response body is unavailable.");
       }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let finalPayload: any = null;
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        const events = buffer.split("\n\n");
-        buffer = events.pop() || "";
-
-        for (const eventChunk of events) {
-          const dataLine = eventChunk.split("\n").find(l => l.startsWith("data: "));
-          if (!dataLine) continue;
-          const payload = JSON.parse(dataLine.slice(6));
-
+      const result = await consumeSSEStream(response.body, (payload) => {
+          if (payload.type === "final" || payload.type === "error") {
+            setIsAnswerStreaming(false);
+          }
           if (payload.type === "token") {
             setChats(prev => prev.map(c => {
               if (c.id !== sessionId) return c;
               const msgs = c.messages.map(m => {
                 if (m.id !== aiMsgId) return m;
-                return { ...m, content: m.content + (payload.content || "") };
+                return { ...m, content: m.content + String(payload.content || "") };
               });
               return { ...c, messages: msgs };
             }));
@@ -1753,17 +1802,13 @@ export default function ChatApp({ user }: ChatAppProps) {
               if (c.id !== sessionId) return c;
               const msgs = c.messages.map(m => {
                 if (m.id !== aiMsgId) return m;
-                return { ...m, sources: payload.sources || m.sources };
+                return { ...m, sources: (payload.sources as Source[] | undefined) || m.sources };
               });
               return { ...c, messages: msgs };
             }));
-          } else if (payload.type === "final") {
-            finalPayload = payload;
-          } else if (payload.type === "error") {
-            throw new Error(payload.message || "Streaming request failed.");
           }
-        }
-      }
+      });
+      const finalPayload = result.final as any;
 
       setChats(prev => {
         const finalizedChats = prev.map(c => {
@@ -1785,6 +1830,12 @@ export default function ChatApp({ user }: ChatAppProps) {
                 processingTimeMs: finalPayload.processing_time_ms,
                 modulesExecuted: finalPayload.modules_executed,
                 reasoning: finalPayload.reasoning,
+                chatMode: finalPayload.chat_mode,
+                finishReason: finalPayload.finish_reason || 'stop',
+                completionStatus: finalPayload.completion_status || 'complete',
+                continuationCount: finalPayload.continuation_count,
+                canContinue: finalPayload.can_continue,
+                assistantMessageId: finalPayload.assistant_message_id,
               } : m.details,
             };
           });
@@ -1804,8 +1855,12 @@ export default function ChatApp({ user }: ChatAppProps) {
           const updated = prev.map(c => {
             if (c.id !== sessionId) return c;
             const msgs = c.messages.map(m => {
-              if (m.id !== aiMsgId || m.content) return m;
-              return { ...m, content: "Generation stopped." };
+              if (m.id !== aiMsgId) return m;
+              return {
+                ...m,
+                content: m.content || "Generation stopped.",
+                details: { ...m.details, completionStatus: 'stopped', canContinue: Boolean(m.content) },
+              };
             });
             return { ...c, messages: msgs };
           });
@@ -1828,17 +1883,99 @@ export default function ChatApp({ user }: ChatAppProps) {
           if (c.id !== sessionId) return c;
           const msgs = c.messages.map(m => {
             if (m.id !== aiMsgId) return m;
-            return { ...m, content: `Error: ${e.message}` };
+            return {
+              ...m,
+              content: m.content || `Error: ${e.message}`,
+              details: { ...m.details, completionStatus: 'interrupted', canContinue: Boolean(m.content) },
+            };
           });
-          return { ...c, messages: msgs, preview: `Error: ${e.message}` };
+          const preserved = msgs.find(m => m.id === aiMsgId)?.content || `Error: ${e.message}`;
+          return { ...c, messages: msgs, preview: preserved };
         });
         saveChatsToStorage(finalizedChats);
         return finalizedChats;
       });
     } finally {
+      setIsAnswerStreaming(false);
       setIsGenerating(false);
+      if (abortControllerRef.current === abortController) {
+        abortControllerRef.current = null;
+      }
       if (abortControllerRef.current === null) {
         playNotificationSound();
+      }
+    }
+  };
+
+  const handleContinueAnswer = async (msgId: string) => {
+    if (isGenerating || !activeSessionId) return;
+    const token = localStorage.getItem('access_token');
+    if (!token) return;
+    setIsGenerating(true);
+    setIsAnswerStreaming(true);
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+    try {
+      const response = await fetch(`/chat/sessions/${activeSessionId}/continue-stream`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+        signal: abortController.signal,
+      });
+      if (!response.ok) throw new Error(`Continuation failed with status ${response.status}`);
+      if (!response.body) throw new Error('Streaming response body is unavailable.');
+      const result = await consumeSSEStream(response.body, (payload) => {
+        if (payload.type === 'final' || payload.type === 'error') {
+          setIsAnswerStreaming(false);
+        }
+        if (payload.type !== 'token') return;
+        setChats(prev => prev.map(chat => chat.id !== activeSessionId ? chat : {
+          ...chat,
+          messages: chat.messages.map(message => message.id !== msgId ? message : {
+            ...message,
+            content: message.content + String(payload.content || ''),
+          }),
+        }));
+      });
+      const finalPayload = result.final as any;
+      setChats(prev => {
+        const updated = prev.map(chat => chat.id !== activeSessionId ? chat : {
+          ...chat,
+          messages: chat.messages.map(message => message.id !== msgId ? message : {
+            ...message,
+            content: finalPayload.answer || message.content,
+            sources: finalPayload.sources || message.sources,
+            details: {
+              ...message.details,
+              chatMode: finalPayload.chat_mode,
+              finishReason: finalPayload.finish_reason || 'stop',
+              completionStatus: finalPayload.completion_status || 'complete',
+              continuationCount: finalPayload.continuation_count,
+              canContinue: Boolean(finalPayload.can_continue),
+              assistantMessageId: finalPayload.assistant_message_id,
+            },
+          }),
+        });
+        saveChatsToStorage(updated);
+        return updated;
+      });
+    } catch (error: any) {
+      if (error?.name !== 'AbortError') showToast(error?.message || 'The answer was interrupted.');
+      setChats(prev => prev.map(chat => chat.id !== activeSessionId ? chat : {
+        ...chat,
+        messages: chat.messages.map(message => message.id !== msgId ? message : {
+          ...message,
+          details: {
+            ...message.details,
+            completionStatus: error?.name === 'AbortError' ? 'stopped' : 'interrupted',
+            canContinue: true,
+          },
+        }),
+      }));
+    } finally {
+      setIsAnswerStreaming(false);
+      setIsGenerating(false);
+      if (abortControllerRef.current === abortController) {
+        abortControllerRef.current = null;
       }
     }
   };
@@ -1873,9 +2010,10 @@ export default function ChatApp({ user }: ChatAppProps) {
 
     saveChatsToStorage(updatedChats);
     setIsGenerating(true);
+    setIsAnswerStreaming(true);
 
+    const abortController = new AbortController();
     try {
-      const abortController = new AbortController();
       abortControllerRef.current = abortController;
 
       showToast('Regenerating campaign recommendation...');
@@ -1967,7 +2105,11 @@ export default function ChatApp({ user }: ChatAppProps) {
       });
       saveChatsToStorage(finalizedChats);
     } finally {
+      setIsAnswerStreaming(false);
       setIsGenerating(false);
+      if (abortControllerRef.current === abortController) {
+        abortControllerRef.current = null;
+      }
       playNotificationSound();
     }
   };
@@ -2235,11 +2377,13 @@ export default function ChatApp({ user }: ChatAppProps) {
                 key="chat"
                 session={activeSession}
                 isGenerating={isGenerating}
+                isAnswerStreaming={isAnswerStreaming}
                 onBack={() => setCurrentView('home')}
                 messagesEndRef={messagesEndRef}
                 onToggleReaction={handleToggleReaction}
                 reactions={reactions}
                 onRegenerate={handleRegenerate}
+                onContinue={handleContinueAnswer}
                 onCopyText={handleCopyText}
                 onExportMsgMarkdown={(msg, sessionTitle) => {
                   const md = `# ${sessionTitle} - Recommendation Report\nDate: ${new Date().toLocaleDateString()}\n\n${msg.content}`;
@@ -2259,7 +2403,7 @@ export default function ChatApp({ user }: ChatAppProps) {
                   `;
                   exportToPdf(sessionTitle || "Grounded Recommendation", html);
                 }}
-                onOpenPlayer={(src) => setActivePlayerSource(src)}
+                onOpenPlayer={handleOpenPlayerDrawer}
                 userAvatarUrl={userAvatarUrl}
                 userInitial={userInitial}
                 displayName={displayName}
@@ -2455,7 +2599,7 @@ export default function ChatApp({ user }: ChatAppProps) {
                     e.preventDefault();
                     handleSendMessage(inputValue);
                   }}
-                  className="bg-white rounded-full border border-transparent shadow-[0_4px_24px_rgb(0,0,0,0.06)] p-2.5 flex items-center gap-3 transition-shadow duration-300 hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] backdrop-blur-xl bg-white/95"
+                  className="chat-composer-shell bg-white rounded-full border shadow-[0_4px_24px_rgb(0,0,0,0.06)] p-2.5 flex items-center gap-3 transition-shadow duration-300 hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] backdrop-blur-xl bg-white/95"
                 >
                   <button
                     type="button"
@@ -2509,7 +2653,7 @@ export default function ChatApp({ user }: ChatAppProps) {
                     )}
                   </button>
 
-                  {isGenerating ? (
+                  {isAnswerStreaming ? (
                     <button
                       type="button"
                       onClick={handleStopGeneration}
@@ -2521,8 +2665,8 @@ export default function ChatApp({ user }: ChatAppProps) {
                   ) : (
                     <button
                       type="submit"
-                      disabled={inputValue.trim().length === 0}
-                      className={`flex items-center justify-center w-11 h-11 rounded-full transition-all duration-300 shrink-0 ${inputValue.trim().length > 0
+                      disabled={isGenerating || inputValue.trim().length === 0}
+                      className={`flex items-center justify-center w-11 h-11 rounded-full transition-all duration-300 shrink-0 ${!isGenerating && inputValue.trim().length > 0
                         ? 'bg-black text-white shadow-md scale-100 cursor-pointer hover:bg-gray-800'
                         : 'bg-gray-50 text-gray-400 scale-95 cursor-not-allowed'
                         }`}
@@ -2839,21 +2983,36 @@ export default function ChatApp({ user }: ChatAppProps) {
         </AnimatePresence>
 
         {/* Player Slide-over Drawer */}
-        <AnimatePresence>
-          {activePlayerSource && (
+        <AnimatePresence
+          onExitComplete={() => {
+            setActivePlayerSource(null);
+            setIsDrawerMediaMounted(false);
+          }}
+        >
+          {isPlayerDrawerOpen && activePlayerSource && (
             <motion.div
-              initial={{ x: "100%", opacity: 0 }}
-              animate={{ x: 0, opacity: 1 }}
-              exit={{ x: "100%", opacity: 0 }}
-              transition={{ type: "spring", damping: 25, stiffness: 200 }}
-              className="fixed top-0 right-0 h-full w-[400px] z-[100] bg-white border-l border-gray-200 shadow-[-10px_0_40px_rgba(0,0,0,0.1)] flex flex-col overflow-hidden"
+              variants={{
+                closed: { x: 420 },
+                open: { x: 0 },
+              }}
+              initial="closed"
+              animate="open"
+              exit="closed"
+              transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+              onAnimationComplete={(definition) => {
+                if (definition === 'open') {
+                  setIsDrawerMediaMounted(true);
+                }
+              }}
+              className="fixed top-0 right-0 h-full w-[400px] z-[100] bg-white border-l border-gray-200 shadow-[-10px_0_40px_rgba(0,0,0,0.1)] flex flex-col overflow-hidden will-change-transform"
+              style={{ backfaceVisibility: 'hidden' }}
             >
               <div className="flex items-center justify-between p-4 border-b border-gray-200/50">
                 <h3 className="font-semibold text-gray-800 text-sm truncate pr-4">
                   {activePlayerSource.resource_title}
                 </h3>
                 <button
-                  onClick={() => setActivePlayerSource(null)}
+                  onClick={handleClosePlayerDrawer}
                   className="p-1.5 rounded-full hover:bg-gray-100/80 text-gray-500 hover:text-gray-900 transition-colors"
                 >
                   <X size={18} />
@@ -2865,11 +3024,17 @@ export default function ChatApp({ user }: ChatAppProps) {
                 /\.(mp4|mov|avi|mkv|webm|m4v)(?:$|[?#\s])/i.test(
                   `${activePlayerSource.resource_title || ''} ${activePlayerSource.resource_path || ''}`,
                 ) ? (
-                  <ChatDrawerVideoPlayer
-                    key={`${activePlayerSource.resource_id}-${activePlayerSource.timestamp ?? 0}`}
-                    resourceId={activePlayerSource.resource_id}
-                    timestamp={activePlayerSource.timestamp}
-                  />
+                  isDrawerMediaMounted ? (
+                    <ChatDrawerVideoPlayer
+                      key={`${activePlayerSource.resource_id}-${activePlayerSource.timestamp ?? 0}`}
+                      resourceId={activePlayerSource.resource_id}
+                      timestamp={activePlayerSource.timestamp}
+                    />
+                  ) : (
+                    <div className="rounded-xl overflow-hidden border border-gray-200/50 bg-slate-950 aspect-video flex items-center justify-center w-full">
+                      <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
+                    </div>
+                  )
                 ) : (
                   <div className="rounded-xl p-6 shadow-sm border border-gray-200/50 bg-gray-50/50 flex flex-col items-center justify-center text-center">
                     <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm mb-3">
@@ -3274,84 +3439,17 @@ function HomeView({ displayName, onSelectSuggestion, suggestions }: {
   );
 }
 
-/* --- TYPEWRITER STREAMING MESSAGE COMPONENT --- */
-function TypewriterMessage({
-  content,
-  msgId,
-  isLatest,
-  speed = 15,
-  formatTextContent
-}: {
-  content: string;
-  msgId: string;
-  isLatest: boolean;
-  speed?: number;
-  formatTextContent: (text: string) => ReactNode
-}) {
-  const [displayedText, setDisplayedText] = useState(() => {
-    if (!isLatest) return content;
-    const completed = sessionStorage.getItem(`streamed-${msgId}`);
-    return completed ? content : '';
-  });
-
-  const contentRef = useRef(content);
-  contentRef.current = content;
-
-  useEffect(() => {
-    if (!isLatest) {
-      setDisplayedText(content);
-      return;
-    }
-
-    const completed = sessionStorage.getItem(`streamed-${msgId}`);
-    if (completed) {
-      setDisplayedText(content);
-      return;
-    }
-
-    let currentIdx = 0;
-    setDisplayedText('');
-
-    const interval = setInterval(() => {
-      const words = contentRef.current.split(' ');
-      if (currentIdx < words.length) {
-        setDisplayedText((prev) => {
-          const displayed = prev ? prev.split(' ') : [];
-          const next = words.slice(0, Math.max(displayed.length, currentIdx + 1));
-          return next.join(' ');
-        });
-        currentIdx++;
-      } else {
-        clearInterval(interval);
-        try {
-          sessionStorage.setItem(`streamed-${msgId}`, 'true');
-        } catch (e) {
-          console.error(e);
-        }
-      }
-    }, speed);
-
-    return () => {
-      clearInterval(interval);
-    };
-  }, [msgId, isLatest, speed]);
-
-  return (
-    <div className="prose prose-slate max-w-none transition-all duration-300">
-      {formatTextContent(displayedText)}
-    </div>
-  );
-}
-
 /* --- CHAT VIEW (ACTIVE CONVERSATION) --- */
 function ChatView({
   session,
   isGenerating,
+  isAnswerStreaming,
   onBack,
   messagesEndRef,
   onToggleReaction,
   reactions,
   onRegenerate,
+  onContinue,
   onCopyText,
   onExportMsgMarkdown,
   onExportMsgPdf,
@@ -3362,11 +3460,13 @@ function ChatView({
 }: {
   session: ChatSession | null;
   isGenerating: boolean;
+  isAnswerStreaming: boolean;
   onBack: () => void;
   messagesEndRef: RefObject<HTMLDivElement | null>;
   onToggleReaction: (msgId: string, type: 'like' | 'dislike') => void;
   reactions: Record<string, 'like' | 'dislike'>;
   onRegenerate: (msgId: string) => void;
+  onContinue: (msgId: string) => void;
   onCopyText: (content: string) => void;
   onExportMsgMarkdown: (msg: Message, sessionTitle: string) => void;
   onExportMsgPdf: (msg: Message, sessionTitle: string) => void;
@@ -3468,10 +3568,27 @@ function ChatView({
                       <TypewriterMessage
                         content={msg.content}
                         msgId={msg.id}
-                        isLatest={isGenerating && session.messages[session.messages.length - 1].id === msg.id}
+                        isLatest={isAnswerStreaming && session.messages[session.messages.length - 1].id === msg.id}
                         formatTextContent={(text) => formatTextContent(text, msg.sources)}
                       />
                     </div>
+                    {(msg.details?.completionStatus === 'interrupted' || msg.details?.completionStatus === 'stopped') && (
+                      <p className={`mt-3 text-xs font-medium ${isDarkMode ? 'text-amber-300/80' : 'text-amber-600'}`}>
+                        {msg.details.completionStatus === 'stopped' ? 'Answer stopped' : 'Answer interrupted'} — partial response preserved.
+                      </p>
+                    )}
+
+                    {msg.details?.canContinue && session.messages[session.messages.length - 1]?.id === msg.id && (
+                      <button
+                        type="button"
+                        disabled={isGenerating}
+                        onClick={() => onContinue(msg.id)}
+                        className={`mt-4 inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold transition-colors disabled:opacity-50 ${isDarkMode ? 'bg-indigo-400/15 text-indigo-200 hover:bg-indigo-400/25' : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100'}`}
+                      >
+                        <RefreshCw size={13} />
+                        Continue answer
+                      </button>
+                    )}
 
                     {msg.sources && msg.sources.length > 0 && (
                       <SourceList sources={msg.sources} onOpenSource={onOpenPlayer} theme={isDarkMode ? "dark" : "light"} />

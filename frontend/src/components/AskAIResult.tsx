@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
+import TypewriterMessage from './chat/TypewriterMessage';
 
 // ---------- Types ----------
 interface CitationSource {
@@ -119,56 +120,6 @@ const HOME_MARKDOWN_COMPONENTS: Components = {
   ),
 };
 
-// ---------- Typewriter hook ----------
-// Returns `rendered` (for ReactMarkdown, updates ~every 150ms) and `done`.
-// Internally advances characters at `speed` ms but only flushes to `rendered`
-// when either enough chars accumulated or a natural pause (newline / punctuation)
-// is hit — this keeps markdown re-parsing infrequent and avoids the "I" flicker.
-function useTypewriter(text: string, speed: number = 14) {
-  const [rendered, setRendered] = useState('');
-  const [done, setDone] = useState(false);
-  const textRef = useRef(text);
-  const bufferRef = useRef('');
-
-  useEffect(() => {
-    if (textRef.current === text && rendered) return;
-    textRef.current = text;
-    setRendered('');
-    setDone(false);
-    bufferRef.current = '';
-    if (!text) return;
-
-    let i = 0;
-    const FLUSH_INTERVAL = 150; // ms between ReactMarkdown re-parses
-    let lastFlush = Date.now();
-
-    const interval = setInterval(() => {
-      i++;
-      bufferRef.current = text.slice(0, i);
-
-      const now = Date.now();
-      const char = text[i - 1] || '';
-      const isPause = /[\n\r.!?;:,]/.test(char);
-      const enoughTime = now - lastFlush >= FLUSH_INTERVAL;
-
-      if (isPause || enoughTime || i >= text.length) {
-        setRendered(bufferRef.current);
-        lastFlush = now;
-      }
-
-      if (i >= text.length) {
-        clearInterval(interval);
-        setRendered(text); // final flush — guaranteed up-to-date
-        setDone(true);
-      }
-    }, speed);
-
-    return () => clearInterval(interval);
-  }, [text, speed]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  return { displayed: rendered, done };
-}
-
 // ---------- Main component ----------
 export default function AskAIResult({ query, submissionId, onClose, onLoadingChange }: AskAIResultProps) {
   const [answer, setAnswer] = useState('');
@@ -177,11 +128,15 @@ export default function AskAIResult({ query, submissionId, onClose, onLoadingCha
   const [error, setError] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const latestRequestIdRef = useRef(0);
+  const typewriterCloseTimerRef = useRef<number | null>(null);
+  const [typewriterStreaming, setTypewriterStreaming] = useState(false);
   const onLoadingChangeRef = useRef(onLoadingChange);
-  onLoadingChangeRef.current = onLoadingChange;
 
   const cleanAnswer = stripHomeCitations(answer);
-  const { displayed: typedAnswer, done: typingDone } = useTypewriter(cleanAnswer, 14);
+
+  useEffect(() => {
+    onLoadingChangeRef.current = onLoadingChange;
+  }, [onLoadingChange]);
 
   useEffect(() => {
     const trimmedQuery = query.trim();
@@ -191,11 +146,17 @@ export default function AskAIResult({ query, submissionId, onClose, onLoadingCha
     const requestId = latestRequestIdRef.current + 1;
     latestRequestIdRef.current = requestId;
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     onLoadingChangeRef.current?.(true);
     setError(null);
     setAnswer('');
     setSources([]);
+    setTypewriterStreaming(false);
+    if (typewriterCloseTimerRef.current !== null) {
+      window.clearTimeout(typewriterCloseTimerRef.current);
+      typewriterCloseTimerRef.current = null;
+    }
 
     const fetchAnswer = async () => {
       try {
@@ -218,8 +179,16 @@ export default function AskAIResult({ query, submissionId, onClose, onLoadingCha
         const data = await res.json();
         if (controller.signal.aborted || latestRequestIdRef.current !== requestId) return;
 
-        setAnswer(data.answer ?? '');
+        const nextAnswer = data.answer ?? '';
+        setAnswer(nextAnswer);
         setSources(data.sources ?? []);
+        if (nextAnswer) {
+          setTypewriterStreaming(true);
+          typewriterCloseTimerRef.current = window.setTimeout(() => {
+            setTypewriterStreaming(false);
+            typewriterCloseTimerRef.current = null;
+          }, 50);
+        }
       } catch (e: unknown) {
         if (controller.signal.aborted || latestRequestIdRef.current !== requestId) return;
 
@@ -234,7 +203,13 @@ export default function AskAIResult({ query, submissionId, onClose, onLoadingCha
     };
 
     void fetchAnswer();
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      if (typewriterCloseTimerRef.current !== null) {
+        window.clearTimeout(typewriterCloseTimerRef.current);
+        typewriterCloseTimerRef.current = null;
+      }
+    };
   }, [query, submissionId]);
 
   // Copy answer
@@ -375,7 +350,7 @@ export default function AskAIResult({ query, submissionId, onClose, onLoadingCha
               className="lg:col-span-2 max-h-[350px] overflow-y-auto pr-2 space-y-2.5 min-w-0"
               style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(148,163,184,.25) transparent' }}
             >
-              {loading && !typedAnswer ? (
+              {loading && !cleanAnswer ? (
                 <div className="space-y-2.5 animate-pulse">
                   {[100, 85, 92, 70].map((w, i) => (
                     <div key={i} className="h-3.5 rounded-full bg-slate-100" style={{ width: `${w}%` }} />
@@ -397,37 +372,21 @@ export default function AskAIResult({ query, submissionId, onClose, onLoadingCha
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="home-ask-ai-markdown">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={HOME_MARKDOWN_COMPONENTS}>
-                          {typedAnswer}
-                        </ReactMarkdown>
+                        <TypewriterMessage
+                          content={cleanAnswer}
+                          msgId={`home-ask-ai-${submissionId}`}
+                          isLatest={typewriterStreaming}
+                          speed={16}
+                          formatTextContent={(text) => (
+                            <ReactMarkdown remarkPlugins={[remarkGfm]} components={HOME_MARKDOWN_COMPONENTS}>
+                              {text}
+                            </ReactMarkdown>
+                          )}
+                        />
                       </div>
                     </div>
                   </motion.div>
 
-                  {/* Chunk excerpt cards — appear after answer finishes typing */}
-                  {false && typingDone && sources.map((src, i) => {
-                    return (
-                      <div
-                        key={`chunk-${src.resource_id}-${src.chunk_index}`}
-                        className="bg-white border border-slate-200/50 rounded-xl p-3 flex items-start gap-3.5 shadow-sm"
-                        style={{
-                          animation: 'chunkFadeIn 0.4s ease both',
-                          animationDelay: `${i * 120}ms`,
-                        }}
-                      >
-                        <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.286L13 21l-2.286-6.857L5 12l5.714-2.286L13 3z" />
-                          </svg>
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-[13px] font-medium text-slate-600 leading-relaxed whitespace-pre-wrap">
-                            {src.excerpt}
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })}
                 </>
               )}
             </div>
@@ -495,11 +454,11 @@ export default function AskAIResult({ query, submissionId, onClose, onLoadingCha
                                 event.stopPropagation();
                                 openSource(src);
                               }}
-                              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200/70 bg-slate-50 text-slate-500 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600 dark:border-white/10 dark:bg-slate-900/50 dark:text-slate-300 dark:hover:border-indigo-400/40 dark:hover:bg-indigo-500/15 dark:hover:text-indigo-200"
+                              className="group flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-slate-200/70 bg-slate-50 text-slate-500 shadow-none transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600 hover:shadow-sm active:translate-y-0 active:scale-95 dark:border-white/10 dark:bg-slate-900/50 dark:text-slate-300 dark:hover:border-indigo-400/40 dark:hover:bg-indigo-500/15 dark:hover:text-indigo-200"
                               title={`Open ${title}`}
                               aria-label={`Open ${title}`}
                             >
-                              <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24">
+                              <svg className="h-4 w-4 transition-transform duration-200 ease-out group-hover:translate-x-0.5 group-hover:-translate-y-0.5" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M7 17L17 7M10 7h7v7" />
                               </svg>
                             </button>

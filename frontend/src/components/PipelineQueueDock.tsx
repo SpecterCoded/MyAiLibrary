@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { logActivity } from '../utils/activityLogger';
 import {
@@ -31,6 +31,7 @@ interface QueueJob {
   error_message: string | null;
   progress?: number;
   current_stage?: string | null;
+  progress_mode?: "determinate" | "indeterminate" | "terminal";
   attempt_count?: number;
   retryable?: boolean;
   blocked_by_job_id?: string | null;
@@ -41,7 +42,6 @@ interface QueueJob {
 
 const STATUS_MAP: Record<string, {
   label: string;
-  percent: number;
   gradient: string;
   badgeBg: string;
   badgeText: string;
@@ -49,7 +49,6 @@ const STATUS_MAP: Record<string, {
 }> = {
   transcribing: {
     label: "Transcribing",
-    percent: 35,
     gradient: "from-amber-400 to-yellow-400",
     badgeBg: "bg-amber-50 dark:bg-amber-500/10",
     badgeText: "text-amber-600 dark:text-amber-400",
@@ -57,7 +56,6 @@ const STATUS_MAP: Record<string, {
   },
   chaptering: {
     label: "Chaptering",
-    percent: 58,
     gradient: "from-orange-400 to-amber-400",
     badgeBg: "bg-orange-50 dark:bg-orange-500/10",
     badgeText: "text-orange-600 dark:text-orange-400",
@@ -65,7 +63,6 @@ const STATUS_MAP: Record<string, {
   },
   summarizing: {
     label: "Summarizing",
-    percent: 45,
     gradient: "from-yellow-400 to-orange-400",
     badgeBg: "bg-yellow-50 dark:bg-yellow-500/10",
     badgeText: "text-yellow-600 dark:text-yellow-400",
@@ -73,7 +70,6 @@ const STATUS_MAP: Record<string, {
   },
   "sub-chaptering": {
     label: "Sub-Chaptering",
-    percent: 72,
     gradient: "from-teal-400 to-emerald-400",
     badgeBg: "bg-teal-50 dark:bg-teal-500/10",
     badgeText: "text-teal-600 dark:text-teal-400",
@@ -81,7 +77,6 @@ const STATUS_MAP: Record<string, {
   },
   subchaptering: {
     label: "Sub-Chaptering",
-    percent: 72,
     gradient: "from-teal-400 to-emerald-400",
     badgeBg: "bg-teal-50 dark:bg-teal-500/10",
     badgeText: "text-teal-600 dark:text-teal-400",
@@ -89,7 +84,6 @@ const STATUS_MAP: Record<string, {
   },
   indexing: {
     label: "Indexing",
-    percent: 50,
     gradient: "from-cyan-400 to-blue-400",
     badgeBg: "bg-cyan-50 dark:bg-cyan-500/10",
     badgeText: "text-cyan-600 dark:text-cyan-400",
@@ -97,7 +91,6 @@ const STATUS_MAP: Record<string, {
   },
   embedding: {
     label: "Embedding",
-    percent: 88,
     gradient: "from-indigo-400 to-cyan-400",
     badgeBg: "bg-indigo-50 dark:bg-indigo-500/10",
     badgeText: "text-indigo-600 dark:text-indigo-400",
@@ -105,7 +98,6 @@ const STATUS_MAP: Record<string, {
   },
   ready: {
     label: "Ready",
-    percent: 100,
     gradient: "from-emerald-400 to-green-400",
     badgeBg: "bg-emerald-50 dark:bg-emerald-500/10",
     badgeText: "text-emerald-600 dark:text-emerald-400",
@@ -113,7 +105,6 @@ const STATUS_MAP: Record<string, {
   },
   completed: {
     label: "Ready",
-    percent: 100,
     gradient: "from-emerald-400 to-green-400",
     badgeBg: "bg-emerald-50 dark:bg-emerald-500/10",
     badgeText: "text-emerald-600 dark:text-emerald-400",
@@ -121,7 +112,6 @@ const STATUS_MAP: Record<string, {
   },
   retryingConnection: {
     label: "Retrying connection",
-    percent: 48,
     gradient: "from-amber-400 to-yellow-400",
     badgeBg: "bg-amber-50 dark:bg-amber-500/10",
     badgeText: "text-amber-600 dark:text-amber-400",
@@ -129,7 +119,6 @@ const STATUS_MAP: Record<string, {
   },
   waitingForConnection: {
     label: "Waiting for connection",
-    percent: 50,
     gradient: "from-amber-400 to-orange-400",
     badgeBg: "bg-amber-50 dark:bg-amber-500/10",
     badgeText: "text-amber-600 dark:text-amber-400",
@@ -137,7 +126,6 @@ const STATUS_MAP: Record<string, {
   },
   failed: {
     label: "Failed",
-    percent: 100,
     gradient: "from-red-400 to-rose-400",
     badgeBg: "bg-red-50 dark:bg-red-500/10",
     badgeText: "text-red-600 dark:text-red-400",
@@ -145,7 +133,6 @@ const STATUS_MAP: Record<string, {
   },
   paused: {
     label: "Paused",
-    percent: 50,
     gradient: "from-slate-400 to-slate-300",
     badgeBg: "bg-slate-50 dark:bg-slate-500/10",
     badgeText: "text-slate-600 dark:text-slate-400",
@@ -153,7 +140,6 @@ const STATUS_MAP: Record<string, {
   },
   queued: {
     label: "Queued",
-    percent: 8,
     gradient: "from-slate-400 to-slate-300",
     badgeBg: "bg-slate-50 dark:bg-slate-500/10",
     badgeText: "text-slate-600 dark:text-slate-400",
@@ -161,7 +147,6 @@ const STATUS_MAP: Record<string, {
   },
   documentIntelligenceQueued: {
     label: "Queued",
-    percent: 12,
     gradient: "from-violet-400 to-indigo-400",
     badgeBg: "bg-violet-50 dark:bg-violet-500/10",
     badgeText: "text-violet-600 dark:text-violet-400",
@@ -169,7 +154,6 @@ const STATUS_MAP: Record<string, {
   },
   documentIntelligenceProcessing: {
     label: "Analyzing",
-    percent: 82,
     gradient: "from-violet-400 to-indigo-400",
     badgeBg: "bg-violet-50 dark:bg-violet-500/10",
     badgeText: "text-violet-600 dark:text-violet-400",
@@ -177,7 +161,6 @@ const STATUS_MAP: Record<string, {
   },
   documentIntelligenceReady: {
     label: "Ready",
-    percent: 100,
     gradient: "from-violet-400 to-indigo-400",
     badgeBg: "bg-violet-50 dark:bg-violet-500/10",
     badgeText: "text-violet-600 dark:text-violet-400",
@@ -185,7 +168,6 @@ const STATUS_MAP: Record<string, {
   },
   transcriptOnlyQueued: {
     label: "Queued",
-    percent: 12,
     gradient: "from-amber-400 to-orange-400",
     badgeBg: "bg-amber-50 dark:bg-amber-500/10",
     badgeText: "text-amber-600 dark:text-amber-400",
@@ -193,7 +175,6 @@ const STATUS_MAP: Record<string, {
   },
   transcriptOnlyProcessing: {
     label: "Regenerating Transcript",
-    percent: 52,
     gradient: "from-amber-400 to-orange-400",
     badgeBg: "bg-amber-50 dark:bg-amber-500/10",
     badgeText: "text-amber-600 dark:text-amber-400",
@@ -201,7 +182,6 @@ const STATUS_MAP: Record<string, {
   },
   transcriptOnlyReady: {
     label: "Transcript Ready",
-    percent: 100,
     gradient: "from-emerald-400 to-green-400",
     badgeBg: "bg-emerald-50 dark:bg-emerald-500/10",
     badgeText: "text-emerald-600 dark:text-emerald-400",
@@ -285,6 +265,7 @@ export const PipelineQueueDock: React.FC = () => {
   const [jobs, setJobs] = useState<QueueJob[]>([]);
   const [isOpen, setIsOpen] = useState(true);
   const [visible, setVisible] = useState(false);
+  const progressByJobRef = useRef<Record<string, number>>({});
 
   const [stopped, setStopped] = useState(false);
 
@@ -299,7 +280,13 @@ export const PipelineQueueDock: React.FC = () => {
       if (res.status === 401) { setStopped(true); return; }
       if (res.ok) {
         const data = await res.json();
-        const nextJobs = dedupeQueueJobs(data);
+        const nextJobs = dedupeQueueJobs(data).map((job) => {
+          const incoming = Math.max(0, Math.min(100, Number(job.progress ?? 0)));
+          const previous = progressByJobRef.current[job.job_id] ?? 0;
+          const progress = job.job_status === "completed" ? 100 : Math.max(previous, incoming);
+          progressByJobRef.current[job.job_id] = progress;
+          return { ...job, progress };
+        });
         setJobs(nextJobs);
         if (nextJobs.length > 0) {
           setVisible(true);
@@ -438,6 +425,8 @@ export const PipelineQueueDock: React.FC = () => {
                         const isActive = job.job_status === "queued" || job.job_status === "waiting" || isConnectionRetrying || isConnectionWaiting || job.job_status === "processing";
                         const isFailed = job.job_status === "failed";
                         const isPaused = job.job_status === "paused";
+                        const authoritativeProgress = Math.max(0, Math.min(100, job.progress ?? 0));
+                        const isIndeterminate = job.progress_mode === "indeterminate" && isActive;
 
                         return (
                           <motion.div
@@ -537,11 +526,19 @@ export const PipelineQueueDock: React.FC = () => {
                             {/* Progress bar */}
                             <div className="mt-3 h-[5px] rounded-full bg-slate-200/60 dark:bg-white/[0.06] overflow-hidden">
                               <motion.div
-                                className={`h-full rounded-full bg-gradient-to-r ${status.gradient}`}
+                                className={`relative h-full overflow-hidden rounded-full bg-gradient-to-r ${isFailed ? "from-red-500 to-rose-400" : status.gradient}`}
                                 initial={{ width: 0 }}
-                                animate={{ width: ((job.progress || status.percent) + "%") }}
+                                animate={{ width: `${authoritativeProgress}%` }}
                                 transition={{ duration: 0.6, ease: "easeOut" }}
-                              />
+                              >
+                                {isIndeterminate && (
+                                  <motion.span
+                                    className="absolute inset-y-0 w-1/2 bg-gradient-to-r from-transparent via-white/70 to-transparent"
+                                    animate={{ x: ["-120%", "240%"] }}
+                                    transition={{ duration: 1.25, repeat: Infinity, ease: "linear" }}
+                                  />
+                                )}
+                              </motion.div>
                             </div>
                           </motion.div>
                         );

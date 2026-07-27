@@ -196,10 +196,12 @@ class QueueWorker:
                         knowledge_status = None
                         if job_type == "reindex":
                             from services.processing_service import reindex_resource
-                            reindex_resource(job.resource_id)
+                            reindex_resource(job.resource_id, job.id)
                         elif job_type == "document_intelligence":
                             from services.document_intelligence_service import run_document_intelligence
-                            run_document_intelligence(job.resource_id)
+                            intelligence_status = run_document_intelligence(job.resource_id, job.id)
+                            if intelligence_status == "failed":
+                                raise RuntimeError("Document intelligence failed")
                         elif job_type == "knowledge_generation":
                             from services.knowledge_service import run_knowledge_pipeline
                             knowledge_status = run_knowledge_pipeline(job.resource_id, job.id)
@@ -228,6 +230,9 @@ class QueueWorker:
                         # If we got here, processing succeeded
                         if job:
                             job.status = "completed"
+                            job.progress = 100
+                            job.current_stage = "complete"
+                            job.heartbeat_at = utc_now()
                             job.finished_at = utc_now()
                             job.error_message = None
                             job.next_retry_at = None
@@ -596,6 +601,7 @@ def get_queue_status(db, current_user_id: str = None):
         if job.status in ["queued", "waiting", "retrying_connection", "waiting_for_connection", "processing", "paused"]
     }
 
+    from services.processing_progress import progress_mode_for
     output = []
     seen_finished_resources = set()
     for job, resource in results:
@@ -607,7 +613,9 @@ def get_queue_status(db, current_user_id: str = None):
         if not is_active:
             seen_finished_resources.add(job.resource_id)
 
-        detail_status = resource.processing_status
+        detail_status = (
+            job.current_stage or resource.processing_status or "queued"
+        ).replace("_", " ")
         job_type = getattr(job, "job_type", "full")
         
         if job_type == "knowledge_generation":
@@ -658,6 +666,7 @@ def get_queue_status(db, current_user_id: str = None):
             "error_message": job.error_message,
             "progress": getattr(job, "progress", 0) or 0,
             "current_stage": getattr(job, "current_stage", None),
+            "progress_mode": progress_mode_for(job),
             "attempt_count": getattr(job, "attempt_count", 0) or 0,
             "retryable": bool(getattr(job, "retryable", 1)),
             "blocked_by_job_id": getattr(job, "blocked_by_job_id", None),
@@ -703,7 +712,10 @@ def get_job_status(db, resource_id: str):
         return None
 
     job, resource = result
-    detail_status = resource.processing_status
+    from services.processing_progress import progress_mode_for
+    detail_status = (
+        (job.current_stage or resource.processing_status or "queued").replace("_", " ")
+    )
     if getattr(job, "job_type", "full") == "document_intelligence":
         if job.status == "completed":
             detail_status = "document intelligence ready"
@@ -722,6 +734,16 @@ def get_job_status(db, resource_id: str):
             detail_status = "transcript regeneration failed"
         else:
             detail_status = "queued for transcript regeneration"
+    elif getattr(job, "job_type", "full") == "knowledge_generation":
+        if job.status == "completed":
+            detail_status = "knowledge ready"
+        elif job.status == "failed":
+            detail_status = "knowledge generation failed"
+    elif getattr(job, "job_type", "full") == "reindex":
+        if job.status == "completed":
+            detail_status = "re-indexing complete"
+        elif job.status == "failed":
+            detail_status = "re-indexing failed"
 
     return {
         "job_id": job.id,
@@ -734,6 +756,9 @@ def get_job_status(db, resource_id: str):
         "started_at": job.started_at.isoformat() if job.started_at else None,
         "finished_at": job.finished_at.isoformat() if job.finished_at else None,
         "error_message": job.error_message,
+        "progress": max(0, min(100, int(job.progress or 0))),
+        "current_stage": job.current_stage,
+        "progress_mode": progress_mode_for(job),
     }
 
 
