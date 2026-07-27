@@ -48,8 +48,6 @@ export const FileExplorerContainer: React.FC<FileExplorerProps> = ({
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
   const [isLoadingFolder, setIsLoadingFolder] = useState(true);
-  const [showSpinner, setShowSpinner] = useState(false);
-  const spinnerTimerRef = useRef<any>(null);
   const [folderError, setFolderError] = useState<string | null>(null);
 
   // Navigation states
@@ -331,16 +329,6 @@ export const FileExplorerContainer: React.FC<FileExplorerProps> = ({
     }
     setFolderError(null);
 
-    // Setup delayed spinner so fast requests feel smooth and instant
-    if (spinnerTimerRef.current) clearTimeout(spinnerTimerRef.current);
-    setShowSpinner(false);
-
-    spinnerTimerRef.current = setTimeout(() => {
-      if (fetchRequestIdRef.current === requestId) {
-        setShowSpinner(true);
-      }
-    }, 200);
-
     try {
       const token = localStorage.getItem('access_token');
       const headers = { 'Authorization': `Bearer ${token}` };
@@ -362,9 +350,6 @@ export const FileExplorerContainer: React.FC<FileExplorerProps> = ({
         headers,
         signal: abortControllerRef.current.signal
       });
-
-      if (spinnerTimerRef.current) clearTimeout(spinnerTimerRef.current);
-      setShowSpinner(false);
 
       if (!response.ok) {
         if (response.status === 404) {
@@ -451,8 +436,6 @@ export const FileExplorerContainer: React.FC<FileExplorerProps> = ({
         console.log(`[TABS] ⏹ fetchItems ABORTED (new request superseded) | filter: ${activeFilter}`);
         return;
       }
-      if (spinnerTimerRef.current) clearTimeout(spinnerTimerRef.current);
-      setShowSpinner(false);
       console.error("Failed to fetch items:", error);
       if (requestId === fetchRequestIdRef.current) {
         setFolderError(error instanceof Error ? error.message : "Failed to load folder");
