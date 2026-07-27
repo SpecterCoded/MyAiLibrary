@@ -928,7 +928,7 @@ function createWorkspaceWindow(record: WorkspaceWindowRecord): BrowserWindow {
     ...bounds,
     minWidth: record.primary ? bounds.width : DETACHED_WORKSPACE_MIN_WIDTH,
     minHeight: record.primary ? bounds.height : DETACHED_WORKSPACE_MIN_HEIGHT,
-    resizable: !record.primary,
+    resizable: true,
     maximizable: true,
     minimizable: true,
     fullscreenable: !record.primary,
@@ -967,6 +967,9 @@ function createWorkspaceWindow(record: WorkspaceWindowRecord): BrowserWindow {
   window.on('move', saveBounds)
   window.on('maximize', saveBounds)
   window.on('unmaximize', saveBounds)
+  window.on('will-resize', (event) => {
+    if (record.primary) event.preventDefault()
+  })
   window.on('close', (event) => {
     if (quitting) return
     if (record.primary) {

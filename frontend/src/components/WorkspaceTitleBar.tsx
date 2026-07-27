@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Reorder } from 'framer-motion';
+import { LayoutGroup, motion, Reorder, useReducedMotion } from 'framer-motion';
 import { ExternalLink, Plus, X } from 'lucide-react';
 import type { WorkspaceTab } from '../types/workspaceTabs';
 
@@ -31,6 +31,7 @@ export default function WorkspaceTitleBar({
   onOpenTabInNewWindow,
   onReorderTabs,
 }: WorkspaceTitleBarProps) {
+  const prefersReducedMotion = useReducedMotion();
   const canAddTab = tabs.length < maxTabs;
   const draggingTabIdRef = useRef<string | null>(null);
   const suppressClickRef = useRef(false);
@@ -83,6 +84,7 @@ export default function WorkspaceTitleBar({
     <>
       <div className="workspace-titlebar flex h-10 shrink-0 items-stretch border-b border-slate-200/70 bg-[#f5f8fd] text-slate-700 dark:border-white/10 dark:bg-[#0f141d] dark:text-slate-200">
         <div className="workspace-drag-region flex min-w-0 flex-1 items-end gap-1 px-2 pr-[150px]">
+          <LayoutGroup id="workspace-tabs">
           <Reorder.Group
           axis="x"
           values={tabIds}
@@ -117,14 +119,23 @@ export default function WorkspaceTitleBar({
                   onSelectTab(tab.id);
                 }}
                 onContextMenu={(event) => openContextMenu(event, tab)}
-                className={`group flex h-8 w-full items-center justify-between gap-2 rounded-t-[10px] px-3 text-left text-[12px] font-semibold transition-colors ${
+                className={`group relative isolate flex h-8 w-full items-center justify-between gap-2 rounded-t-[10px] border border-transparent px-3 text-left text-[12px] font-semibold transition-colors ${
                   active
-                    ? 'border border-slate-200/80 border-b-transparent bg-white text-slate-950 shadow-[0_1px_8px_rgba(15,23,42,0.08)] dark:border-white/10 dark:border-b-transparent dark:bg-[#25272b] dark:text-white dark:shadow-none'
-                    : 'border border-transparent bg-transparent text-slate-500 hover:bg-white/55 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-white/7 dark:hover:text-slate-100'
+                    ? 'text-slate-950 dark:text-white'
+                    : 'bg-transparent text-slate-500 hover:bg-white/55 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-white/7 dark:hover:text-slate-100'
                 }`}
                 title={tab.title}
               >
-                <span className="min-w-0 flex-1 truncate">{tab.title}</span>
+                {active && (
+                  <motion.span
+                    layoutId="workspace-active-tab-highlight"
+                    className="pointer-events-none absolute inset-0 z-0 rounded-t-[10px] border border-slate-200/80 border-b-transparent bg-white shadow-[0_1px_8px_rgba(15,23,42,0.08)] dark:border-white/10 dark:border-b-transparent dark:bg-[#25272b] dark:shadow-none"
+                    transition={prefersReducedMotion
+                      ? { duration: 0 }
+                      : { type: 'spring', stiffness: 560, damping: 42, mass: 0.55 }}
+                  />
+                )}
+                <span className="relative z-10 min-w-0 flex-1 truncate">{tab.title}</span>
                 <span
                   role="button"
                   tabIndex={-1}
@@ -134,7 +145,7 @@ export default function WorkspaceTitleBar({
                     event.stopPropagation();
                     onCloseTab(tab.id);
                   }}
-                  className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md transition-colors ${
+                  className={`relative z-10 flex h-5 w-5 shrink-0 items-center justify-center rounded-md transition-colors ${
                     active
                       ? 'text-slate-400 hover:bg-slate-100 hover:text-slate-800 dark:hover:bg-white/10 dark:hover:text-white'
                       : 'text-slate-400 opacity-0 hover:bg-white/70 hover:text-slate-700 group-hover:opacity-100 dark:hover:bg-white/10 dark:hover:text-white'
@@ -156,6 +167,7 @@ export default function WorkspaceTitleBar({
             <Plus className="h-4 w-4" />
           </button>
           </Reorder.Group>
+          </LayoutGroup>
         </div>
       </div>
       {contextMenu && contextMenuTab && createPortal(
