@@ -2342,7 +2342,7 @@ export default function ChatApp({ user }: ChatAppProps) {
             </div>
           )}
 
-          <div className="w-full max-w-3xl pointer-events-auto relative">
+          <div className="w-full max-w-3xl focus-within:max-w-[900px] pointer-events-auto relative transition-[max-width] duration-500 ease-out">
             <AnimatePresence mode="wait">
               {isVoicePanelOpen ? (
                 <motion.div
