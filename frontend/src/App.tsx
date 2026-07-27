@@ -15,7 +15,7 @@ import ActivityLogPanel from './components/ActivityLogPanel';
 import { GridBackground } from './components/grid';
 import { FileExplorerContainer as FileExplorer } from './components/FileExplorer/FileExplorer';
 import { PipelineQueueDock } from './components/PipelineQueueDock';
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { CheckCircle2, Download, Loader2 } from 'lucide-react';
 import AudioPlayerApp from './components/audio-player/AudioPlayerApp';
 import VideoPlayerApp from './components/video-player/VideoPlayerApp';
@@ -162,21 +162,8 @@ const readInitialWorkspaceTabsState = (): WorkspaceTabsState => {
   return { tabs: [tab], activeTabId: tab.id };
 };
 
-const workspaceTabParamsEqual = (
-  left: WorkspaceTabParams | undefined,
-  right: WorkspaceTabParams | undefined,
-) => {
-  const leftParams = left || {};
-  const rightParams = right || {};
-  const keys = new Set([
-    ...Object.keys(leftParams),
-    ...Object.keys(rightParams),
-  ] as Array<keyof WorkspaceTabParams>);
-
-  return [...keys].every((key) => leftParams[key] === rightParams[key]);
-};
-
 export default function App() {
+  const prefersReducedMotion = useReducedMotion();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentUser, setCurrentUser] = useState<BackendUser | null>(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
@@ -662,24 +649,13 @@ export default function App() {
   const updateActiveWorkspaceTab = (kind: WorkspaceTabKind, params: WorkspaceTabParams = {}, title?: string) => {
     setWorkspaceTabsState((prev) => {
       const activeId = prev.activeTabId || prev.tabs[0]?.id;
-      const activeTab = prev.tabs.find((tab) => tab.id === activeId);
-      const nextTitle = title || getWorkspaceTabTitle(kind, params);
-      if (
-        activeTab &&
-        activeTab.kind === kind &&
-        activeTab.title === nextTitle &&
-        workspaceTabParamsEqual(activeTab.params, params)
-      ) {
-        return prev;
-      }
-
       const nextTabs = prev.tabs.map((tab) => (
         tab.id === activeId
           ? {
               ...tab,
               kind,
               params,
-              title: nextTitle,
+              title: title || getWorkspaceTabTitle(kind, params),
               updatedAt: Date.now(),
             }
           : tab
@@ -1133,17 +1109,35 @@ export default function App() {
 
   const renderWorkspaceTabPanel = (tab: WorkspaceTab) => {
     const isActive = tab.id === workspaceTabsState.activeTabId;
-    const panelClassName = `workspace-tab-panel absolute inset-0 min-h-0 min-w-0 ${
-      isActive ? 'flex z-10' : 'hidden'
+    const panelClassName = `workspace-tab-panel absolute inset-0 min-h-0 min-w-0 flex ${
+      isActive ? 'z-10' : 'pointer-events-none z-0'
     }`;
+    const panelMotion = isActive
+      ? {
+          opacity: 1,
+          y: 0,
+          visibility: 'visible' as const,
+        }
+      : {
+          opacity: 0,
+          y: prefersReducedMotion ? 0 : 4,
+          transitionEnd: { visibility: 'hidden' as const },
+        };
+    const panelTransition = {
+      duration: prefersReducedMotion ? 0 : 0.16,
+      ease: [0.16, 1, 0.3, 1] as const,
+    };
     const tabView = tab.kind as DashboardView;
 
     if (tab.kind === 'audio-player') {
       return (
-        <div
+        <motion.div
           key={tab.id}
           className={panelClassName}
           aria-hidden={!isActive}
+          initial={false}
+          animate={panelMotion}
+          transition={panelTransition}
         >
           <AnimatePresence mode="wait" initial={false}>
             <motion.div
@@ -1168,16 +1162,19 @@ export default function App() {
               />
             </motion.div>
           </AnimatePresence>
-        </div>
+        </motion.div>
       );
     }
 
     if (tab.kind === 'video-player') {
       return (
-        <div
+        <motion.div
           key={tab.id}
           className={panelClassName}
           aria-hidden={!isActive}
+          initial={false}
+          animate={panelMotion}
+          transition={panelTransition}
         >
           <AnimatePresence mode="wait" initial={false}>
             <motion.div
@@ -1202,7 +1199,7 @@ export default function App() {
               />
             </motion.div>
           </AnimatePresence>
-        </div>
+        </motion.div>
       );
     }
 
@@ -1210,19 +1207,22 @@ export default function App() {
       const playlistId = tab.params?.playlistId || tab.params?.folderId || null;
       const playlistName = tab.params?.playlistName || tab.params?.folderName || 'Folder';
       return (
-        <div
+        <motion.div
           key={tab.id}
           className={panelClassName}
           aria-hidden={!isActive}
+          initial={false}
+          animate={panelMotion}
+          transition={panelTransition}
         >
-          <AnimatePresence mode="sync" initial={isActive}>
+          <AnimatePresence mode="wait" initial={false}>
             <motion.div
               key={`${tab.id}-${tab.kind}`}
-              initial={{ scale: 0.985, y: 8 }}
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.995, y: -4 }}
-              transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-              className="absolute inset-0 z-10 min-w-0 overflow-hidden bg-[#f7f8fc] dark:bg-[#25272b]"
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300, mass: 0.8 }}
+              className="h-full w-full min-w-0 overflow-hidden"
             >
               <FileExplorer
                 playlistId={playlistId}
@@ -1243,16 +1243,19 @@ export default function App() {
               />
             </motion.div>
           </AnimatePresence>
-        </div>
+        </motion.div>
       );
     }
 
     if (tab.kind === 'document-intelligence') {
       return (
-        <div
+        <motion.div
           key={tab.id}
           className={panelClassName}
           aria-hidden={!isActive}
+          initial={false}
+          animate={panelMotion}
+          transition={panelTransition}
         >
           <AnimatePresence mode="wait" initial={false}>
             <motion.div
@@ -1271,24 +1274,27 @@ export default function App() {
               ) : null}
             </motion.div>
           </AnimatePresence>
-        </div>
+        </motion.div>
       );
     }
 
     return (
-      <div
+      <motion.div
         key={tab.id}
         className={panelClassName}
         aria-hidden={!isActive}
+        initial={false}
+        animate={panelMotion}
+        transition={panelTransition}
       >
-        <AnimatePresence mode="sync" initial={isActive}>
+        <AnimatePresence mode="wait" initial={false}>
           <motion.div
             key={`${tab.id}-dashboard`}
-            initial={{ scale: 0.992, y: 8 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.995, y: -4 }}
-            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-            className="absolute inset-0 z-0 flex min-h-0 min-w-0 bg-[linear-gradient(135deg,#f5f8fd_0%,#edf2f9_40%,#e4ebf6_100%)] dark:bg-[linear-gradient(135deg,#0B0F19_0%,#050505_100%)]"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            transition={{ duration: 0.3, ease: 'easeOut' }}
+            className="flex h-full w-full min-h-0 min-w-0"
           >
             {isPrimaryWorkspaceWindow && (
               <Sidebar
@@ -1428,7 +1434,7 @@ export default function App() {
             </main>
           </motion.div>
         </AnimatePresence>
-      </div>
+      </motion.div>
     );
   };
 

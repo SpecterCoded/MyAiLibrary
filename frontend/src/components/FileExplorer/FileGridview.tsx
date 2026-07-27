@@ -372,38 +372,7 @@ export const FileGridview: React.FC<PrettyGridViewProps> = ({
   const listVirtual = useVirtualWindow(listContainerRef, items.length, listRowHeight, 8);
 
   if (items.length === 0) {
-    if (isLoading || isTransitioning) {
-      return (
-        <div
-          className={
-            viewMode === "grid"
-              ? "grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
-              : "flex w-full flex-col gap-2"
-          }
-          aria-label="Loading folder contents"
-          aria-busy="true"
-        >
-          {Array.from({ length: viewMode === "grid" ? 10 : 7 }, (_, index) => (
-            <div
-              key={index}
-              className={
-                viewMode === "grid"
-                  ? "min-h-[156px] animate-pulse rounded-xl border border-slate-200/60 bg-white/55 p-4 dark:border-white/5 dark:bg-slate-800/35"
-                  : "h-11 animate-pulse rounded-xl border border-slate-200/50 bg-white/55 dark:border-white/5 dark:bg-slate-800/35"
-              }
-              aria-hidden="true"
-            >
-              {viewMode === "grid" && (
-                <>
-                  <div className="mx-auto mb-4 aspect-square w-2/3 rounded-lg bg-slate-200/65 dark:bg-slate-700/55" />
-                  <div className="mx-auto h-3 w-3/4 rounded-full bg-slate-200/70 dark:bg-slate-700/60" />
-                </>
-              )}
-            </div>
-          ))}
-        </div>
-      );
-    }
+    if (isLoading || isTransitioning) return null;
     if (searchQuery) {
       return (
         <div

@@ -14,10 +14,6 @@
   contain: layout paint;
 }
 
-.workspace-tab-panel[aria-hidden="true"] {
-  display: none !important;
-}
-
 .detached-workspace-root {
   position: relative;
   min-width: 0;
