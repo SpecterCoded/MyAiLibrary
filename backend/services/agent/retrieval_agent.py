@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass
 from time import perf_counter
 
@@ -14,6 +15,7 @@ from .retry_strategy import RetryStrategy
 from .reflection import ReflectionEngine
 from .workflow_executor import WorkflowExecutor
 from core.activity_log import log_user_activity
+from services.pipeline_logger import get_current_rag_trace
 from .workflow_models import (
     AgentDecision,
     RetrievalEvaluation,
@@ -90,6 +92,7 @@ class RetrievalAgent:
         reflection_step = next(step for step in workflow.steps if step.phase is WorkflowPhase.ADAPTATION and step.enabled)
 
         memory = AgentMemory()
+        rag_trace = request.trace or get_current_rag_trace()
         memory.tool_outputs.update({"rewritten_query": query, "retrieval_plan": workflow.initial_plan})
         memory.complete_step("plan", "workflow", workflow)
         memory.complete_step("rewrite", "rewritten_query", query)
@@ -126,6 +129,7 @@ class RetrievalAgent:
                 selected_resource_ids=request.selected_resource_ids,
                 available_resource_ids=request.available_resource_ids,
                 storage_root=request.storage_root,
+                trace=rag_trace,
             )
             fingerprint = memory.signature(current_query, current_plan.retrieval_mode.value, current_plan.retrieval_depth, current_plan.enable_multi_query)
             memory.tool_outputs["retrieval_plan"] = current_plan
@@ -148,10 +152,24 @@ class RetrievalAgent:
                 self._log_event(workflow, "execution", retrieval_step.step_id, retrieval_step.tool_name, "failed", {"error": str(exc)[:500]})
             memory.remember_results(execution.results)
             memory.queries_tried.update(item.strip().lower() for item in execution.report.queries_executed)
-            evaluation: RetrievalEvaluation = self._executor.execute_node(
-                evaluation_step, memory, current_query, execution.results, current_plan,
-                input_fingerprint=fingerprint,
-            )
+            with (
+                rag_trace.phase(
+                    "retrieval_evaluation",
+                    {
+                        "attempt": memory.retry_count + 1,
+                        "candidateCount": len(execution.results),
+                    },
+                )
+                if rag_trace else nullcontext({})
+            ) as phase_details:
+                evaluation: RetrievalEvaluation = self._executor.execute_node(
+                    evaluation_step, memory, current_query, execution.results, current_plan,
+                    input_fingerprint=fingerprint,
+                )
+                phase_details.update({
+                    "confidence": evaluation.confidence,
+                    "quality": evaluation.quality.value,
+                })
             memory.evaluations.append(evaluation)
             executed_modules.extend(execution.report.modules_executed)
             skipped_modules.extend(execution.report.modules_skipped)
@@ -170,9 +188,20 @@ class RetrievalAgent:
                 best_evaluation = candidate_evaluation
                 best_plan = current_plan
 
-            reflection = self._reflection.reflect_on_retrieval(
-                workflow, reflection_step.step_id, current_query, current_plan, evaluation, memory,
-            )
+            with (
+                rag_trace.phase(
+                    "retrieval_reflection",
+                    {
+                        "attempt": memory.retry_count + 1,
+                        "confidence": evaluation.confidence,
+                    },
+                )
+                if rag_trace else nullcontext({})
+            ) as phase_details:
+                reflection = self._reflection.reflect_on_retrieval(
+                    workflow, reflection_step.step_id, current_query, current_plan, evaluation, memory,
+                )
+                phase_details["selected"] = reflection.next_node is not None
             memory.reflection_decisions.append(reflection)
             memory.complete_step(reflection_step.step_id, "reflection", reflection)
             retry = reflection.retry_decision or self._retry_strategy.decide(
@@ -202,6 +231,11 @@ class RetrievalAgent:
             if not retry.should_retry or retry.adapted_plan is None:
                 break
             memory.retry_count += 1
+            if rag_trace:
+                adaptation_started = rag_trace.begin_phase(
+                    "retrieval_adaptation",
+                    {"retryCount": memory.retry_count},
+                )
             current_plan = retry.adapted_plan
             if retry.action is RetryAction.REWRITE_QUERY and retry.adapted_query is None:
                 try:
@@ -214,12 +248,26 @@ class RetrievalAgent:
                     pass
             else:
                 current_query = retry.adapted_query or current_query
+            if rag_trace:
+                rag_trace.complete_phase(
+                    "retrieval_adaptation",
+                    adaptation_started,
+                    {
+                        "retryCount": memory.retry_count,
+                        "retrievalMode": current_plan.retrieval_mode.value,
+                    },
+                )
 
         if best_execution is None or best_evaluation is None:
             # Defensive fallback; the first attempt is normally guaranteed unique.
-            fallback = self._executor.execute_retrieval_attempt(workflow.initial_plan, request)
-            best_execution = fallback
-            best_evaluation = self._executor.evaluate_retrieval(query, fallback.results, workflow.initial_plan)
+            with (
+                rag_trace.phase("retrieval_fallback")
+                if rag_trace else nullcontext({})
+            ) as phase_details:
+                fallback = self._executor.execute_retrieval_attempt(workflow.initial_plan, request)
+                best_execution = fallback
+                best_evaluation = self._executor.evaluate_retrieval(query, fallback.results, workflow.initial_plan)
+                phase_details["resultCount"] = len(fallback.results)
             best_plan = workflow.initial_plan
 
         selected_plan = best_plan or current_plan
@@ -274,15 +322,41 @@ class RetrievalAgent:
             "user_id": user_id or "",
             "resource_id": resource_id or "",
         }
-        workflow = self._planner.create_workflow(
-            query,
-            has_chat_history=has_chat_history,
-            cache_candidate_present=cache_candidate_present,
-            initial_plan=initial_plan,
-            streaming=streaming,
-            user_id=user_id,
-            resource_id=resource_id,
-        )
+        rag_trace = get_current_rag_trace()
+        with (
+            rag_trace.phase(
+                "retrieval_planning",
+                {
+                    "cacheHit": cache_candidate_present,
+                    "streaming": streaming,
+                    "chatHistoryPresent": has_chat_history,
+                },
+            )
+            if rag_trace else nullcontext({})
+        ) as phase_details:
+            workflow = self._planner.create_workflow(
+                query,
+                has_chat_history=has_chat_history,
+                cache_candidate_present=cache_candidate_present,
+                initial_plan=initial_plan,
+                streaming=streaming,
+                user_id=user_id,
+                resource_id=resource_id,
+            )
+            phase_details.update({
+                "classification": workflow.initial_plan.query_classification.value,
+                "retrievalMode": workflow.initial_plan.retrieval_mode.value,
+                "multiQuery": workflow.initial_plan.enable_multi_query,
+                "rerank": workflow.initial_plan.rerank,
+                "compressContext": workflow.initial_plan.compress_context,
+                "hallucinationCheck": workflow.initial_plan.hallucination_check,
+                "hyde": workflow.initial_plan.use_hyde,
+                "maxChunks": workflow.initial_plan.max_chunks,
+                "retrievalDepth": workflow.initial_plan.retrieval_depth,
+                "rrfK": workflow.initial_plan.rrf_k,
+                "workflowNodeCount": len(workflow.nodes),
+                "workflowEdgeCount": len(workflow.edges),
+            })
         self._log_event(
             workflow, "planning", workflow.entry_node, workflow.node(workflow.entry_node).tool_name,
             "completed", self._planning_details(workflow),

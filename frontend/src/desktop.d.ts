@@ -98,7 +98,9 @@ declare global {
     setUpdatePreferences(preferences: Partial<DesktopUpdatePreferences>): Promise<DesktopUpdatePreferences | null>
     openUpdateLogs(): Promise<boolean>
     getAppInfo(): Promise<DesktopAppInfo | null>
+    openSystemConsole(): Promise<boolean>
     openBackendLogTerminal(): Promise<boolean>
+    logSystemEvent(event: SystemLogEventInput): void
     getSystemTheme(): Promise<'light' | 'dark'>
     setTitleBarTheme(theme: 'light' | 'dark'): Promise<boolean>
     setWindowControlsHidden(hidden: boolean): Promise<boolean>
@@ -130,8 +132,70 @@ declare global {
     openViewer(payload: DesktopAttachmentViewerPayload): void
   }
 
+  type SystemLogLevel = 'debug' | 'info' | 'warning' | 'error' | 'critical'
+  type SystemLogSource = 'desktop' | 'backend' | 'renderer'
+  type SystemLogStatus = 'starting' | 'running' | 'waiting' | 'completed' | 'failed' | 'cancelled' | 'stopped'
+
+  interface SystemLogEventInput {
+    timestamp?: string
+    source: SystemLogSource
+    level?: SystemLogLevel
+    category: string
+    event: string
+    message: string
+    operation?: string
+    phase?: string
+    status?: SystemLogStatus
+    correlationId?: string
+    durationMs?: number
+    context?: Record<string, unknown>
+  }
+
+  interface SystemLogEvent extends SystemLogEventInput {
+    id: string
+    timestamp: string
+    sessionId: string
+    level: SystemLogLevel
+  }
+
+  interface SystemLogSnapshot {
+    sessionId: string
+    startedAt: string
+    events: SystemLogEvent[]
+    totalEvents: number
+    truncated: boolean
+  }
+
+  interface SystemLogClearFilter {
+    level?: SystemLogLevel
+    source?: SystemLogSource
+    category?: string
+    eventIds?: string[]
+  }
+
+  interface SystemLogBridge {
+    getSnapshot(limit?: number): Promise<SystemLogSnapshot | null>
+    getBackendState(): Promise<'starting' | 'ready' | 'stopping' | 'stopped' | 'failed'>
+    getTheme(): Promise<'light' | 'dark'>
+    onEvent(listener: (event: SystemLogEvent) => void): () => void
+    onSetFilter(listener: (level: string) => void): () => void
+    onBackendState(listener: (
+      state: 'starting' | 'ready' | 'stopping' | 'stopped' | 'failed',
+      detail?: string,
+    ) => void): () => void
+    onThemeChanged(listener: (theme: 'light' | 'dark') => void): () => void
+    exportLogs(): Promise<{ success: boolean; path?: string; count?: number }>
+    clearLogs(filter?: SystemLogClearFilter): Promise<{ success: boolean; deleted: number }>
+    revealLogs(): Promise<boolean>
+    close(): void
+    minimize(): void
+    toggleMaximize(): void
+    isMaximized(): Promise<boolean>
+  }
+
   interface Window {
     desktop?: DesktopBridge
     desktopAttachments?: DesktopAttachmentsBridge
+    systemLogs?: SystemLogBridge
   }
 }

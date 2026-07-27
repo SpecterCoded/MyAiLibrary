@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { InstalledUpdateInfo, UpdatePreferences, UpdateState } from './update-types'
+import type { SystemLogEventInput } from './system-log'
 
 export type BackendState = 'starting' | 'ready' | 'stopping' | 'stopped' | 'failed'
 export type BackendStateListener = (state: BackendState, detail?: string) => void
@@ -71,7 +72,7 @@ window.addEventListener(
     if (!isBackendLogShortcut(event)) return
     event.preventDefault()
     event.stopImmediatePropagation()
-    void ipcRenderer.invoke('desktop:open-backend-log-terminal')
+    void ipcRenderer.invoke('desktop:open-system-console')
   },
   { capture: true },
 )
@@ -117,7 +118,9 @@ contextBridge.exposeInMainWorld('desktop', {
   setUpdatePreferences: (preferences: Partial<UpdatePreferences>): Promise<UpdatePreferences | null> => ipcRenderer.invoke('desktop:set-update-preferences', preferences),
   openUpdateLogs: (): Promise<boolean> => ipcRenderer.invoke('desktop:open-update-logs'),
   getAppInfo: (): Promise<Record<string, unknown> | null> => ipcRenderer.invoke('desktop:get-app-info'),
-  openBackendLogTerminal: (): Promise<boolean> => ipcRenderer.invoke('desktop:open-backend-log-terminal'),
+  openSystemConsole: (): Promise<boolean> => ipcRenderer.invoke('desktop:open-system-console'),
+  openBackendLogTerminal: (): Promise<boolean> => ipcRenderer.invoke('desktop:open-system-console'),
+  logSystemEvent: (event: SystemLogEventInput): void => ipcRenderer.send('system-log:renderer-event', event),
   getSystemTheme: (): Promise<'light' | 'dark'> => ipcRenderer.invoke('desktop:get-system-theme'),
   setTitleBarTheme: (theme: 'light' | 'dark'): Promise<boolean> => ipcRenderer.invoke('desktop:set-titlebar-theme', theme),
   setWindowControlsHidden: (hidden: boolean): Promise<boolean> => ipcRenderer.invoke('desktop:set-window-controls-hidden', hidden),

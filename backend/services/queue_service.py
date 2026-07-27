@@ -17,11 +17,14 @@ from models import ProcessingJob, Resource, DownloadTask, User
 from services.processing_service import process_resource
 from services.dependency_failure_service import DependencyFailure, classify_provider_error
 from core.activity_log import log_user_activity
+from core.logger import get_logger
+from core.time import utc_now
 
 from database import SessionLocal
 
 
 DOCUMENT_EMBED_ONLY_TYPES = {"pdf", "docx", "image"}
+logger = get_logger("QUEUE")
 
 
 class QueueWorker:
@@ -50,11 +53,23 @@ class QueueWorker:
             instance._running = True
             thread = Thread(target=instance._work_loop, daemon=True)
             thread.start()
-            print("[OK] Queue worker started")
+            logger.info(
+                "Queue worker started.",
+                event="worker.queue_started",
+                operation="application_boot",
+                phase="queue_worker",
+                status="completed",
+            )
 
     def _work_loop(self):
         """Main worker loop. Processes one job at a time forever."""
-        print("Queue worker loop started")
+        logger.info(
+            "Queue worker loop is running.",
+            event="worker.queue_loop_running",
+            operation="backend_runtime",
+            phase="queue_worker",
+            status="running",
+        )
         while self._running:
             db = None
             try:
@@ -62,7 +77,7 @@ class QueueWorker:
                 try:
                     # Check for stuck processing jobs (stuck for > 10 min)
                     from datetime import timedelta
-                    stuck_cutoff = datetime.utcnow() - timedelta(minutes=10)
+                    stuck_cutoff = utc_now() - timedelta(minutes=10)
                     stuck_jobs = (
                         db.query(ProcessingJob)
                         .filter(
@@ -106,14 +121,14 @@ class QueueWorker:
                         ProcessingJob.status.in_(["retrying_connection", "waiting_for_connection"]),
                         or_(
                             ProcessingJob.next_retry_at.is_(None),
-                            ProcessingJob.next_retry_at <= datetime.utcnow(),
+                            ProcessingJob.next_retry_at <= utc_now(),
                         ),
                     ).all()
                     for connection_job in connection_jobs:
                         connection_job.status = "queued"
                         connection_job.current_stage = "resuming_connection"
                         connection_job.started_at = None
-                        connection_job.heartbeat_at = datetime.utcnow()
+                        connection_job.heartbeat_at = utc_now()
                     if connection_jobs:
                         db.commit()
 
@@ -138,10 +153,24 @@ class QueueWorker:
                     )
                     job.status = "processing"
                     job.started_at = datetime.now(timezone.utc)
-                    job.heartbeat_at = datetime.utcnow()
+                    job.heartbeat_at = utc_now()
                     job.attempt_count = (getattr(job, "attempt_count", 0) or 0) + 1
                     job.current_stage = job.current_stage or "starting"
                     db.commit()
+                    logger.info(
+                        "Queued processing job started.",
+                        event="queue.job_started",
+                        operation=f"resource_{job_type}",
+                        phase="queue",
+                        status="running",
+                        correlation_id=job.id,
+                        context={
+                            "jobId": job.id,
+                            "resourceId": job.resource_id,
+                            "jobType": job_type,
+                            "attempt": job.attempt_count,
+                        },
+                    )
 
                     # Update resource status
                     resource = (
@@ -199,7 +228,7 @@ class QueueWorker:
                         # If we got here, processing succeeded
                         if job:
                             job.status = "completed"
-                            job.finished_at = datetime.utcnow()
+                            job.finished_at = utc_now()
                             job.error_message = None
                             job.next_retry_at = None
                             job.retry_schedule_step = 0
@@ -212,6 +241,29 @@ class QueueWorker:
                         # Re-fetch resource for notification purposes only (read-only)
                         resource = db.query(Resource).filter(Resource.id == job.resource_id).first() if job else None
                         print(f"[QUEUE] [OK] Job {job.id if job else 'unknown'} finished")
+                        duration_ms = None
+                        if job and job.started_at and job.finished_at:
+                            try:
+                                duration_ms = max(
+                                    0,
+                                    (job.finished_at - job.started_at.replace(tzinfo=None)).total_seconds() * 1000,
+                                )
+                            except (TypeError, ValueError):
+                                duration_ms = None
+                        logger.info(
+                            "Queued processing job completed.",
+                            event="queue.job_completed",
+                            operation=f"resource_{job_type}",
+                            phase="complete",
+                            status="completed",
+                            correlation_id=job.id if job else None,
+                            duration_ms=duration_ms,
+                            context={
+                                "jobId": job.id if job else None,
+                                "resourceId": job.resource_id if job else None,
+                                "jobType": job_type,
+                            },
+                        )
                         if resource and resource.user_id:
                             log_user_activity(db, resource.user_id, 'queue', f'Completed: {job_type}', resource.title)
 
@@ -338,7 +390,7 @@ class QueueWorker:
                                 job.status = "retrying_connection" if step < 3 else "waiting_for_connection"
                                 job.current_stage = job.status
                                 retry_delay = failure.retry_after_seconds or delays[step]
-                                job.next_retry_at = datetime.utcnow() + timedelta(seconds=retry_delay)
+                                job.next_retry_at = utc_now() + timedelta(seconds=retry_delay)
                                 job.finished_at = None
                                 job.retryable = 1
                                 job.last_error_code = failure.code
@@ -346,7 +398,7 @@ class QueueWorker:
                                 should_notify_failure = step == 3
                             else:
                                 job.status = "failed"
-                                job.finished_at = datetime.utcnow()
+                                job.finished_at = utc_now()
                                 job.error_message = failure.safe_detail if failure else "unexpected_processing_error"
                                 job.last_error_code = failure.code if failure else "unexpected_processing_error"
 
@@ -360,6 +412,21 @@ class QueueWorker:
 
                         db.commit()
                         print(f"[QUEUE] [FAIL] Job {job.id if job else 'unknown'} failed")
+                        logger.error(
+                            "Queued processing job failed.",
+                            event="queue.job_failed",
+                            operation=f"resource_{job_type}",
+                            phase=getattr(job, "current_stage", None) or "processing",
+                            status="failed",
+                            correlation_id=job.id if job else None,
+                            context={
+                                "jobId": job.id if job else None,
+                                "resourceId": job.resource_id if job else None,
+                                "jobType": job_type,
+                                "errorCode": failure.code if failure else "unexpected_processing_error",
+                                "retryable": bool(getattr(job, "retryable", 0)) if job else False,
+                            },
+                        )
                         if resource and resource.user_id:
                             log_user_activity(db, resource.user_id, 'queue', f'Failed: {job_type}', resource.title)
 
@@ -402,9 +469,13 @@ class QueueWorker:
                     db.close()
 
             except Exception as e:
-                print(f"[QUEUE] Unexpected error in worker: {e}")
-                import traceback
-                print(traceback.format_exc())
+                logger.exception(
+                    "Unexpected queue worker error.",
+                    event="worker.queue_unexpected_error",
+                    operation="backend_runtime",
+                    phase="queue_worker",
+                    status="failed",
+                )
                 if db:
                     try:
                         db.close()
@@ -450,7 +521,7 @@ def create_processing_job(db, resource_id: str, job_type: str = "full", input_fi
         resource_id=resource_id,
         status=status,
         job_type=job_type,
-        created_at=datetime.utcnow(),
+        created_at=utc_now(),
         progress=0,
         current_stage="waiting_for_prerequisite" if blocker else "queued",
         attempt_count=0,
@@ -482,6 +553,20 @@ def create_processing_job(db, resource_id: str, job_type: str = "full", input_fi
         raise
 
     print(f"[QUEUE] Queued job {job.id} type={job_type} for resource {resource_id}")
+    logger.info(
+        "Processing job entered the queue.",
+        event="queue.job_queued",
+        operation=f"resource_{job_type}",
+        phase="queue",
+        status="waiting" if blocker else "starting",
+        correlation_id=job.id,
+        context={
+            "jobId": job.id,
+            "resourceId": resource_id,
+            "jobType": job_type,
+            "blockedByJobId": blocker.id if blocker else None,
+        },
+    )
     if resource and resource.user_id:
         log_user_activity(db, resource.user_id, "queue", f"Queued: {job_type}", resource.title)
     return job
@@ -677,10 +762,22 @@ class DownloaderWorker:
             instance._running = True
             thread = Thread(target=instance._work_loop, daemon=True)
             thread.start()
-            print("[OK] Downloader worker started")
+            logger.info(
+                "Downloader worker started.",
+                event="worker.downloader_started",
+                operation="application_boot",
+                phase="downloader_worker",
+                status="completed",
+            )
 
     def _work_loop(self):
-        print("Downloader worker loop started")
+        logger.info(
+            "Downloader worker loop is running.",
+            event="worker.downloader_loop_running",
+            operation="backend_runtime",
+            phase="downloader_worker",
+            status="running",
+        )
         while self._running:
             try:
                 db = SessionLocal()
@@ -696,9 +793,19 @@ class DownloaderWorker:
                         time.sleep(1)
                         continue
 
+                    download_started_at = time.perf_counter()
                     task.status = "processing"
-                    task.updated_at = datetime.utcnow()
+                    task.updated_at = utc_now()
                     db.commit()
+                    logger.info(
+                        "Download task started.",
+                        event="download.task_started",
+                        operation="content_download",
+                        phase="download",
+                        status="running",
+                        correlation_id=task.id,
+                        context={"taskId": task.id, "taskType": getattr(task, "task_type", None)},
+                    )
                     log_user_activity(db, task.user_id, 'download', f'Started download: {task.url}')
                     try:
                         from main import _notify_explorer_changed
@@ -733,6 +840,35 @@ class DownloaderWorker:
                             task.status = "completed"
                             task.progress = 100
 
+                        logger.info(
+                            "Download task completed.",
+                            event="download.task_completed",
+                            operation="content_download",
+                            phase="complete",
+                            status="completed",
+                            correlation_id=task.id,
+                            context={"taskId": task.id, "taskType": getattr(task, "task_type", None)},
+                        )
+                        from services.provider_billing_service import report_provider_billing
+
+                        report_provider_billing(
+                            provider_service="content_download",
+                            provider=(
+                                task_type
+                                if task_type in ["twitter", "instagram"]
+                                else "youtube"
+                            ),
+                            correlation_id=task.id,
+                            exact_zero_cost=True,
+                            zero_cost_reason="non_billed_public_media_transfer",
+                            unit_count=1,
+                            unit_label="download",
+                            duration_ms=max(
+                                0.0,
+                                (time.perf_counter() - download_started_at) * 1000,
+                            ),
+                        )
+
                         log_user_activity(db, task.user_id, 'download', f'Download completed: {task.file_name or task.url}')
                         try:
                             from main import create_notification
@@ -751,6 +887,15 @@ class DownloaderWorker:
                     except Exception as e:
                         task.status = "failed"
                         task.error_message = str(e)
+                        logger.exception(
+                            "Download task failed.",
+                            event="download.task_failed",
+                            operation="content_download",
+                            phase="download",
+                            status="failed",
+                            correlation_id=task.id,
+                            context={"taskId": task.id, "taskType": getattr(task, "task_type", None)},
+                        )
                         log_user_activity(db, task.user_id, 'download', f'Download failed: {task.file_name or task.url}', str(e)[:200])
                         try:
                             from main import create_notification
@@ -766,7 +911,7 @@ class DownloaderWorker:
                         except Exception as ne:
                             print(f"[DOWNLOAD NOTIFICATION ERROR] {ne}")
                     
-                    task.updated_at = datetime.utcnow()
+                    task.updated_at = utc_now()
                     db.commit()
                     try:
                         from main import _notify_explorer_changed

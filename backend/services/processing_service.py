@@ -327,7 +327,20 @@ def save_mindmap(
 
 def process_resource(resource_id: str, job_id: str = None, job_type: str = "full"):
 
-    logger.info(f"START PROCESSING (Type: {job_type})")
+    operation = f"resource_{job_type}"
+    correlation_id = job_id or resource_id
+    process_started_at = time.perf_counter()
+    active_phase = "preflight"
+    phase_started_at = process_started_at
+    logger.info(
+        "Resource processing started.",
+        event="processing.started",
+        operation=operation,
+        phase=active_phase,
+        status="running",
+        correlation_id=correlation_id,
+        context={"jobId": job_id, "resourceId": resource_id, "jobType": job_type},
+    )
 
     db = SessionLocal()
     try:
@@ -366,6 +379,30 @@ def process_resource(resource_id: str, job_id: str = None, job_type: str = "full
             return None
 
         def update_processing_status(next_status: str):
+            nonlocal active_phase, phase_started_at
+            now = time.perf_counter()
+            if active_phase != next_status:
+                logger.info(
+                    f"Processing phase completed: {active_phase}.",
+                    event="processing.phase_completed",
+                    operation=operation,
+                    phase=active_phase,
+                    status="completed",
+                    correlation_id=correlation_id,
+                    duration_ms=(now - phase_started_at) * 1000,
+                    context={"jobId": job_id, "resourceId": resource_id},
+                )
+                active_phase = next_status
+                phase_started_at = now
+                logger.info(
+                    f"Processing phase started: {next_status}.",
+                    event="processing.phase_started",
+                    operation=operation,
+                    phase=next_status,
+                    status="running",
+                    correlation_id=correlation_id,
+                    context={"jobId": job_id, "resourceId": resource_id},
+                )
             resource.processing_status = next_status
             db.commit()
 
@@ -432,16 +469,16 @@ def process_resource(resource_id: str, job_id: str = None, job_type: str = "full
 
         if job_type == "manual_index" and has_prepared_transcript:
             logger.info("USING EXISTING TRANSCRIPT FOR MANUAL INDEX")
-            resource.processing_status = "indexing"
+            update_processing_status("indexing")
         elif _is_resume and has_prepared_transcript:
             logger.info("USING EXISTING TRANSCRIPT FOR RESUME")
-            resource.processing_status = "indexing"
+            update_processing_status("indexing")
         elif document_embed_only:
             logger.info("INDEXING")
-            resource.processing_status = "indexing"
+            update_processing_status("indexing")
         else:
             logger.info("TRANSCRIBING")
-            resource.processing_status = "transcribing"
+            update_processing_status("transcribing")
         db.commit()
 
         result = {}
@@ -665,8 +702,7 @@ def process_resource(resource_id: str, job_id: str = None, job_type: str = "full
 
                 # CHAPTERING status
                 logger.info("CHAPTERING")
-                resource.processing_status = "chaptering"
-                db.commit()
+                update_processing_status("chaptering")
                 log_user_activity(db, resource.user_id, 'ai_features', 'Generating chapters', resource.title)
 
                 # Ensure we have an SRT file path before attempting to read
@@ -720,8 +756,7 @@ def process_resource(resource_id: str, job_id: str = None, job_type: str = "full
 
                     # SUBCHAPTERING status
                     logger.info("SUBCHAPTERING")
-                    resource.processing_status = "subchaptering"
-                    db.commit()
+                    update_processing_status("subchaptering")
                     log_user_activity(db, resource.user_id, 'ai_features', 'Generating subchapters', resource.title)
 
                     chaptering_errors: list[str] = []
@@ -864,8 +899,7 @@ def process_resource(resource_id: str, job_id: str = None, job_type: str = "full
             and not document_embed_only
         ):
             try:
-                resource.processing_status = "summarizing"
-                db.commit()
+                update_processing_status("summarizing")
                 logger.info("GENERATING SUMMARY (with chapter structure)")
                 log_user_activity(db, resource.user_id, 'ai_features', 'Generating summary', resource.title)
                 chapters_for_summary = [{"title": c.title, "start_time": c.start_time, "end_time": c.end_time} for c in db.query(Chapter).filter(Chapter.resource_id == resource.id).order_by(Chapter.start_time).all()]
@@ -922,14 +956,12 @@ def process_resource(resource_id: str, job_id: str = None, job_type: str = "full
                         duplicate_embedded_resource.id,
                     )
                     resource.is_embedded = "false"
-                    resource.processing_status = "ready"
-                    db.commit()
+                    update_processing_status("ready")
                     return
 
                 logger.info("EMBEDDING")
 
-                resource.processing_status = "embedding"
-                db.commit()
+                update_processing_status("embedding")
                 log_user_activity(db, resource.user_id, 'ai_features', 'Embedding and indexing', resource.title)
 
                 logger.info("STORING CHROMA EMBEDDINGS")
@@ -964,8 +996,7 @@ def process_resource(resource_id: str, job_id: str = None, job_type: str = "full
         else:
             if resource.type in ["audio", "video", "youtube"] and resource.transcript:
                 logger.info("REBUILDING SEARCH INDEX WITHOUT EMBEDDINGS")
-                resource.processing_status = "indexing"
-                db.commit()
+                update_processing_status("indexing")
                 rebuild_resource_search_index(db, resource)
             resource.is_embedded = "false"
             db.commit()
@@ -976,8 +1007,18 @@ def process_resource(resource_id: str, job_id: str = None, job_type: str = "full
 
         logger.info("READY")
 
-        resource.processing_status = "ready"
-        db.commit()
+        update_processing_status("ready")
+        completed_at = time.perf_counter()
+        logger.info(
+            "Resource processing completed.",
+            event="processing.completed",
+            operation=operation,
+            phase="complete",
+            status="completed",
+            correlation_id=correlation_id,
+            duration_ms=(completed_at - process_started_at) * 1000,
+            context={"jobId": job_id, "resourceId": resource_id, "jobType": job_type},
+        )
 
     finally:
         db.close()

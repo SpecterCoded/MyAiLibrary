@@ -22,7 +22,8 @@ import hashlib
 
 import chromadb
 from transformers.utils import logging
-from services.ai_cost_service import record_ai_usage
+from services.ai_cost_service import record_chat_completion_usage
+from services.provider_billing_service import report_provider_billing
 
 logging.set_verbosity_error()
 BASE_DIR = Path(__file__).resolve().parent
@@ -151,25 +152,31 @@ def embed_text(
             model=_model,
             input=text,
         )
-        usage = getattr(response, "usage", None)
-        prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
-        total_tokens = int(getattr(usage, "total_tokens", prompt_tokens) or prompt_tokens)
         try:
-            record_ai_usage(
+            provider_request_id = str(getattr(response, "id", "") or "") or None
+            metrics = record_chat_completion_usage(
+                response=response,
                 user_id=user_id,
                 resource_id=resource_id,
                 feature=feature,
                 operation="embedding",
                 model=_model,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=0,
-                total_tokens=total_tokens,
-                request_id=str(getattr(response, "id", "")) or None,
                 metadata={
                     "provider": "chatqt_embedding",
-                    "exact_tokens": total_tokens > 0,
-                    "exact_provider_cost": False,
+                    "usage_scope": "internal",
                 },
+                correlation_id=provider_request_id,
+            )
+            report_provider_billing(
+                provider_service="embedding",
+                provider=_provider,
+                model=_model,
+                response=response,
+                correlation_id=provider_request_id,
+                billing_lookup_pending=bool(
+                    getattr(response, "id", None)
+                    and metrics.get("providerCostUsd") is None
+                ),
             )
         except Exception:
             pass
@@ -224,26 +231,34 @@ def embed_texts(
                 if vec:
                     detected_dim = len(vec)
 
-            usage = getattr(response, "usage", None)
-            prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
-            total_tokens = int(getattr(usage, "total_tokens", prompt_tokens) or prompt_tokens)
             try:
-                record_ai_usage(
+                provider_request_id = str(getattr(response, "id", "") or "") or None
+                metrics = record_chat_completion_usage(
+                    response=response,
                     user_id=user_id,
                     resource_id=resource_id,
                     feature=feature,
                     operation="embedding",
                     model=_model,
-                    prompt_tokens=prompt_tokens,
-                    completion_tokens=0,
-                    total_tokens=total_tokens,
-                    request_id=str(getattr(response, "id", "")) or None,
                     metadata={
                         "provider": "chatqt_embedding",
-                        "exact_tokens": total_tokens > 0,
-                        "exact_provider_cost": False,
+                        "usage_scope": "internal",
                         "batch_size": len(inputs),
                     },
+                    correlation_id=provider_request_id,
+                )
+                report_provider_billing(
+                    provider_service="embedding",
+                    provider=_provider,
+                    model=_model,
+                    response=response,
+                    correlation_id=provider_request_id,
+                    billing_lookup_pending=bool(
+                        getattr(response, "id", None)
+                        and metrics.get("providerCostUsd") is None
+                    ),
+                    unit_count=len(inputs),
+                    unit_label="texts",
                 )
             except Exception:
                 pass

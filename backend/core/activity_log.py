@@ -9,6 +9,8 @@ On each write, old entries beyond the cap are auto-deleted.
 from uuid import uuid4
 from datetime import datetime
 
+from core.time import utc_now
+
 MAX_ENTRIES_PER_USER = 15
 
 
@@ -26,7 +28,7 @@ def log_user_activity(db, user_id: str, category: str, action: str, detail: str 
             category=category,
             action=action,
             detail=detail,
-            created_at=datetime.utcnow(),
+            created_at=utc_now(),
         )
         db.add(entry)
         db.commit()

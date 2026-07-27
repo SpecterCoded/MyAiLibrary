@@ -2,6 +2,7 @@ import os
 from datetime import datetime, timedelta
 
 import sys
+import time
 import warnings
 
 # Aggressively silence all warnings
@@ -34,12 +35,25 @@ import sqlalchemy
 from core.config import get_upload_path, UPLOADS_ROOT
 from core.paths import EXTRA_FILES_DIR
 from core.logger import setup_logger, get_logger
+from core.time import utc_now
+from core.request_context import (
+    get_request_correlation_id,
+    reset_request_correlation_id,
+    set_request_correlation_id,
+)
 logger = setup_logger()
 sys_logger = get_logger("SYSTEM")
+generation_logger = get_logger("GENERATION")
 BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 EXTRAA_FILES_ROOT = str(EXTRA_FILES_DIR)
 
-sys_logger.info("Initializing MyAiLibrary...")
+sys_logger.info(
+    "Initializing MyAiLibrary.",
+    event="application.initializing",
+    operation="application_boot",
+    phase="backend_import",
+    status="starting",
+)
 
 from auth import create_access_token, create_refresh_token, get_current_user, get_current_user_id, validate_registration, validate_token, verify_firebase_token
 from embedding_service import (
@@ -567,6 +581,95 @@ app = FastAPI()
 from fastapi.responses import JSONResponse
 from services.dependency_failure_service import DependencyFailure
 
+
+def _log_generation_persisted(
+    feature: str,
+    *,
+    item_count: int | None = None,
+    storage_target: str = "database",
+) -> None:
+    """Record successful output persistence without exposing generated content."""
+    context = {
+        "feature": feature,
+        "storageTarget": storage_target,
+    }
+    if item_count is not None:
+        context["outputItemCount"] = item_count
+    generation_logger.info(
+        f"Generated output persisted: {feature}.",
+        event="generation.persistence_completed",
+        operation="generation_pipeline",
+        phase="persistence",
+        status="completed",
+        correlation_id=get_request_correlation_id(),
+        context=context,
+    )
+
+
+@app.middleware("http")
+async def structured_request_logging(request: Request, call_next):
+    """Record request lifecycle data without bodies, queries, or credentials."""
+    started = time.perf_counter()
+    correlation_id = request.headers.get("x-request-id") or str(uuid4())
+    request_context_token = set_request_correlation_id(correlation_id)
+    is_generation_request = (
+        "/generate" in request.url.path or "/regenerate" in request.url.path
+    )
+    safe_context = {
+        "method": request.method,
+        "path": request.url.path,
+        "generationRequest": is_generation_request,
+    }
+    sys_logger.info(
+        f"{request.method} {request.url.path} started.",
+        event="api.request_started",
+        operation="api_request",
+        phase=request.url.path,
+        status="starting",
+        correlation_id=correlation_id,
+        context=safe_context,
+    )
+    try:
+        response = await call_next(request)
+    except Exception:
+        duration_ms = round((time.perf_counter() - started) * 1000)
+        sys_logger.exception(
+            "API request failed.",
+            event="api.request_failed",
+            operation="api_request",
+            phase=request.url.path,
+            status="failed",
+            correlation_id=correlation_id,
+            duration_ms=duration_ms,
+            context=safe_context,
+        )
+        raise
+    finally:
+        reset_request_correlation_id(request_context_token)
+
+    duration_ms = round((time.perf_counter() - started) * 1000)
+    status_code = response.status_code
+    log_method = (
+        sys_logger.error
+        if status_code >= 500
+        else sys_logger.warning
+        if status_code >= 400
+        else sys_logger.info
+    )
+    log_method(
+        f"{request.method} {request.url.path} completed with HTTP {status_code}.",
+        event="api.request_completed",
+        operation="api_request",
+        phase=request.url.path,
+        status="failed" if status_code >= 400 else "completed",
+        correlation_id=correlation_id,
+        duration_ms=duration_ms,
+        context={**safe_context, "statusCode": status_code},
+    )
+    response.headers["x-request-id"] = correlation_id
+    return response
+
+
 @app.exception_handler(DependencyFailure)
 async def dependency_failure_response(request: Request, failure: DependencyFailure):
     _, message = failure.notification_for("Request")
@@ -696,7 +799,7 @@ def _touch_playlist(db: Session, playlist_id: str):
     """Update a playlist's updated_at timestamp."""
     pl = db.query(Playlist).filter(Playlist.id == playlist_id).first()
     if pl:
-        pl.updated_at = datetime.utcnow().isoformat()
+        pl.updated_at = utc_now().isoformat()
 
 
 def _get_owned_folder(db: Session, folder_id: str, user_id: str):
@@ -889,7 +992,7 @@ def create_notification(
             item_meta=item_meta,
             is_read=0,
             is_archived=0,
-            created_at=datetime.utcnow(),
+            created_at=utc_now(),
         )
         db.add(notif)
         db.commit()
@@ -950,8 +1053,8 @@ def create_playlist(
         icon_type=icon_type,
         user_id=user.id,
         storage_root=user.storage_root,
-        created_at=datetime.utcnow().isoformat(),
-        updated_at=datetime.utcnow().isoformat()
+        created_at=utc_now().isoformat(),
+        updated_at=utc_now().isoformat()
     )
 
     # Physical folder creation
@@ -2128,10 +2231,24 @@ def rerank_test(
 @app.on_event("startup")
 def startup_queue_worker():
     """Start the queue worker on app startup."""
+    sys_logger.info(
+        "Backend startup services are starting.",
+        event="application.services_started",
+        operation="application_boot",
+        phase="background_services",
+        status="starting",
+    )
     QueueWorker.start()
     DownloaderWorker.start()
     start_periodic_sync()
     start_wtp_model_warmup()
+    sys_logger.info(
+        "Backend startup services are ready.",
+        event="application.backend_ready",
+        operation="application_boot",
+        phase="background_services",
+        status="completed",
+    )
 
 
 def start_wtp_model_warmup():
@@ -2158,9 +2275,22 @@ def start_wtp_model_warmup():
             from services.sentence_segmentation_service import warmup_wtp_model
 
             if warmup_wtp_model(model_path):
-                sys_logger.info("WTP Canine model warmed up successfully.")
+                sys_logger.info(
+                    "WTP Canine model warmed up successfully.",
+                    event="model.warmup_completed",
+                    operation="application_boot",
+                    phase="wtp_warmup",
+                    status="completed",
+                )
         except Exception as exc:
-            sys_logger.warning(f"WTP Canine startup warmup skipped: {exc}")
+            sys_logger.warning(
+                "WTP Canine startup warmup was skipped.",
+                event="model.warmup_skipped",
+                operation="application_boot",
+                phase="wtp_warmup",
+                status="stopped",
+                context={"errorType": type(exc).__name__},
+            )
 
     threading.Thread(target=worker, name="wtp-canine-warmup", daemon=True).start()
 
@@ -3166,7 +3296,7 @@ def rename_playlist(
     playlist.name = name
     if description is not None:
         playlist.description = description
-    playlist.updated_at = datetime.utcnow().isoformat()
+    playlist.updated_at = utc_now().isoformat()
 
     # 3. Update all resource paths in this playlist
     resources = db.query(Resource).join(Folder).filter(Folder.playlist_id == playlist.id).all()
@@ -3189,7 +3319,7 @@ def update_playlist_icon(
     if not playlist:
         raise HTTPException(status_code=404, detail="Playlist not found")
     playlist.icon_type = icon_type
-    playlist.updated_at = datetime.utcnow().isoformat()
+    playlist.updated_at = utc_now().isoformat()
     db.commit()
     return serialize_playlist(playlist)
 
@@ -4719,6 +4849,10 @@ def _regenerate_media_structure(
 
         resource.processing_status = "ready"
         db.commit()
+        _log_generation_persisted(
+            "transcript_regeneration_structure",
+            item_count=len(chapters),
+        )
         return {"message": f"Generated {len(chapters)} chapters"}
 
     except Exception as e:
@@ -4893,7 +5027,7 @@ def retry_queue_job(
         ).first()
         if state:
             state.status = job.status
-            state.updated_at = datetime.utcnow()
+            state.updated_at = utc_now()
     db.commit()
     return {"message": "Job queued for retry", "status": job.status}
 
@@ -4922,9 +5056,9 @@ def start_over_knowledge_job(
     if run:
         _cleanup_run_staging(db, run.id)
         run.status = "superseded"
-        run.finished_at = datetime.utcnow()
+        run.finished_at = utc_now()
     job.status = "superseded"
-    job.finished_at = datetime.utcnow()
+    job.finished_at = utc_now()
     db.commit()
     replacement = create_processing_job(
         db, job.resource_id, job_type="knowledge_generation"
@@ -4956,13 +5090,13 @@ def delete_queue_job(
     if job.status in ["queued", "waiting", "retrying_connection", "waiting_for_connection", "processing", "paused"]:
         job.status = "cancelled"
         job.current_stage = "cancelled"
-        job.finished_at = datetime.utcnow()
+        job.finished_at = utc_now()
         if job.job_type == "knowledge_generation":
             run = db.query(KnowledgeRun).filter(KnowledgeRun.job_id == job.id).first()
             if run:
                 run.status = "cancelled"
                 run.current_stage = "cancelled"
-                run.finished_at = datetime.utcnow()
+                run.finished_at = utc_now()
                 from services.knowledge_service import _cleanup_run_staging
                 _cleanup_run_staging(db, run.id)
             state = db.query(ResourceKnowledgeState).filter(
@@ -4970,7 +5104,7 @@ def delete_queue_job(
             ).first()
             if state:
                 state.status = "ready" if state.active_run_id else "not_generated"
-                state.updated_at = datetime.utcnow()
+                state.updated_at = utc_now()
         db.commit()
         return {"message": "Job cancelled"}
 
@@ -5389,7 +5523,7 @@ def refresh_all_notes(
                 if db_note.content != blocks or db_note.title != new_title:
                     db_note.content = blocks
                     db_note.title = new_title
-                    db_note.updated_at = datetime.utcnow()
+                    db_note.updated_at = utc_now()
                     db.add(db_note)
             else:
                 with open(file_path, "r", encoding="utf-8") as f:
@@ -5408,8 +5542,8 @@ def refresh_all_notes(
                     user_id=current_user.id,
                     is_favorite=0,
                     status="active",
-                    created_at=datetime.utcnow(),
-                    updated_at=datetime.utcnow(),
+                    created_at=utc_now(),
+                    updated_at=utc_now(),
                     filename=file_name
                 )
                 db.add(note)
@@ -5546,7 +5680,7 @@ def update_note(
         import json
         note.tags = json.dumps(data["tags"]) if isinstance(data["tags"], list) else data["tags"]
 
-    note.updated_at = datetime.utcnow()
+    note.updated_at = utc_now()
     log_user_activity(db, current_user.id, 'notebook', f'Updated note "{note.title}"')
 
     # Sync physical file
@@ -7038,6 +7172,7 @@ def generate_chapter_summary(chapter_id: str, db: Session = Depends(get_db)):
 
     db.add(summary)
     db.commit()
+    _log_generation_persisted("chapter_summary_generation", item_count=1)
 
     return {
         "chapter_id": chapter_id,
@@ -7082,6 +7217,10 @@ def generate_resource_quiz(
         db,
         resource,
         quiz_data,
+    )
+    _log_generation_persisted(
+        "quiz_generation",
+        item_count=len(quiz_data) if isinstance(quiz_data, list) else None,
     )
 
     return quiz_data
@@ -7129,6 +7268,10 @@ def regenerate_resource_quiz(
         resource,
         quiz_data,
     )
+    _log_generation_persisted(
+        "quiz_regeneration",
+        item_count=len(quiz_data) if isinstance(quiz_data, list) else None,
+    )
 
     return quiz_data
 
@@ -7164,6 +7307,10 @@ def generate_resource_flashcards(
         db,
         resource,
         flashcards_data,
+    )
+    _log_generation_persisted(
+        "flashcards_generation",
+        item_count=len(flashcards_data) if isinstance(flashcards_data, list) else None,
     )
 
     return flashcards_data
@@ -7211,6 +7358,10 @@ def regenerate_resource_flashcards(
         resource,
         flashcards_data,
     )
+    _log_generation_persisted(
+        "flashcards_regeneration",
+        item_count=len(flashcards_data) if isinstance(flashcards_data, list) else None,
+    )
 
     return flashcards_data
 
@@ -7246,6 +7397,7 @@ def generate_resource_summary(
     resource.summary = summary
 
     db.commit()
+    _log_generation_persisted("summary_generation", item_count=1)
 
     return {"summary": summary}
 
@@ -7291,6 +7443,7 @@ def regenerate_resource_summary(
     resource.summary = summary
     resource.is_embedded = _add_outdated_flag(resource.is_embedded, "summary")
     db.commit()
+    _log_generation_persisted("summary_regeneration", item_count=1)
 
     return {"summary": summary}
 
@@ -7353,6 +7506,7 @@ Summary:
         resource,
         mindmap_data,
     )
+    _log_generation_persisted("mindmap_generation", item_count=1)
 
     return mindmap_data
 
@@ -7434,6 +7588,7 @@ Summary:
         resource,
         mindmap_data,
     )
+    _log_generation_persisted("mindmap_regeneration", item_count=1)
 
     return mindmap_data
 
@@ -7524,6 +7679,10 @@ def get_resource_suggested_questions(
         normalized_questions = questions if isinstance(questions, list) else []
         resource.suggested_questions = json.dumps(normalized_questions)
         db.commit()
+        _log_generation_persisted(
+            "suggested_questions_generation",
+            item_count=len(normalized_questions),
+        )
         log_user_activity(db, current_user.id, 'ai_features', 'Generated suggested questions', resource.title)
         sys_logger.info(
             "Suggested questions load: generated and saved initial questions",
@@ -7554,6 +7713,10 @@ def get_resource_suggested_questions(
         normalized_questions = questions if isinstance(questions, list) else []
         resource.suggested_questions = json.dumps(normalized_questions)
         db.commit()
+        _log_generation_persisted(
+            "suggested_questions_generation",
+            item_count=len(normalized_questions),
+        )
         sys_logger.info(
             "Suggested questions load: repaired empty saved questions by regenerating",
             extra={
@@ -7592,6 +7755,10 @@ def regenerate_resource_suggested_questions(
     questions = generate_suggested_questions(resource.transcript or "", duration_seconds=duration, user_id=current_user.id, resource_id=resource.id, feature="suggested_questions_regeneration")
     resource.suggested_questions = json.dumps(questions if isinstance(questions, list) else [])
     db.commit()
+    _log_generation_persisted(
+        "suggested_questions_regeneration",
+        item_count=len(questions) if isinstance(questions, list) else None,
+    )
     sys_logger.info(
         "Suggested questions regenerate: saved fresh questions",
         extra={
@@ -7809,7 +7976,7 @@ def save_notes_to_notebook(
             
         blocks_json = markdown_to_blocks(updated_md)
         note.content = blocks_json
-        note.updated_at = datetime.datetime.utcnow()
+        note.updated_at = utc_now()
         db.commit()
         db.refresh(note)
     else:
@@ -7832,8 +7999,8 @@ def save_notes_to_notebook(
             filename=filename,
             is_favorite=0,
             status="active",
-            created_at=datetime.datetime.utcnow(),
-            updated_at=datetime.datetime.utcnow()
+            created_at=utc_now(),
+            updated_at=utc_now()
         )
         db.add(note)
         db.commit()
@@ -7984,6 +8151,7 @@ def generate_resource_notes(
     notes = generate_study_notes(content, user_id=current_user.id, resource_id=resource.id, feature="notes_generation")
     resource.study_notes = notes
     db.commit()
+    _log_generation_persisted("notes_generation", item_count=1)
     log_user_activity(db, current_user.id, 'ai_features', 'Generated study notes', resource.title)
     return {"notes": notes}
 
@@ -8011,6 +8179,7 @@ def regenerate_resource_notes(
     notes = generate_study_notes(content, user_id=current_user.id, resource_id=resource.id, feature="notes_regeneration")
     resource.study_notes = notes
     db.commit()
+    _log_generation_persisted("notes_regeneration", item_count=1)
     return {"notes": notes}
 
 
@@ -8103,8 +8272,8 @@ def update_resource_notes(
                     filename=filename,
                     is_favorite=0,
                     status="active",
-                    created_at=datetime.datetime.utcnow(),
-                    updated_at=datetime.datetime.utcnow()
+                    created_at=utc_now(),
+                    updated_at=utc_now()
                 )
                 db.add(note)
                 db.commit()
@@ -8132,7 +8301,7 @@ def update_resource_notes(
                 
                 blocks_json = markdown_to_blocks(updated_md)
                 note.content = blocks_json
-                note.updated_at = datetime.datetime.utcnow()
+                note.updated_at = utc_now()
                 db.commit()
             except Exception as e:
                 logger.error(f"Error syncing study notes update to notebook note: {e}")
@@ -8310,7 +8479,7 @@ def record_session(db: Session, user_id: str, request: Request) -> None:
             .first()
         )
 
-        now = datetime.utcnow()
+        now = utc_now()
         if session:
             session.last_active = now
         else:
@@ -10016,8 +10185,8 @@ def update_account_details(
         # Enforce a 14-day cooldown between username changes.
         if user.username_changed_at is not None:
             next_allowed = user.username_changed_at + timedelta(days=14)
-            if datetime.utcnow() < next_allowed:
-                days_left = (next_allowed - datetime.utcnow()).days + 1
+            if utc_now() < next_allowed:
+                days_left = (next_allowed - utc_now()).days + 1
                 raise HTTPException(
                     status_code=429,
                     detail=f"You can only change your username once every 14 days. Try again in {days_left} day(s).",
@@ -10027,7 +10196,7 @@ def update_account_details(
         if existing_user:
             raise HTTPException(status_code=400, detail="Username already exists")
         user.username = request.username
-        user.username_changed_at = datetime.utcnow()
+        user.username_changed_at = utc_now()
 
     # Email is immutable and cannot be changed after registration.
     if request.email is not None and request.email.strip() != "" and request.email != user.email:
@@ -10080,7 +10249,7 @@ def get_my_sessions(
         .all()
     )
 
-    now = datetime.utcnow()
+    now = utc_now()
     result = []
     for s in sessions:
         is_current = s.user_agent == current_ua and s.ip_address == current_ip
@@ -10290,7 +10459,7 @@ def create_activity_logs(
             category=entry.category,
             action=entry.action,
             detail=entry.detail,
-            created_at=datetime.utcnow(),
+            created_at=utc_now(),
         )
         db.add(log)
         created += 1
@@ -10709,11 +10878,11 @@ def create_knowledge_run(
             input_fingerprint=fingerprint,
             current_stage=job.current_stage,
             progress=job.progress or 0,
-            created_at=datetime.utcnow(),
+            created_at=utc_now(),
         )
         db.add(run)
     state.status = "waiting" if job.status == "waiting" else "queued"
-    state.updated_at = datetime.utcnow()
+    state.updated_at = utc_now()
     db.commit()
     log_user_activity(
         db,
@@ -11136,7 +11305,7 @@ def create_knowledge_study_event(
         resource_id=payload.resource_id,
         event_type=payload.event_type,
         metadata_json=json.dumps(payload.metadata or {}),
-        created_at=datetime.utcnow(),
+        created_at=utc_now(),
     )
     db.add(event)
     db.commit()

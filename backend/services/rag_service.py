@@ -22,6 +22,11 @@ from .planner.planner_models import RetrievalPlan
 from .agent.retrieval_agent import RetrievalAgent
 from .agent.workflow_executor import WorkflowExecutor
 from .agent.workflow_models import RetrievalWorkflow
+from .pipeline_logger import (
+    RagPipelineTrace,
+    get_current_rag_trace,
+    trace_rag_pipeline,
+)
 from core.config import (
     ENABLE_QUERY_ROUTING,
     ENABLE_CHUNK_OVERLAP,
@@ -29,6 +34,26 @@ from core.config import (
     ENABLE_PARENT_CHILD_RETRIEVAL,
     ENABLE_HIERARCHICAL_RETRIEVAL,
 )
+
+
+def _skip_trace_phases(
+    trace: RagPipelineTrace,
+    phases: list[str],
+    reason_code: str,
+) -> None:
+    for phase in phases:
+        trace.skip_phase(phase, reason_code=reason_code)
+
+
+_POST_CACHE_RAG_PHASES = [
+    "retrieval_orchestration",
+    "answer_generation",
+    "citation_enforcement",
+    "source_extraction",
+    "hallucination_verification",
+    "confidence_scoring",
+    "semantic_cache_write",
+]
 
 
 def _rerank_metric_values(results: list[dict], modules_executed: list[str]) -> tuple[bool, float | None, float | None]:
@@ -416,6 +441,7 @@ def prepare_rag_context(
 from sqlalchemy.orm import Session
 from .cache_service import save_to_cache
 
+@trace_rag_pipeline(streaming=False)
 def run_rag_pipeline(
     db: Session,
     user_id: str,
@@ -432,24 +458,41 @@ def run_rag_pipeline(
     Unified Production RAG Pipeline with Semantic Caching.
     Cache is checked BEFORE retrieval so hits skip the entire search pipeline.
     """
-    from services.pipeline_logger import PipelineLogger
-    plog = PipelineLogger(user_id, question)
-    plog.log("start", resource_id=resource_id, globe_on=globe_on)
+    trace = get_current_rag_trace()
+    if trace is None:
+        raise RuntimeError("RAG trace was not initialized")
     pipeline_started = perf_counter()
 
     log_user_activity(db, user_id, 'ai_chat', 'RAG query', question[:100])
     # Globe mode: bypass the entire RAG pipeline — pure LLM, like ChatGPT
     if globe_on:
         from .llm_service import generate_answer
-        answer = generate_answer(
-            question=question,
-            context="",
-            chat_history=final_history_str,
-            concise=concise,
-            globe_on=True,
-            user_id=user_id,
-            resource_id=resource_id,
-            feature="global_chat_answer",
+        _skip_trace_phases(
+            trace,
+            ["query_rewrite", "semantic_cache_lookup", "query_routing", "retrieval_orchestration"],
+            "globe_mode",
+        )
+        with trace.phase("answer_generation", {"mode": "globe"}):
+            answer = generate_answer(
+                question=question,
+                context="",
+                chat_history=final_history_str,
+                concise=concise,
+                globe_on=True,
+                user_id=user_id,
+                resource_id=resource_id,
+                feature="global_chat_answer",
+            )
+        _skip_trace_phases(
+            trace,
+            [
+                "citation_enforcement",
+                "source_extraction",
+                "hallucination_verification",
+                "confidence_scoring",
+                "semantic_cache_write",
+            ],
+            "globe_mode",
         )
         if log_query:
             log_query(
@@ -467,7 +510,7 @@ def run_rag_pipeline(
                 hallucination_check_status="skipped",
                 rerank_executed=False,
             )
-        return {
+        result = {
             "answer": answer,
             "context": "",
             "sources": [],
@@ -476,47 +519,66 @@ def run_rag_pipeline(
             "confidence": 1.0,
             "confidence_label": "globe"
         }
+        trace.finish({
+            "mode": "globe",
+            "confidence": 1.0,
+            "confidenceLabel": "globe",
+            "sourceCount": 0,
+            "hallucinationCount": 0,
+        })
+        return result
 
     # 0. Resolve the user's active workspace so retrieval is scoped to it.
     from models import Resource, User
-    user = db.query(User).filter(User.id == user_id).first()
-    storage_root = user.storage_root if user else None
-    available_resource_ids = [
-        row[0]
-        for row in db.query(Resource.id).filter(
-            Resource.user_id == user_id,
-            Resource.is_deleted == 0,
-        ).all()
-    ]
+    with trace.phase("workspace_scope_resolution") as phase_details:
+        user = db.query(User).filter(User.id == user_id).first()
+        storage_root = user.storage_root if user else None
+        available_resource_ids = [
+            row[0]
+            for row in db.query(Resource.id).filter(
+                Resource.user_id == user_id,
+                Resource.is_deleted == 0,
+            ).all()
+        ]
+        phase_details["selectedResourceCount"] = len(selected_resource_ids or [])
 
     # 1. Query Rewrite (needed for cache key, but NOT retrieval yet)
     retrieval_agent = RetrievalAgent()
     rewritten_question = question
     if chat_history and len(chat_history) > 0:
-        rewritten_question = retrieval_agent.execute_tool(
-            "query_rewrite",
-            question,
-            chat_history,
-            user_id=user_id,
-            resource_id=resource_id,
-            feature="query_rewrite",
-        )
+        with trace.phase("query_rewrite", {"chatHistoryPresent": True}):
+            rewritten_question = retrieval_agent.execute_tool(
+                "query_rewrite",
+                question,
+                chat_history,
+                user_id=user_id,
+                resource_id=resource_id,
+                feature="query_rewrite",
+            )
         log_user_activity(db, user_id, 'ai_chat', 'Query rewritten', f'"{question[:50]}" → "{rewritten_question[:50]}"')
+    else:
+        trace.skip_phase("query_rewrite", reason_code="no_chat_history")
 
     # 2. Check Cache BEFORE retrieval — skip entire pipeline on hit
     cached_result = None
     # We bypass the cache entirely if specific resources are selected via the global chat,
     # because the cache schema currently keys off a single resource_id.
     if not selected_resource_ids:
-        cached_result = retrieval_agent.execute_tool(
-            "semantic_cache",
-            db,
-            resource_id,
-            rewritten_question,
-            user_id=user_id,
+        with trace.phase("semantic_cache_lookup") as phase_details:
+            cached_result = retrieval_agent.execute_tool(
+                "semantic_cache",
+                db,
+                resource_id,
+                rewritten_question,
+                user_id=user_id,
+            )
+            phase_details["cacheHit"] = cached_result is not None
+    else:
+        trace.skip_phase(
+            "semantic_cache_lookup",
+            reason_code="selected_resources_bypass_cache",
         )
 
-    plog.log("cache_check", hit=cached_result is not None)
     workflow = retrieval_agent.create_workflow(
         rewritten_question,
         has_chat_history=bool(chat_history),
@@ -525,14 +587,39 @@ def run_rag_pipeline(
         resource_id=resource_id,
     )
     plan = workflow.initial_plan
+    trace.skip_phase(
+        "hyde_expansion",
+        reason_code=(
+            "planner_executor_not_enabled"
+            if plan.use_hyde and ENABLE_HYDE
+            else "plan_disabled"
+        ),
+        context={"hyde": plan.use_hyde and ENABLE_HYDE},
+    )
 
     # 2.5 Query routing gate — skip retrieval for greetings/small talk
     user_rag = get_user_rag_settings(user_id)
-    if user_rag["query_routing"]:
-        from services.query_router import should_skip_retrieval
-        if should_skip_retrieval(question, plan.query_classification):
-            log_user_activity(db, user_id, 'ai_chat', 'Query routed', f'Skipping retrieval for {plan.query_classification.value}')
-            from services.llm_service import generate_answer
+    with trace.phase(
+        "query_routing",
+        {"classification": plan.query_classification.value},
+    ) as phase_details:
+        should_route_without_retrieval = False
+        if user_rag["query_routing"]:
+            from services.query_router import should_skip_retrieval
+            should_route_without_retrieval = should_skip_retrieval(
+                question,
+                plan.query_classification,
+            )
+        phase_details.update({
+            "executed": bool(user_rag["query_routing"]),
+            "selected": should_route_without_retrieval,
+        })
+
+    if should_route_without_retrieval:
+        log_user_activity(db, user_id, 'ai_chat', 'Query routed', f'Skipping retrieval for {plan.query_classification.value}')
+        from services.llm_service import generate_answer
+        trace.skip_phase("retrieval_orchestration", reason_code="query_routed")
+        with trace.phase("answer_generation", {"mode": "routed"}):
             answer = generate_answer(
                 question=question,
                 context="",
@@ -543,33 +630,68 @@ def run_rag_pipeline(
                 resource_id=resource_id,
                 feature="global_chat_answer",
             )
-            if log_query:
-                log_query(
-                    query=question,
-                    latency_ms=(perf_counter() - pipeline_started) * 1000,
-                    cache_hit=False,
-                    chunks_retrieved=0,
-                    confidence_score=1.0,
-                    confidence_label="routed",
-                    complexity_level=plan.query_classification.value,
-                    resource_id=resource_id or "",
-                    user_id=user_id or "",
-                    response_passed=True,
-                    hallucination_checked=False,
-                    hallucination_check_status="skipped",
-                    rerank_executed=False,
-                )
-            return {
-                "answer": answer,
-                "context": "",
-                "sources": [],
-                "hallucinations": [],
-                "rewritten_question": rewritten_question,
-                "confidence": 1.0,
-                "confidence_label": "routed"
-            }
+        _skip_trace_phases(
+            trace,
+            [
+                "citation_enforcement",
+                "source_extraction",
+                "hallucination_verification",
+                "confidence_scoring",
+                "semantic_cache_write",
+            ],
+            "query_routed",
+        )
+        if log_query:
+            log_query(
+                query=question,
+                latency_ms=(perf_counter() - pipeline_started) * 1000,
+                cache_hit=False,
+                chunks_retrieved=0,
+                confidence_score=1.0,
+                confidence_label="routed",
+                complexity_level=plan.query_classification.value,
+                resource_id=resource_id or "",
+                user_id=user_id or "",
+                response_passed=True,
+                hallucination_checked=False,
+                hallucination_check_status="skipped",
+                rerank_executed=False,
+            )
+        result = {
+            "answer": answer,
+            "context": "",
+            "sources": [],
+            "hallucinations": [],
+            "rewritten_question": rewritten_question,
+            "confidence": 1.0,
+            "confidence_label": "routed"
+        }
+        trace.finish({
+            "mode": "routed",
+            "classification": plan.query_classification.value,
+            "confidence": 1.0,
+            "confidenceLabel": "routed",
+            "sourceCount": 0,
+            "hallucinationCount": 0,
+        })
+        return result
 
-    if retrieval_agent.should_accept_cache(workflow, cached_result, user_id=user_id, resource_id=resource_id):
+    with trace.phase(
+        "semantic_cache_decision",
+        {
+            "cacheHit": cached_result is not None,
+            "cacheTrusted": plan.trust_semantic_cache,
+        },
+    ) as phase_details:
+        cache_accepted = retrieval_agent.should_accept_cache(
+            workflow,
+            cached_result,
+            user_id=user_id,
+            resource_id=resource_id,
+        )
+        phase_details["cacheAccepted"] = cache_accepted
+
+    if cache_accepted:
         log_user_activity(db, user_id, 'ai_chat', 'Cache hit', f'Confidence: {cached_result["confidence"]:.2f}')
         if log_planner_execution:
             log_planner_execution(
@@ -599,7 +721,8 @@ def run_rag_pipeline(
                 )
             except Exception:
                 pass
-        return {
+        _skip_trace_phases(trace, _POST_CACHE_RAG_PHASES, "semantic_cache_hit")
+        result = {
             "answer": cached_result["answer"],
             "context": "",
             "sources": cached_result["sources"],
@@ -608,23 +731,46 @@ def run_rag_pipeline(
             "confidence": cached_result["confidence"],
             "confidence_label": "cached"
         }
+        trace.finish({
+            "mode": "cached",
+            "cacheHit": True,
+            "cacheAccepted": True,
+            "confidence": cached_result["confidence"],
+            "confidenceLabel": "cached",
+            "sourceCount": len(cached_result.get("sources", [])),
+            "hallucinationCount": 0,
+        })
+        return result
 
     # 2.5 Analyze question complexity — controls pipeline depth
     # 3. Full retrieval pipeline (only on cache miss)
     log_user_activity(db, user_id, 'ai_chat', 'Retrieving context', f'Strategy: {plan.retrieval_mode.value}')
-    context, reranked_results, rewritten_question, execution_report = prepare_rag_context(
-        question=rewritten_question,
-        user_id=user_id,
-        resource_id=resource_id,
-        chat_history=None,
-        n_results=n_results,
-        selected_resource_ids=selected_resource_ids,
-        storage_root=storage_root,
-        plan=plan,
-        available_resource_ids=available_resource_ids,
-        agent=retrieval_agent,
-        workflow=workflow,
-    )
+    with trace.phase(
+        "retrieval_orchestration",
+        {
+            "retrievalMode": plan.retrieval_mode.value,
+            "maxChunks": plan.max_chunks,
+            "retrievalDepth": plan.retrieval_depth,
+        },
+    ) as phase_details:
+        context, reranked_results, rewritten_question, execution_report = prepare_rag_context(
+            question=rewritten_question,
+            user_id=user_id,
+            resource_id=resource_id,
+            chat_history=None,
+            n_results=n_results,
+            selected_resource_ids=selected_resource_ids,
+            storage_root=storage_root,
+            plan=plan,
+            available_resource_ids=available_resource_ids,
+            agent=retrieval_agent,
+            workflow=workflow,
+        )
+        phase_details.update({
+            "resultCount": len(reranked_results),
+            "modulesExecuted": execution_report.modules_executed,
+            "modulesSkipped": execution_report.modules_skipped,
+        })
     execution_report.modules_skipped.append("semantic_cache")
     agent_execution = retrieval_agent.last_result
     if agent_execution is None:
@@ -633,16 +779,18 @@ def run_rag_pipeline(
 
     # 4. LLM Answer Generation
     log_user_activity(db, user_id, 'ai_chat', 'Generating answer', f'{len(reranked_results)} chunks used')
-    answer = retrieval_agent.execute_workflow_node(
-        workflow, agent_memory, "answer",
-        question, context, final_history_str, concise,
-        input_fingerprint=rewritten_question,
-        globe_on=globe_on,
-        user_id=user_id,
-        resource_id=resource_id,
-        feature="resource_rag_answer" if resource_id else "global_rag_answer",
-    )
-    answer = enforce_inline_chunk_citations(answer, reranked_results)
+    with trace.phase("answer_generation", {"chunkCount": len(reranked_results)}):
+        answer = retrieval_agent.execute_workflow_node(
+            workflow, agent_memory, "answer",
+            question, context, final_history_str, concise,
+            input_fingerprint=rewritten_question,
+            globe_on=globe_on,
+            user_id=user_id,
+            resource_id=resource_id,
+            feature="resource_rag_answer" if resource_id else "global_rag_answer",
+        )
+    with trace.phase("citation_enforcement", {"chunkCount": len(reranked_results)}):
+        answer = enforce_inline_chunk_citations(answer, reranked_results)
     execution_report.modules_executed.append("answer_generation")
 
     # 5-6. Evidence extraction + hallucination check
@@ -653,6 +801,14 @@ def run_rag_pipeline(
     if plan.hallucination_check:
         from concurrent.futures import ThreadPoolExecutor
 
+        source_started = trace.begin_phase(
+            "source_extraction",
+            {"parallel": True, "chunkCount": len(reranked_results)},
+        )
+        verification_started = trace.begin_phase(
+            "hallucination_verification",
+            {"parallel": True, "chunkCount": len(context_chunks)},
+        )
         with ThreadPoolExecutor(max_workers=2) as pool:
             future_sources = pool.submit(
                 retrieval_agent.execute_workflow_node,
@@ -674,28 +830,82 @@ def run_rag_pipeline(
                 resource_id=resource_id,
                 feature="hallucination_detection",
             )
-            sources = future_sources.result()
-            hallucinations = future_halluc.result()
+            source_error = None
+            verification_error = None
+            try:
+                sources = future_sources.result()
+                trace.complete_phase(
+                    "source_extraction",
+                    source_started,
+                    {"parallel": True, "sourceCount": len(sources)},
+                )
+            except BaseException as error:
+                sources = []
+                source_error = error
+                trace.fail_phase("source_extraction", source_started, error)
+            try:
+                hallucinations = future_halluc.result()
+                trace.complete_phase(
+                    "hallucination_verification",
+                    verification_started,
+                    {
+                        "parallel": True,
+                        "hallucinationCount": len(hallucinations),
+                    },
+                )
+            except BaseException as error:
+                hallucinations = []
+                verification_error = error
+                trace.fail_phase("hallucination_verification", verification_started, error)
+            if source_error is not None:
+                raise source_error
+            if verification_error is not None:
+                raise verification_error
     else:
-        sources = retrieval_agent.execute_workflow_node(
-            workflow, agent_memory, "sources", reranked_results, answer,
-            input_fingerprint=str(len(reranked_results)),
-        )
+        with trace.phase(
+            "source_extraction",
+            {"chunkCount": len(reranked_results)},
+        ) as phase_details:
+            sources = retrieval_agent.execute_workflow_node(
+                workflow, agent_memory, "sources", reranked_results, answer,
+                input_fingerprint=str(len(reranked_results)),
+            )
+            phase_details["sourceCount"] = len(sources)
         hallucinations = []
         agent_memory.skipped_steps.add("hallucination")
+        trace.skip_phase(
+            "hallucination_verification",
+            reason_code="plan_disabled",
+        )
 
     if plan.hallucination_check:
         execution_report.modules_executed.append("hallucination_check")
     else:
         execution_report.modules_skipped.append("hallucination_check")
+    trace.skip_phase(
+        "nli_verification",
+        reason_code="not_in_active_rag_pipeline",
+        context={"executed": False},
+    )
 
     # 7. Confidence Scoring
     log_user_activity(db, user_id, 'ai_chat', 'Scoring confidence')
-    confidence, confidence_label = retrieval_agent.execute_workflow_node(
-        workflow, agent_memory, "confidence",
-        reranked_results, hallucinations,
-        input_fingerprint=str(len(reranked_results)),
-    )
+    with trace.phase(
+        "confidence_scoring",
+        {
+            "chunkCount": len(reranked_results),
+            "hallucinationCount": len(hallucinations),
+        },
+    ) as phase_details:
+        confidence, confidence_label = retrieval_agent.execute_workflow_node(
+            workflow, agent_memory, "confidence",
+            reranked_results, hallucinations,
+            input_fingerprint=str(len(reranked_results)),
+        )
+        phase_details.update({
+            "confidence": confidence,
+            "confidenceLabel": confidence_label,
+        })
     retrieval_agent.finalize_workflow(confidence)
     execution_report.modules_executed.append("confidence_score")
 
@@ -712,14 +922,23 @@ def run_rag_pipeline(
     # 8. Store in Cache
     # We only cache if no specific selected resources are filtered
     if not selected_resource_ids:
-        save_to_cache(
-            db,
-            resource_id,
-            rewritten_question,
-            answer,
-            sources,
-            confidence,
-            user_id=user_id,
+        with trace.phase(
+            "semantic_cache_write",
+            {"confidence": confidence, "sourceCount": len(sources)},
+        ):
+            save_to_cache(
+                db,
+                resource_id,
+                rewritten_question,
+                answer,
+                sources,
+                confidence,
+                user_id=user_id,
+            )
+    else:
+        trace.skip_phase(
+            "semantic_cache_write",
+            reason_code="selected_resources_bypass_cache",
         )
 
     # 9. Log metrics (never breaks pipeline)
@@ -774,12 +993,23 @@ def run_rag_pipeline(
         except Exception:
             pass
 
-    plog.log("complete", confidence=confidence, label=confidence_label, chunks=len(reranked_results), hallucinations=len(hallucinations))
-    plog.flush()
-
+    trace.finish({
+        "mode": "retrieval",
+        "classification": plan.query_classification.value,
+        "retrievalMode": plan.retrieval_mode.value,
+        "chunkCount": len(reranked_results),
+        "sourceCount": len(sources),
+        "hallucinationCount": len(hallucinations),
+        "confidence": confidence,
+        "confidenceLabel": confidence_label,
+        "retryCount": agent_execution.retry_count,
+        "modulesExecuted": execution_report.modules_executed,
+        "modulesSkipped": execution_report.modules_skipped,
+    })
     return result
 
 
+@trace_rag_pipeline(streaming=True)
 def run_rag_pipeline_stream(
     user_id: str,
     resource_id: str,
@@ -799,31 +1029,52 @@ def run_rag_pipeline_stream(
 
     Includes cache-before-retrieval and complexity-based pipeline depth.
     """
+    trace = get_current_rag_trace()
+    if trace is None:
+        raise RuntimeError("RAG trace was not initialized")
     full_answer = ""
     pipeline_started = perf_counter()
 
     # Globe mode: bypass the entire RAG pipeline — pure LLM streaming, like ChatGPT
     if globe_on:
         from .llm_service import generate_answer_stream
+        _skip_trace_phases(
+            trace,
+            ["query_rewrite", "semantic_cache_lookup", "query_routing", "retrieval_orchestration"],
+            "globe_mode",
+        )
         buffer = ""
         THRESHOLD = 30
-        for token in generate_answer_stream(
-            question=question,
-            context="",
-            chat_history=final_history_str,
-            globe_on=True,
-            user_id=user_id,
-            resource_id=resource_id,
-            feature="media_global_chat_stream",
-        ):
-            full_answer += token
-            buffer += token
-            if len(buffer) >= THRESHOLD or re.search(r'[.!?](\s|$)', buffer):
+        with trace.phase("answer_generation", {"mode": "globe"}):
+            for token in generate_answer_stream(
+                question=question,
+                context="",
+                chat_history=final_history_str,
+                globe_on=True,
+                user_id=user_id,
+                resource_id=resource_id,
+                feature="media_global_chat_stream",
+            ):
+                full_answer += token
+                buffer += token
+                if len(buffer) >= THRESHOLD or re.search(r'[.!?](\s|$)', buffer):
+                    yield {"type": "token", "content": buffer}
+                    buffer = ""
+            if buffer:
                 yield {"type": "token", "content": buffer}
-                buffer = ""
-        if buffer:
-            yield {"type": "token", "content": buffer}
-        full_answer = normalize_response_markup(full_answer)
+        with trace.phase("response_normalization"):
+            full_answer = normalize_response_markup(full_answer)
+        _skip_trace_phases(
+            trace,
+            [
+                "citation_enforcement",
+                "source_extraction",
+                "hallucination_verification",
+                "confidence_scoring",
+                "semantic_cache_write",
+            ],
+            "globe_mode",
+        )
         yield {
             "type": "final",
             "answer": full_answer,
@@ -848,6 +1099,13 @@ def run_rag_pipeline_stream(
                 hallucination_check_status="skipped",
                 rerank_executed=False,
             )
+        trace.finish({
+            "mode": "globe",
+            "confidence": 1.0,
+            "confidenceLabel": "globe",
+            "sourceCount": 0,
+            "hallucinationCount": 0,
+        })
         yield {"type": "done"}
         return
 
@@ -858,37 +1116,43 @@ def run_rag_pipeline_stream(
 
         db = SessionLocal()
         try:
-            user = db.query(User).filter(User.id == user_id).first()
-            storage_root = user.storage_root if user else None
-            available_resource_ids = [
-                row[0]
-                for row in db.query(Resource.id).filter(
-                    Resource.user_id == user_id,
-                    Resource.is_deleted == 0,
-                ).all()
-            ]
+            with trace.phase("workspace_scope_resolution"):
+                user = db.query(User).filter(User.id == user_id).first()
+                storage_root = user.storage_root if user else None
+                available_resource_ids = [
+                    row[0]
+                    for row in db.query(Resource.id).filter(
+                        Resource.user_id == user_id,
+                        Resource.is_deleted == 0,
+                    ).all()
+                ]
 
             # 1. Query Rewrite (for cache key)
             retrieval_agent = RetrievalAgent()
             rewritten_question = question
             if chat_history and len(chat_history) > 0:
-                rewritten_question = retrieval_agent.execute_tool(
-                    "query_rewrite",
-                    question,
-                    chat_history,
-                    user_id=user_id,
-                    resource_id=resource_id,
-                    feature="query_rewrite",
-                )
+                with trace.phase("query_rewrite", {"chatHistoryPresent": True}):
+                    rewritten_question = retrieval_agent.execute_tool(
+                        "query_rewrite",
+                        question,
+                        chat_history,
+                        user_id=user_id,
+                        resource_id=resource_id,
+                        feature="query_rewrite",
+                    )
+            else:
+                trace.skip_phase("query_rewrite", reason_code="no_chat_history")
 
             # 2. Cache check BEFORE retrieval
-            cached = retrieval_agent.execute_tool(
-                "semantic_cache",
-                db,
-                resource_id,
-                rewritten_question,
-                user_id=user_id,
-            )
+            with trace.phase("semantic_cache_lookup") as phase_details:
+                cached = retrieval_agent.execute_tool(
+                    "semantic_cache",
+                    db,
+                    resource_id,
+                    rewritten_question,
+                    user_id=user_id,
+                )
+                phase_details["cacheHit"] = cached is not None
             workflow = retrieval_agent.create_workflow(
                 rewritten_question,
                 has_chat_history=bool(chat_history),
@@ -898,12 +1162,41 @@ def run_rag_pipeline_stream(
                 resource_id=resource_id,
             )
             plan = workflow.initial_plan
-            if retrieval_agent.should_accept_cache(workflow, cached, user_id=user_id, resource_id=resource_id):
+            trace.skip_phase(
+                "hyde_expansion",
+                reason_code=(
+                    "planner_executor_not_enabled"
+                    if plan.use_hyde and ENABLE_HYDE
+                    else "plan_disabled"
+                ),
+                context={"hyde": plan.use_hyde and ENABLE_HYDE},
+            )
+            trace.skip_phase(
+                "query_routing",
+                reason_code="streaming_route_not_applied",
+                context={"classification": plan.query_classification.value},
+            )
+            with trace.phase(
+                "semantic_cache_decision",
+                {
+                    "cacheHit": cached is not None,
+                    "cacheTrusted": plan.trust_semantic_cache,
+                },
+            ) as phase_details:
+                cache_accepted = retrieval_agent.should_accept_cache(
+                    workflow,
+                    cached,
+                    user_id=user_id,
+                    resource_id=resource_id,
+                )
+                phase_details["cacheAccepted"] = cache_accepted
+            if cache_accepted:
                 yield {"type": "metadata", "rewritten_question": rewritten_question}
                 # Stream cached answer in chunks
                 chunk_size = 40
-                for i in range(0, len(cached["answer"]), chunk_size):
-                    yield {"type": "token", "content": cached["answer"][i:i+chunk_size]}
+                with trace.phase("cached_response_stream"):
+                    for i in range(0, len(cached["answer"]), chunk_size):
+                        yield {"type": "token", "content": cached["answer"][i:i+chunk_size]}
                 yield {
                     "type": "final",
                     "answer": cached["answer"],
@@ -952,23 +1245,46 @@ def run_rag_pipeline_stream(
                         )
                     except Exception:
                         pass
+                _skip_trace_phases(trace, _POST_CACHE_RAG_PHASES, "semantic_cache_hit")
+                trace.finish({
+                    "mode": "cached",
+                    "cacheHit": True,
+                    "cacheAccepted": True,
+                    "confidence": cached["confidence"],
+                    "confidenceLabel": "cached",
+                    "sourceCount": len(cached.get("sources", [])),
+                    "hallucinationCount": 0,
+                })
                 return
         finally:
             db.close()
 
         # 4. Full retrieval pipeline
-        context, reranked_results, rewritten_question, execution_report = prepare_rag_context(
-            question=rewritten_question,
-            user_id=user_id,
-            resource_id=resource_id,
-            chat_history=None,
-            n_results=n_results,
-            storage_root=storage_root,
-            plan=plan,
-            available_resource_ids=available_resource_ids,
-            agent=retrieval_agent,
-            workflow=workflow,
-        )
+        with trace.phase(
+            "retrieval_orchestration",
+            {
+                "retrievalMode": plan.retrieval_mode.value,
+                "maxChunks": plan.max_chunks,
+                "retrievalDepth": plan.retrieval_depth,
+            },
+        ) as phase_details:
+            context, reranked_results, rewritten_question, execution_report = prepare_rag_context(
+                question=rewritten_question,
+                user_id=user_id,
+                resource_id=resource_id,
+                chat_history=None,
+                n_results=n_results,
+                storage_root=storage_root,
+                plan=plan,
+                available_resource_ids=available_resource_ids,
+                agent=retrieval_agent,
+                workflow=workflow,
+            )
+            phase_details.update({
+                "resultCount": len(reranked_results),
+                "modulesExecuted": execution_report.modules_executed,
+                "modulesSkipped": execution_report.modules_skipped,
+            })
         execution_report.modules_skipped.append("semantic_cache")
         agent_execution = retrieval_agent.last_result
         if agent_execution is None:
@@ -984,30 +1300,32 @@ def run_rag_pipeline_stream(
         buffer = ""
         THRESHOLD = 30
 
-        answer_stream = retrieval_agent.execute_workflow_node(
-            workflow, agent_memory, "answer",
-            question, context, final_history_str,
-            input_fingerprint=rewritten_question,
-            globe_on=globe_on,
-            user_id=user_id,
-            resource_id=resource_id,
-            feature="media_rag_answer_stream" if resource_id else "global_rag_answer_stream",
-        )
-        for token in answer_stream:
-            full_answer += token
-            buffer += token
+        with trace.phase("answer_generation", {"chunkCount": len(reranked_results)}):
+            answer_stream = retrieval_agent.execute_workflow_node(
+                workflow, agent_memory, "answer",
+                question, context, final_history_str,
+                input_fingerprint=rewritten_question,
+                globe_on=globe_on,
+                user_id=user_id,
+                resource_id=resource_id,
+                feature="media_rag_answer_stream" if resource_id else "global_rag_answer_stream",
+            )
+            for token in answer_stream:
+                full_answer += token
+                buffer += token
 
-            if len(buffer) >= THRESHOLD or re.search(r'[.!?](\s|$)', buffer):
-                yield {"type": "token", "content": buffer}
-                buffer = ""
+                if len(buffer) >= THRESHOLD or re.search(r'[.!?](\s|$)', buffer):
+                    yield {"type": "token", "content": buffer}
+                    buffer = ""
 
         execution_report.modules_executed.append("answer_generation")
 
         if buffer:
             yield {"type": "token", "content": buffer}
-        full_answer = normalize_response_markup(
-            enforce_inline_chunk_citations(full_answer, reranked_results)
-        )
+        with trace.phase("citation_enforcement", {"chunkCount": len(reranked_results)}):
+            full_answer = enforce_inline_chunk_citations(full_answer, reranked_results)
+        with trace.phase("response_normalization"):
+            full_answer = normalize_response_markup(full_answer)
         agent_memory.tool_outputs["answer"] = full_answer
 
         provisional_sources = _build_provisional_sources(reranked_results)
@@ -1025,6 +1343,14 @@ def run_rag_pipeline_stream(
         if plan.hallucination_check:
             from concurrent.futures import ThreadPoolExecutor
 
+            source_started = trace.begin_phase(
+                "source_extraction",
+                {"parallel": True, "chunkCount": len(reranked_results)},
+            )
+            verification_started = trace.begin_phase(
+                "hallucination_verification",
+                {"parallel": True, "chunkCount": len(context_chunks)},
+            )
             with ThreadPoolExecutor(max_workers=2) as pool:
                 future_sources = pool.submit(
                     retrieval_agent.execute_workflow_node,
@@ -1046,18 +1372,53 @@ def run_rag_pipeline_stream(
                     resource_id=resource_id,
                     feature="hallucination_detection",
                 )
-                sources = future_sources.result()
-                yield {
-                    "type": "sources",
-                    "answer": full_answer,
-                    "sources": sources,
-                }
-                hallucinations = future_halluc.result()
+                source_error = None
+                verification_error = None
+                try:
+                    sources = future_sources.result()
+                    trace.complete_phase(
+                        "source_extraction",
+                        source_started,
+                        {"parallel": True, "sourceCount": len(sources)},
+                    )
+                except BaseException as error:
+                    sources = []
+                    source_error = error
+                    trace.fail_phase("source_extraction", source_started, error)
+                if source_error is None:
+                    yield {
+                        "type": "sources",
+                        "answer": full_answer,
+                        "sources": sources,
+                    }
+                try:
+                    hallucinations = future_halluc.result()
+                    trace.complete_phase(
+                        "hallucination_verification",
+                        verification_started,
+                        {
+                            "parallel": True,
+                            "hallucinationCount": len(hallucinations),
+                        },
+                    )
+                except BaseException as error:
+                    hallucinations = []
+                    verification_error = error
+                    trace.fail_phase("hallucination_verification", verification_started, error)
+                if source_error is not None:
+                    raise source_error
+                if verification_error is not None:
+                    raise verification_error
         else:
-            sources = retrieval_agent.execute_workflow_node(
-                workflow, agent_memory, "sources", reranked_results, full_answer,
-                input_fingerprint=str(len(reranked_results)),
-            )
+            with trace.phase(
+                "source_extraction",
+                {"chunkCount": len(reranked_results)},
+            ) as phase_details:
+                sources = retrieval_agent.execute_workflow_node(
+                    workflow, agent_memory, "sources", reranked_results, full_answer,
+                    input_fingerprint=str(len(reranked_results)),
+                )
+                phase_details["sourceCount"] = len(sources)
             yield {
                 "type": "sources",
                 "answer": full_answer,
@@ -1065,17 +1426,37 @@ def run_rag_pipeline_stream(
             }
             hallucinations = []
             agent_memory.skipped_steps.add("hallucination")
+            trace.skip_phase(
+                "hallucination_verification",
+                reason_code="plan_disabled",
+            )
 
         if plan.hallucination_check:
             execution_report.modules_executed.append("hallucination_check")
         else:
             execution_report.modules_skipped.append("hallucination_check")
-
-        confidence, confidence_label = retrieval_agent.execute_workflow_node(
-            workflow, agent_memory, "confidence",
-            reranked_results, hallucinations,
-            input_fingerprint=str(len(reranked_results)),
+        trace.skip_phase(
+            "nli_verification",
+            reason_code="not_in_active_rag_pipeline",
+            context={"executed": False},
         )
+
+        with trace.phase(
+            "confidence_scoring",
+            {
+                "chunkCount": len(reranked_results),
+                "hallucinationCount": len(hallucinations),
+            },
+        ) as phase_details:
+            confidence, confidence_label = retrieval_agent.execute_workflow_node(
+                workflow, agent_memory, "confidence",
+                reranked_results, hallucinations,
+                input_fingerprint=str(len(reranked_results)),
+            )
+            phase_details.update({
+                "confidence": confidence,
+                "confidenceLabel": confidence_label,
+            })
         retrieval_agent.finalize_workflow(confidence)
         execution_report.modules_executed.append("confidence_score")
         latency_ms = (perf_counter() - pipeline_started) * 1000
@@ -1096,17 +1477,23 @@ def run_rag_pipeline_stream(
 
         # 6. Save to cache
         try:
-            with SessionLocal() as cache_db:
-                save_to_cache(
-                    cache_db,
-                    resource_id,
-                    rewritten_question,
-                    full_answer,
-                    sources,
-                    confidence,
-                    user_id=user_id,
-                )
+            with trace.phase(
+                "semantic_cache_write",
+                {"confidence": confidence, "sourceCount": len(sources)},
+            ):
+                with SessionLocal() as cache_db:
+                    save_to_cache(
+                        cache_db,
+                        resource_id,
+                        rewritten_question,
+                        full_answer,
+                        sources,
+                        confidence,
+                        user_id=user_id,
+                    )
         except Exception:
+            # Cache persistence is intentionally non-fatal; the failed phase is
+            # already present in the trace.
             pass
 
         if log_planner_execution:
@@ -1160,7 +1547,21 @@ def run_rag_pipeline_stream(
             except Exception:
                 pass
 
+        trace.finish({
+            "mode": "retrieval",
+            "classification": plan.query_classification.value,
+            "retrievalMode": plan.retrieval_mode.value,
+            "chunkCount": len(reranked_results),
+            "sourceCount": len(sources),
+            "hallucinationCount": len(hallucinations),
+            "confidence": confidence,
+            "confidenceLabel": confidence_label,
+            "retryCount": agent_execution.retry_count,
+            "modulesExecuted": execution_report.modules_executed,
+            "modulesSkipped": execution_report.modules_skipped,
+        })
     except Exception as e:
+        trace.fail(e)
         yield {"type": "error", "message": str(e)}
     finally:
         yield {"type": "done"}

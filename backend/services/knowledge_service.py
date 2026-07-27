@@ -18,7 +18,9 @@ from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from database import SessionLocal
+from core.logger import get_logger
 from core.paths import EXTRA_FILES_DIR
+from core.time import utc_now
 from services.url_utils import strip_api_suffix
 from models import (
     AliasCandidate,
@@ -45,6 +47,8 @@ from models import (
     SubChapter,
     UserSetting,
 )
+
+logger = get_logger("KNOWLEDGE")
 
 RELATIONSHIP_TYPES = {
     "depends_on", "uses", "requires", "compares_with", "causes",
@@ -351,7 +355,7 @@ def get_or_create_knowledge_state(db: Session, resource: Resource) -> ResourceKn
             user_id=resource.user_id,
             status="not_generated",
             stale_reasons="[]",
-            updated_at=datetime.utcnow(),
+            updated_at=utc_now(),
         )
         db.add(state)
         db.flush()
@@ -417,7 +421,7 @@ def mark_knowledge_stale(db: Session, resource_id: str, reason: str, commit: boo
             reasons.append(reason)
         state.stale_reasons = _json(reasons)
         state.status = "stale"
-        state.updated_at = datetime.utcnow()
+        state.updated_at = utc_now()
         if commit:
             db.commit()
 
@@ -746,7 +750,7 @@ def _find_concept(
             id=str(uuid4()), user_id=user_id, run_id=run_id, concept_id=best.id,
             alias=canonical_name, normalized_alias=normalized, domain=domain,
             confidence=best_score, reason="Lexically similar concept requires review",
-            status="pending", created_at=datetime.utcnow(),
+            status="pending", created_at=utc_now(),
         ))
 
     concept = Concept(
@@ -763,7 +767,7 @@ def _find_concept(
         description="",
         color="#3b82f6",
         tags="[]",
-        created_at=datetime.utcnow(),
+        created_at=utc_now(),
     )
     db.add(concept)
     db.flush()
@@ -800,7 +804,7 @@ def _set_checkpoint(
         "completed_source_units": completed_source_units or checkpoint.get(
             "completed_source_units", []
         ),
-        "updated_at": datetime.utcnow().isoformat(),
+        "updated_at": utc_now().isoformat(),
     })
     if extra:
         checkpoint.update(extra)
@@ -817,7 +821,7 @@ def _update_stage(
     db.refresh(job)
     if job.status in {"paused", "cancelled"}:
         raise KnowledgePipelineControl(job.status)
-    now = datetime.utcnow()
+    now = utc_now()
     metrics = _loads(run.metrics_json, {})
     timing = metrics.setdefault("stage_timing", {})
     previous_stage = run.current_stage
@@ -830,6 +834,21 @@ def _update_stage(
             ).total_seconds()
             timing[previous_stage] = round(
                 timing.get(previous_stage, 0.0) + max(0.0, elapsed), 3
+            )
+            logger.info(
+                f"Knowledge phase completed: {previous_stage}",
+                event="knowledge.phase_completed",
+                operation="knowledge_generation",
+                phase=previous_stage,
+                status="completed",
+                correlation_id=job.id,
+                duration_ms=round(max(0.0, elapsed) * 1000),
+                context={
+                    "jobId": job.id,
+                    "runId": run.id,
+                    "resourceId": run.resource_id,
+                    "progress": run.progress,
+                },
             )
         except (TypeError, ValueError):
             pass
@@ -845,6 +864,21 @@ def _update_stage(
     job.progress = progress
     job.heartbeat_at = now
     db.commit()
+    if previous_stage != stage:
+        logger.info(
+            f"Knowledge phase started: {stage}",
+            event="knowledge.phase_started",
+            operation="knowledge_generation",
+            phase=stage,
+            status="running",
+            correlation_id=job.id,
+            context={
+                "jobId": job.id,
+                "runId": run.id,
+                "resourceId": run.resource_id,
+                "progress": progress,
+            },
+        )
 
 
 def _active_run_ids_query(db: Session, user_id: str):
@@ -911,7 +945,7 @@ def _recalculate_graph(db: Session, user_id: str, concept_ids: set[str]) -> None
         analytics.difficulty_score = min(5.0, 1.0 + relationships * 0.15 + analytics.chapter_count * 0.05)
         timeline_positions = [item.start_seconds for item in mentions if item.start_seconds is not None]
         analytics.learning_order = int(min(timeline_positions)) if timeline_positions else None
-        analytics.updated_at = datetime.utcnow()
+        analytics.updated_at = utc_now()
 
         concept = db.query(Concept).filter(Concept.id == concept_id).first()
         if concept and not mentions and concept.origin == "generated":
@@ -929,7 +963,7 @@ def _recalculate_graph(db: Session, user_id: str, concept_ids: set[str]) -> None
             sum(item.confidence for item in evidence) / len(evidence) if evidence else 0.0
         )
         relationship.archived = 0 if evidence else 1
-        relationship.updated_at = datetime.utcnow()
+        relationship.updated_at = utc_now()
 
 
 def _rebuild_recommendations(db: Session, user_id: str, concept_ids: set[str]) -> None:
@@ -964,7 +998,7 @@ def _rebuild_recommendations(db: Session, user_id: str, concept_ids: set[str]) -
                 score=relation.confidence,
                 explanation=f"Connected by {relation.relationship_type} with {relation.evidence_count} supporting source(s).",
                 jump_target_json=_json(first_reference["jump_target"]) if first_reference else None,
-                created_at=datetime.utcnow(), updated_at=datetime.utcnow(),
+                created_at=utc_now(), updated_at=utc_now(),
             ))
 
 
@@ -1544,6 +1578,15 @@ def run_knowledge_pipeline(resource_id: str, job_id: str) -> str:
         job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
         if not resource or not job:
             raise KnowledgePipelineError("Resource or job no longer exists")
+        logger.info(
+            "Knowledge generation started.",
+            event="knowledge.started",
+            operation="knowledge_generation",
+            phase="preflight",
+            status="starting",
+            correlation_id=job_id,
+            context={"jobId": job_id, "resourceId": resource_id},
+        )
         units = _source_units(resource, db)
         if not units:
             raise KnowledgePipelineError(
@@ -1589,7 +1632,7 @@ def run_knowledge_pipeline(resource_id: str, job_id: str) -> str:
                 version=next_version, status="processing",
                 input_fingerprint=fingerprint,
                 current_stage=STAGES[0][0], progress=0,
-                created_at=datetime.utcnow(), started_at=datetime.utcnow(),
+                created_at=utc_now(), started_at=utc_now(),
                 checkpoint_json="{}", metrics_json="{}",
                 rule_version=STRICT_RULE_VERSION,
                 model_version=configured_model,
@@ -1600,7 +1643,7 @@ def run_knowledge_pipeline(resource_id: str, job_id: str) -> str:
             _cleanup_run_staging(db, run.id)
             run.status = "processing"
             run.error_message = None
-            run.started_at = datetime.utcnow()
+            run.started_at = utc_now()
             run.finished_at = None
             if not resume_cache:
                 run.checkpoint_json = "{}"
@@ -1608,7 +1651,7 @@ def run_knowledge_pipeline(resource_id: str, job_id: str) -> str:
             run.rule_version = STRICT_RULE_VERSION
             run.model_version = configured_model
         state.status = "processing"
-        state.updated_at = datetime.utcnow()
+        state.updated_at = utc_now()
         job.input_fingerprint = fingerprint
         db.commit()
 
@@ -2072,13 +2115,13 @@ def run_knowledge_pipeline(resource_id: str, job_id: str) -> str:
         has_published_concepts = bool(affected)
         state.status = "ready" if has_published_concepts else "ready_empty"
         state.stale_reasons = "[]"
-        state.generated_at = datetime.utcnow()
-        state.updated_at = datetime.utcnow()
+        state.generated_at = utc_now()
+        state.updated_at = utc_now()
         run.status = "completed"
         run.current_stage = "global_graph_publish"
         run.progress = 94
-        run.published_at = datetime.utcnow()
-        run.finished_at = datetime.utcnow()
+        run.published_at = utc_now()
+        run.finished_at = utc_now()
         db.flush()
 
         _recalculate_graph(db, resource.user_id, affected)
@@ -2096,8 +2139,29 @@ def run_knowledge_pipeline(resource_id: str, job_id: str) -> str:
         _set_checkpoint(run, "complete")
         job.current_stage = "complete"
         job.progress = 100
-        job.heartbeat_at = datetime.utcnow()
+        job.heartbeat_at = utc_now()
         db.commit()
+        total_duration_ms = None
+        if run.started_at and run.finished_at:
+            total_duration_ms = round(
+                max(0.0, (run.finished_at - run.started_at).total_seconds()) * 1000
+            )
+        logger.info(
+            "Knowledge generation completed.",
+            event="knowledge.completed",
+            operation="knowledge_generation",
+            phase="complete",
+            status="completed",
+            correlation_id=job_id,
+            duration_ms=total_duration_ms,
+            context={
+                "jobId": job_id,
+                "runId": run.id,
+                "resourceId": resource_id,
+                "result": "completed" if has_published_concepts else "completed_empty",
+                "conceptCount": len(affected),
+            },
+        )
         _RUN_MEMORY_CACHE.pop(run.id, None)
         return "completed" if has_published_concepts else "completed_empty"
 
@@ -2114,7 +2178,7 @@ def run_knowledge_pipeline(resource_id: str, job_id: str) -> str:
             run.status = control.status
             run.current_stage = control.status
             run.finished_at = (
-                datetime.utcnow() if control.status == "cancelled" else None
+                utc_now() if control.status == "cancelled" else None
             )
         if resource:
             state = get_or_create_knowledge_state(db, resource)
@@ -2128,8 +2192,21 @@ def run_knowledge_pipeline(resource_id: str, job_id: str) -> str:
                 )
             else:
                 state.status = "not_generated"
-            state.updated_at = datetime.utcnow()
+            state.updated_at = utc_now()
         db.commit()
+        logger.warning(
+            f"Knowledge generation {control.status}.",
+            event="knowledge.controlled",
+            operation="knowledge_generation",
+            phase=control.status,
+            status="cancelled" if control.status == "cancelled" else "stopped",
+            correlation_id=job_id,
+            context={
+                "jobId": job_id,
+                "runId": run.id if run else None,
+                "resourceId": resource_id,
+            },
+        )
         return control.status
     except Exception as exc:
         from services.dependency_failure_service import DependencyFailure
@@ -2157,7 +2234,7 @@ def run_knowledge_pipeline(resource_id: str, job_id: str) -> str:
                 _RUN_MEMORY_CACHE.pop(run.id, None)
                 run.status = "failed"
                 run.error_message = str(exc)[:2000]
-                run.finished_at = datetime.utcnow()
+                run.finished_at = utc_now()
         if resource:
             state = get_or_create_knowledge_state(db, resource)
             current_fingerprint = _source_fingerprint(resource, db)
@@ -2179,13 +2256,28 @@ def run_knowledge_pipeline(resource_id: str, job_id: str) -> str:
                         if state.active_run_id else "failed"
                     )
                 )
-            state.updated_at = datetime.utcnow()
+            state.updated_at = utc_now()
         if job:
             job.retryable = 1
             if temporary:
                 job.current_stage = "waiting_for_connection"
                 job.last_error_code = exc.code
         db.commit()
+        logger.exception(
+            "Knowledge generation failed.",
+            event="knowledge.failed",
+            operation="knowledge_generation",
+            phase=run.current_stage if run else "unknown",
+            status="failed",
+            correlation_id=job_id,
+            context={
+                "jobId": job_id,
+                "runId": run.id if run else None,
+                "resourceId": resource_id,
+                "temporary": temporary,
+                "errorCode": exc.code if isinstance(exc, DependencyFailure) else type(exc).__name__,
+            },
+        )
         raise
     finally:
         db.close()
@@ -2596,7 +2688,7 @@ def delete_concept(
             domain=concept.domain or "general",
             normalized_name=concept.normalized_name,
             reason="user_deleted", active=1,
-            created_at=datetime.utcnow(),
+            created_at=utc_now(),
         )
         db.add(suppression)
     else:
@@ -2627,7 +2719,7 @@ def restore_concept(
     ).all()
     for suppression in suppressions:
         suppression.active = 0
-        suppression.restored_at = datetime.utcnow()
+        suppression.restored_at = utc_now()
     db.commit()
     return concept
 
@@ -2867,7 +2959,7 @@ def resolve_alias_candidate(
     if decision not in {"approve", "reject"}:
         raise ValueError("decision must be approve or reject")
     candidate.status = "approved" if decision == "approve" else "rejected"
-    candidate.resolved_at = datetime.utcnow()
+    candidate.resolved_at = utc_now()
     if decision == "approve" and candidate.concept_id:
         existing = db.query(ConceptAlias).filter(
             ConceptAlias.concept_id == candidate.concept_id,

@@ -1,6 +1,11 @@
 from .llm_service import get_user_chat_client
 from .ai_cost_service import record_chat_completion_usage
 from core.activity_log import log_user_activity
+from core.logger import get_logger
+from services.pipeline_logger import get_current_rag_trace
+
+
+logger = get_logger("RAG")
 
 
 def generate_query_variants(
@@ -148,7 +153,15 @@ Do not add prefixes like 'Rewritten Query:' or 'Output:'.""",
     if not rewritten_query:
         return current_question
 
-    # Debug logging
-    print(f"QUERY REWRITE\nOriginal: {current_question}\nRewritten: {rewritten_query}")
+    trace = get_current_rag_trace()
+    logger.info(
+        "Query rewrite completed.",
+        event="rag.query_rewrite_completed",
+        operation="rag_pipeline",
+        phase="query_rewrite",
+        status="completed",
+        correlation_id=trace.correlation_id if trace else None,
+        context={"rewritten": rewritten_query != current_question},
+    )
 
     return rewritten_query

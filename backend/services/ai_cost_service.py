@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time as _time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -11,6 +13,8 @@ import requests
 from sqlalchemy import func
 
 from database import SessionLocal
+from core.logger import get_logger
+from core.time import utc_now
 from models import AiUsageEvent, User
 
 AI_USAGE_PROVIDER = "chatqt"
@@ -19,9 +23,50 @@ AI_BILLING_UNIT_PRICE_USD = os.getenv("AI_BILLING_UNIT_PRICE_USD")
 AI_DEFAULT_USER_TOKEN_LIMIT = max(1, int(os.getenv("AI_DEFAULT_USER_TOKEN_LIMIT", "25000")))
 AI_USAGE_HTTP_TIMEOUT = max(2, int(os.getenv("AI_USAGE_HTTP_TIMEOUT", "15")))
 AI_USAGE_RECENT_PAGES = max(1, int(os.getenv("AI_USAGE_RECENT_PAGES", "3")))
+AI_USAGE_SETTLEMENT_ATTEMPTS = max(
+    1,
+    int(os.getenv("AI_USAGE_SETTLEMENT_ATTEMPTS", "6")),
+)
+AI_USAGE_SETTLEMENT_DELAY_SECONDS = max(
+    0.1,
+    float(os.getenv("AI_USAGE_SETTLEMENT_DELAY_SECONDS", "0.75")),
+)
 
 _user_billing_cache: dict[str, tuple[str, str, float]] = {}
 _user_wallet_cache: dict[str, tuple[str, str, float]] = {}
+_usage_logger = get_logger("BILLING")
+_settlement_executor = ThreadPoolExecutor(
+    max_workers=2,
+    thread_name_prefix="provider-usage-settlement",
+)
+_settlement_lock = threading.Lock()
+_scheduled_settlements: set[str] = set()
+
+
+def _active_correlation_id() -> str | None:
+    """Resolve the nearest active generation, RAG, or API trace."""
+    try:
+        from services.generation_trace import get_current_generation_trace
+
+        generation_trace = get_current_generation_trace()
+        if generation_trace:
+            return generation_trace.correlation_id
+    except Exception:
+        pass
+    try:
+        from services.pipeline_logger import get_current_rag_trace
+
+        rag_trace = get_current_rag_trace()
+        if rag_trace:
+            return rag_trace.correlation_id
+    except Exception:
+        pass
+    try:
+        from core.request_context import get_request_correlation_id
+
+        return get_request_correlation_id()
+    except Exception:
+        return None
 
 
 def _get_user_billing_config(user_id: str | None) -> tuple[str, str]:
@@ -279,30 +324,31 @@ def _extract_generation_metrics(payload: dict[str, Any]) -> tuple[int | None, in
     return prompt_tokens, completion_tokens, total_tokens, provider_cost_usd
 
 
-def _resolve_chat_completion_metrics(response: Any, user_id: str | None = None) -> tuple[int | None, int | None, int | None, float | None, str | None]:
+def _resolve_chat_completion_metrics(
+    response: Any,
+    user_id: str | None = None,
+) -> tuple[
+    int | None,
+    int | None,
+    int | None,
+    float | None,
+    str | None,
+    bool,
+]:
     request_id = _extract_request_id(response)
     prompt_tokens, completion_tokens, total_tokens = _extract_usage(response)
     payload = _response_payload(response)
     provider_cost_usd = _find_first_numeric(payload, {"cost", "price", "total_cost", "totalCost"})
+    provider_indexed = False
 
-    if request_id:
-        detail_payload = _fetch_generation_detail(request_id, user_id=user_id)
-        if detail_payload:
-            detail_prompt, detail_completion, detail_total, detail_cost = _extract_generation_metrics(detail_payload)
-            prompt_tokens = detail_prompt if detail_prompt is not None else prompt_tokens
-            completion_tokens = detail_completion if detail_completion is not None else completion_tokens
-            total_tokens = detail_total if detail_total is not None else total_tokens
-            provider_cost_usd = detail_cost if detail_cost is not None else provider_cost_usd
-        else:
-            recent_payload = _find_generation_in_recent_pages(request_id, user_id=user_id)
-            if recent_payload:
-                detail_prompt, detail_completion, detail_total, detail_cost = _extract_generation_metrics(recent_payload)
-                prompt_tokens = detail_prompt if detail_prompt is not None else prompt_tokens
-                completion_tokens = detail_completion if detail_completion is not None else completion_tokens
-                total_tokens = detail_total if detail_total is not None else total_tokens
-                provider_cost_usd = detail_cost if detail_cost is not None else provider_cost_usd
-
-    return prompt_tokens, completion_tokens, total_tokens, provider_cost_usd, request_id
+    return (
+        prompt_tokens,
+        completion_tokens,
+        total_tokens,
+        provider_cost_usd,
+        request_id,
+        provider_indexed,
+    )
 
 
 def _billable_cost(total_tokens: int, provider_cost_usd: float | None) -> tuple[float | None, float | None]:
@@ -330,12 +376,12 @@ def record_ai_usage(
     provider_cost_usd: float | None = None,
     request_id: str | None = None,
     metadata: dict[str, Any] | None = None,
-) -> None:
+) -> bool:
     if not user_id:
-        return
+        return False
     usage_scope = _classify_usage_scope(feature, operation, metadata or {})
     if usage_scope != "user_visible":
-        return
+        return False
 
     billable_cost_usd, unit_price_usd = _billable_cost(total_tokens, provider_cost_usd)
 
@@ -357,7 +403,7 @@ def record_ai_usage(
             event = AiUsageEvent(
                 id=str(uuid4()),
                 user_id=user_id,
-                created_at=datetime.utcnow(),
+                created_at=utc_now(),
             )
             db.add(event)
         event.resource_id = resource_id
@@ -375,10 +421,178 @@ def record_ai_usage(
         event.unit_price_usd = unit_price_usd
         event.metadata_json = json.dumps(metadata or {})
         db.commit()
+        return True
     except Exception:
         db.rollback()
+        return False
     finally:
         db.close()
+
+
+def _settle_provider_usage(
+    *,
+    user_id: str,
+    resource_id: str | None,
+    feature: str,
+    operation: str,
+    model: str | None,
+    request_id: str,
+    correlation_id: str | None,
+    metadata: dict[str, Any],
+    settlement_key: str,
+) -> None:
+    """Wait for provider indexing, persist exact metrics, then refresh wallet."""
+    settlement_started_at = _time.perf_counter()
+    try:
+        for attempt in range(1, AI_USAGE_SETTLEMENT_ATTEMPTS + 1):
+            _time.sleep(
+                min(
+                    AI_USAGE_SETTLEMENT_DELAY_SECONDS * (2 ** (attempt - 1)),
+                    6.0,
+                )
+            )
+            payload = _fetch_generation_detail(request_id, user_id=user_id)
+            if not payload:
+                payload = _find_generation_in_recent_pages(
+                    request_id,
+                    user_id=user_id,
+                )
+            if not payload:
+                continue
+
+            (
+                prompt_tokens,
+                completion_tokens,
+                total_tokens,
+                provider_cost_usd,
+            ) = _extract_generation_metrics(payload)
+            if total_tokens is None:
+                continue
+            if (
+                provider_cost_usd is None
+                and attempt < AI_USAGE_SETTLEMENT_ATTEMPTS
+            ):
+                continue
+
+            billable_cost_usd, unit_price_usd = _billable_cost(
+                total_tokens,
+                provider_cost_usd,
+            )
+            settled_metadata = {
+                **metadata,
+                "pending_settlement": False,
+                "exact_tokens": True,
+                "exact_provider_cost": provider_cost_usd is not None,
+                "provider_indexed": True,
+                "settlement_attempt": attempt,
+            }
+            record_ai_usage(
+                user_id=user_id,
+                resource_id=resource_id,
+                feature=feature,
+                operation=operation,
+                model=model,
+                prompt_tokens=int(prompt_tokens or 0),
+                completion_tokens=int(completion_tokens or 0),
+                total_tokens=int(total_tokens or 0),
+                provider_cost_usd=provider_cost_usd,
+                request_id=request_id,
+                metadata=settled_metadata,
+            )
+
+            wallet = get_user_wallet_balance(user_id)
+            context = {
+                "feature": feature,
+                "model": model,
+                "providerIndexed": True,
+                "settlementAttempt": attempt,
+                "promptTokenCount": int(prompt_tokens or 0),
+                "completionTokenCount": int(completion_tokens or 0),
+                "totalTokenCount": int(total_tokens or 0),
+                "providerCostUsd": provider_cost_usd,
+                "billableCostUsd": billable_cost_usd,
+                "walletAvailable": bool(wallet.get("available")),
+                "walletBalance": wallet.get("amount"),
+                "walletCurrency": wallet.get("currency"),
+            }
+            log_method = (
+                _usage_logger.info
+                if provider_cost_usd is not None
+                else _usage_logger.warning
+            )
+            log_method(
+                "Provider indexed generation usage; cost and token burn were settled and wallet status was checked.",
+                event="provider.usage_settled",
+                operation="provider_usage_settlement",
+                phase="provider_indexing",
+                status="completed",
+                correlation_id=correlation_id,
+                duration_ms=max(
+                    0.0,
+                    (_time.perf_counter() - settlement_started_at) * 1000,
+                ),
+                context=context,
+            )
+            return
+
+        _usage_logger.warning(
+            "Provider usage is still waiting to be indexed.",
+            event="provider.usage_pending",
+            operation="provider_usage_settlement",
+            phase="provider_indexing",
+            status="waiting",
+            correlation_id=correlation_id,
+            duration_ms=max(
+                0.0,
+                (_time.perf_counter() - settlement_started_at) * 1000,
+            ),
+            context={
+                "feature": feature,
+                "model": model,
+                "providerIndexed": False,
+                "pendingSettlement": True,
+                "settlementAttempt": AI_USAGE_SETTLEMENT_ATTEMPTS,
+            },
+        )
+    finally:
+        with _settlement_lock:
+            _scheduled_settlements.discard(settlement_key)
+
+
+def _schedule_provider_usage_settlement(
+    *,
+    user_id: str | None,
+    resource_id: str | None,
+    feature: str,
+    operation: str,
+    model: str | None,
+    request_id: str | None,
+    correlation_id: str | None,
+    metadata: dict[str, Any],
+) -> None:
+    if not user_id or not request_id:
+        return
+    settlement_key = f"{user_id}:{request_id}:{feature}:{operation}"
+    with _settlement_lock:
+        if settlement_key in _scheduled_settlements:
+            return
+        _scheduled_settlements.add(settlement_key)
+    try:
+        _settlement_executor.submit(
+            _settle_provider_usage,
+            user_id=user_id,
+            resource_id=resource_id,
+            feature=feature,
+            operation=operation,
+            model=model,
+            request_id=request_id,
+            correlation_id=correlation_id,
+            metadata=dict(metadata),
+            settlement_key=settlement_key,
+        )
+    except Exception:
+        with _settlement_lock:
+            _scheduled_settlements.discard(settlement_key)
 
 
 def record_chat_completion_usage(
@@ -392,9 +606,29 @@ def record_chat_completion_usage(
     completion_text: str = "",
     resource_id: str | None = None,
     metadata: dict[str, Any] | None = None,
-) -> None:
-    prompt_tokens, completion_tokens, total_tokens, provider_cost_usd, request_id = _resolve_chat_completion_metrics(response, user_id=user_id)
-    pending = total_tokens is None
+    correlation_id: str | None = None,
+) -> dict[str, Any]:
+    (
+        prompt_tokens,
+        completion_tokens,
+        total_tokens,
+        provider_cost_usd,
+        request_id,
+        provider_indexed,
+    ) = _resolve_chat_completion_metrics(response, user_id=user_id)
+    correlation_id = correlation_id or _active_correlation_id() or request_id
+    pending = (
+        not provider_indexed
+        or total_tokens is None
+        or provider_cost_usd is None
+    )
+    usage_metadata = {
+        **(metadata or {}),
+        "exact_tokens": total_tokens is not None,
+        "exact_provider_cost": provider_cost_usd is not None,
+        "pending_settlement": pending,
+        "provider_indexed": provider_indexed,
+    }
     record_ai_usage(
         user_id=user_id,
         resource_id=resource_id,
@@ -406,13 +640,31 @@ def record_chat_completion_usage(
         total_tokens=int(total_tokens or 0),
         provider_cost_usd=provider_cost_usd,
         request_id=request_id,
-        metadata={
-            **(metadata or {}),
-            "exact_tokens": not pending,
-            "exact_provider_cost": provider_cost_usd is not None,
-            "pending_settlement": pending,
-        },
+        metadata=usage_metadata,
     )
+    _schedule_provider_usage_settlement(
+        user_id=user_id,
+        resource_id=resource_id,
+        feature=feature,
+        operation=operation,
+        model=model,
+        request_id=request_id,
+        correlation_id=correlation_id,
+        metadata=usage_metadata,
+    )
+    billable_cost_usd, _unit_price_usd = _billable_cost(
+        int(total_tokens or 0),
+        provider_cost_usd,
+    )
+    return {
+        "promptTokenCount": int(prompt_tokens or 0),
+        "completionTokenCount": int(completion_tokens or 0),
+        "totalTokenCount": int(total_tokens or 0),
+        "providerCostUsd": provider_cost_usd,
+        "billableCostUsd": billable_cost_usd,
+        "providerIndexed": provider_indexed,
+        "pendingSettlement": pending,
+    }
 
 
 def record_stream_completion_usage(
@@ -423,14 +675,36 @@ def record_stream_completion_usage(
     request_id: str | None = None,
     resource_id: str | None = None,
     metadata: dict[str, Any] | None = None,
-) -> None:
+    correlation_id: str | None = None,
+) -> dict[str, Any]:
     if not request_id:
-        return
-    detail_payload = _fetch_generation_detail(request_id, user_id=user_id)
-    if not detail_payload:
-        detail_payload = _find_generation_in_recent_pages(request_id, user_id=user_id)
-    prompt_tokens, completion_tokens, total_tokens, provider_cost_usd = _extract_generation_metrics(detail_payload or {})
-    pending = total_tokens is None
+        return {
+            "promptTokenCount": 0,
+            "completionTokenCount": 0,
+            "totalTokenCount": 0,
+            "providerCostUsd": None,
+            "billableCostUsd": None,
+            "providerIndexed": False,
+            "pendingSettlement": True,
+        }
+    correlation_id = correlation_id or _active_correlation_id() or request_id
+    prompt_tokens = None
+    completion_tokens = None
+    total_tokens = None
+    provider_cost_usd = None
+    provider_indexed = False
+    pending = (
+        not provider_indexed
+        or total_tokens is None
+        or provider_cost_usd is None
+    )
+    usage_metadata = {
+        **(metadata or {}),
+        "exact_tokens": total_tokens is not None,
+        "exact_provider_cost": provider_cost_usd is not None,
+        "pending_settlement": pending,
+        "provider_indexed": provider_indexed,
+    }
     record_ai_usage(
         user_id=user_id,
         resource_id=resource_id,
@@ -442,13 +716,31 @@ def record_stream_completion_usage(
         total_tokens=int(total_tokens or 0),
         provider_cost_usd=provider_cost_usd,
         request_id=request_id,
-        metadata={
-            **(metadata or {}),
-            "exact_tokens": not pending,
-            "exact_provider_cost": provider_cost_usd is not None,
-            "pending_settlement": pending,
-        },
+        metadata=usage_metadata,
     )
+    _schedule_provider_usage_settlement(
+        user_id=user_id,
+        resource_id=resource_id,
+        feature=feature,
+        operation="stream_chat",
+        model=model,
+        request_id=request_id,
+        correlation_id=correlation_id,
+        metadata=usage_metadata,
+    )
+    billable_cost_usd, _unit_price_usd = _billable_cost(
+        int(total_tokens or 0),
+        provider_cost_usd,
+    )
+    return {
+        "promptTokenCount": int(prompt_tokens or 0),
+        "completionTokenCount": int(completion_tokens or 0),
+        "totalTokenCount": int(total_tokens or 0),
+        "providerCostUsd": provider_cost_usd,
+        "billableCostUsd": billable_cost_usd,
+        "providerIndexed": provider_indexed,
+        "pendingSettlement": pending,
+    }
 
 
 def serialize_ai_usage_event(event: AiUsageEvent) -> dict[str, Any]:

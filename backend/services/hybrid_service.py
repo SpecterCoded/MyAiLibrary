@@ -1,6 +1,9 @@
+from contextlib import nullcontext
+
 from services.retrieval_service import search_resource
 from .bm25_service import search_resource_bm25
 from core.activity_log import log_user_activity
+from services.pipeline_logger import RagPipelineTrace, get_current_rag_trace
 
 
 def search_resource_hybrid(
@@ -10,15 +13,55 @@ def search_resource_hybrid(
     top_k: int = 20,
     storage_root: str | None = None,
     rrf_k: int = 60,
+    trace: RagPipelineTrace | None = None,
 ):
     # Step 1-2: Run Chroma + BM25 in parallel (independent calls)
     from concurrent.futures import ThreadPoolExecutor
 
+    rag_trace = trace or get_current_rag_trace()
+    dense_started = rag_trace.begin_phase(
+        "dense_retrieval",
+        {"parallel": True, "retrievalDepth": top_k},
+    ) if rag_trace else None
+    keyword_started = rag_trace.begin_phase(
+        "keyword_retrieval",
+        {"parallel": True, "retrievalDepth": top_k},
+    ) if rag_trace else None
     with ThreadPoolExecutor(max_workers=2) as pool:
         future_chroma = pool.submit(search_resource, resource_id, query, user_id=user_id, n_results=top_k, storage_root=storage_root)
         future_bm25 = pool.submit(search_resource_bm25, resource_id, query, top_k=top_k)
-        chroma_results = future_chroma.result()
-        bm25_results = future_bm25.result()
+        dense_error = None
+        keyword_error = None
+        try:
+            chroma_results = future_chroma.result()
+            if rag_trace and dense_started is not None:
+                rag_trace.complete_phase(
+                    "dense_retrieval",
+                    dense_started,
+                    {"parallel": True, "resultCount": len(chroma_results.get("documents", []))},
+                )
+        except BaseException as error:
+            chroma_results = {"documents": [], "metadatas": [], "distances": []}
+            dense_error = error
+            if rag_trace and dense_started is not None:
+                rag_trace.fail_phase("dense_retrieval", dense_started, error)
+        try:
+            bm25_results = future_bm25.result()
+            if rag_trace and keyword_started is not None:
+                rag_trace.complete_phase(
+                    "keyword_retrieval",
+                    keyword_started,
+                    {"parallel": True, "resultCount": len(bm25_results)},
+                )
+        except BaseException as error:
+            bm25_results = []
+            keyword_error = error
+            if rag_trace and keyword_started is not None:
+                rag_trace.fail_phase("keyword_retrieval", keyword_started, error)
+        if dense_error is not None:
+            raise dense_error
+        if keyword_error is not None:
+            raise keyword_error
 
     # Map results by chunk_index
     merged_results = {}
@@ -86,7 +129,15 @@ def search_resource_hybrid(
         )
 
     # Step 5: Sort descending by hybrid_score
-    final_results.sort(key=lambda x: x["hybrid_score"], reverse=True)
+    with (
+        rag_trace.phase(
+            "reciprocal_rank_fusion",
+            {"candidateCount": len(final_results), "rrfK": rrf_k},
+        )
+        if rag_trace else nullcontext({})
+    ) as phase_details:
+        final_results.sort(key=lambda x: x["hybrid_score"], reverse=True)
+        phase_details["resultCount"] = len(final_results[:top_k])
 
     # Log hybrid search results
     try:

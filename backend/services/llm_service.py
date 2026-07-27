@@ -6,12 +6,17 @@ import json
 import re
 import os
 import time as _time
+from contextlib import nullcontext
 
 from openai import OpenAI
 from services.url_utils import strip_api_suffix
 from services.ai_cost_service import (
     record_chat_completion_usage,
     record_stream_completion_usage,
+)
+from services.generation_trace import (
+    get_current_generation_trace,
+    trace_generation,
 )
 
 _INLINE_CITATION_PATTERN = re.compile(r'(?:\s*\(\s*(?:Chunk\s+\d+|\[\d+\])\s*\)|\s*Chunk\s+\d+|\s*\[\d+\])\s*$', re.IGNORECASE)
@@ -83,6 +88,37 @@ def get_user_chat_client(user_id: str | None) -> tuple[OpenAI, str]:
         db.close()
 
 
+def _create_chat_completion(
+    user_id: str | None,
+    *,
+    messages: list[dict],
+    temperature: float,
+    **kwargs,
+):
+    """Create one traced provider request without logging prompt content."""
+    trace = get_current_generation_trace()
+    if trace:
+        with trace.phase("provider_configuration"):
+            client, model = get_user_chat_client(user_id)
+        with trace.phase("provider_request", {"model": model}):
+            response = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=temperature,
+                **kwargs,
+            )
+        return response, model
+
+    client, model = get_user_chat_client(user_id)
+    response = client.chat.completions.create(
+        model=model,
+        messages=messages,
+        temperature=temperature,
+        **kwargs,
+    )
+    return response, model
+
+
 def _record_completion(
     response,
     *,
@@ -95,6 +131,9 @@ def _record_completion(
     model: str,
     metadata: dict | None = None,
 ):
+    trace = get_current_generation_trace()
+    correlation_id = trace.correlation_id if trace else None
+    metrics: dict | None = None
     # Log token burn to activity log.
     try:
         if user_id and hasattr(response, 'usage') and response.usage:
@@ -107,17 +146,33 @@ def _record_completion(
 
             # Record usage before logging token burn.
             try:
-                record_chat_completion_usage(
-                    response=response,
-                    user_id=user_id,
-                    resource_id=resource_id,
-                    feature=feature,
-                    operation=operation,
-                    model=model,
-                    prompt_text=prompt_text,
-                    completion_text=completion_text,
-                    metadata=metadata,
-                )
+                if trace:
+                    with trace.phase("usage_accounting", {"model": model}):
+                        metrics = record_chat_completion_usage(
+                            response=response,
+                            user_id=user_id,
+                            resource_id=resource_id,
+                            feature=feature,
+                            operation=operation,
+                            model=model,
+                            prompt_text=prompt_text,
+                            completion_text=completion_text,
+                            metadata=metadata,
+                            correlation_id=correlation_id,
+                        )
+                else:
+                    metrics = record_chat_completion_usage(
+                        response=response,
+                        user_id=user_id,
+                        resource_id=resource_id,
+                        feature=feature,
+                        operation=operation,
+                        model=model,
+                        prompt_text=prompt_text,
+                        completion_text=completion_text,
+                        metadata=metadata,
+                        correlation_id=correlation_id,
+                    )
             except Exception:
                 pass
 
@@ -130,24 +185,44 @@ def _record_completion(
             )
 
             db.close()
+            if trace and metrics:
+                trace.usage_received(metrics)
             return  # Already recorded above, skip duplicate
     except Exception:
         pass
 
     try:
-        record_chat_completion_usage(
-            response=response,
-            user_id=user_id,
-            resource_id=resource_id,
-            feature=feature,
-            operation=operation,
-            model=model,
-            prompt_text=prompt_text,
-            completion_text=completion_text,
-            metadata=metadata,
-        )
+        if trace:
+            with trace.phase("usage_accounting", {"model": model}):
+                metrics = record_chat_completion_usage(
+                    response=response,
+                    user_id=user_id,
+                    resource_id=resource_id,
+                    feature=feature,
+                    operation=operation,
+                    model=model,
+                    prompt_text=prompt_text,
+                    completion_text=completion_text,
+                    metadata=metadata,
+                    correlation_id=correlation_id,
+                )
+        else:
+            metrics = record_chat_completion_usage(
+                response=response,
+                user_id=user_id,
+                resource_id=resource_id,
+                feature=feature,
+                operation=operation,
+                model=model,
+                prompt_text=prompt_text,
+                completion_text=completion_text,
+                metadata=metadata,
+                correlation_id=correlation_id,
+            )
     except Exception:
         pass
+    if trace and metrics:
+        trace.usage_received(metrics)
 
 
 def _tokenize_for_overlap(text: str) -> list[str]:
@@ -260,7 +335,7 @@ def enforce_inline_chunk_citations(answer: str, results: list[dict]) -> str:
     return "\n".join(updated_lines)
 
 
-def parse_json_robustly(content: str):
+def _parse_json_robustly(content: str):
     """Robustly extract and parse JSON from string content returned by LLMs.
     Supports markdown blocks, trailing commas, single-quote literals, etc.
     """
@@ -310,11 +385,20 @@ def parse_json_robustly(content: str):
     return json.loads(content)
 
 
+def parse_json_robustly(content: str):
+    trace = get_current_generation_trace()
+    if trace:
+        with trace.phase("response_parsing"):
+            return _parse_json_robustly(content)
+    return _parse_json_robustly(content)
+
+
 # =========================
 # CORE QUERY GENERATORS
 # =========================
 
 
+@trace_generation()
 def generate_answer(
     question: str,
     context: str,
@@ -465,10 +549,9 @@ Question:
 {question}
 """
 
-    _client, _model = get_user_chat_client(user_id)
     try:
-        response = _client.chat.completions.create(
-            model=_model,
+        response, _model = _create_chat_completion(
+            user_id,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
         )
@@ -510,7 +593,7 @@ def _clean_answer(text: str) -> str:
     return text.strip()
 
 
-def normalize_response_markup(text: str) -> str:
+def _normalize_response_markup(text: str) -> str:
     """Normalize supported rich-response markers before storage/rendering."""
     if not text:
         return text
@@ -544,6 +627,15 @@ def normalize_response_markup(text: str) -> str:
     )
 
 
+def normalize_response_markup(text: str) -> str:
+    trace = get_current_generation_trace()
+    if trace:
+        with trace.phase("response_normalization"):
+            return _normalize_response_markup(text)
+    return _normalize_response_markup(text)
+
+
+@trace_generation(streaming=True)
 def generate_answer_stream(
     question: str,
     context: str,
@@ -648,30 +740,39 @@ Question:
 {question}
 """
 
-    _client, _model = get_user_chat_client(user_id)
     try:
-        response = _client.chat.completions.create(
-            model=_model,
+        response, _model = _create_chat_completion(
+            user_id,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
             stream=True,
         )
     except Exception as e:
+        trace = get_current_generation_trace()
+        if trace:
+            trace.fail(e)
         yield {"type": "error", "message": _classify_api_error(e)}
         return
 
     buffer = ""
     full_output = ""
     request_id = None
-    for chunk in response:
-        if request_id is None:
-            request_id = getattr(chunk, "id", None)
-        if chunk.choices[0].delta.content:
-            buffer += chunk.choices[0].delta.content
-            full_output += chunk.choices[0].delta.content
-            if len(buffer) > 20:
-                yield buffer[:-20]
-                buffer = buffer[-20:]
+    trace = get_current_generation_trace()
+    stream_phase = (
+        trace.phase("provider_stream", {"model": _model})
+        if trace
+        else nullcontext({})
+    )
+    with stream_phase:
+        for chunk in response:
+            if request_id is None:
+                request_id = getattr(chunk, "id", None)
+            if chunk.choices[0].delta.content:
+                buffer += chunk.choices[0].delta.content
+                full_output += chunk.choices[0].delta.content
+                if len(buffer) > 20:
+                    yield buffer[:-20]
+                    buffer = buffer[-20:]
                 
     if buffer:
         import re
@@ -685,14 +786,27 @@ Question:
             yield cleaned_tail
             full_output = full_output[:-len(buffer)] + cleaned_tail
     try:
-        record_stream_completion_usage(
-            user_id=user_id,
-            resource_id=resource_id,
-            feature=feature,
-            model=_model,
-            request_id=str(request_id) if request_id else None,
-            metadata={"globe_on": globe_on},
-        )
+        if trace:
+            with trace.phase("usage_accounting", {"model": _model}):
+                metrics = record_stream_completion_usage(
+                    user_id=user_id,
+                    resource_id=resource_id,
+                    feature=feature,
+                    model=_model,
+                    request_id=str(request_id) if request_id else None,
+                    metadata={"globe_on": globe_on},
+                    correlation_id=trace.correlation_id,
+                )
+            trace.usage_received(metrics)
+        else:
+            record_stream_completion_usage(
+                user_id=user_id,
+                resource_id=resource_id,
+                feature=feature,
+                model=_model,
+                request_id=str(request_id) if request_id else None,
+                metadata={"globe_on": globe_on},
+            )
     except Exception:
         pass
 
@@ -707,6 +821,7 @@ Question:
 # (Python only ever used those; these earlier copies were dead code).
 
 
+@trace_generation()
 def generate_summary(content, user_id: str | None = None, resource_id: str | None = None, feature: str = "summary_generation", chapters=None):
     """Create a detailed study summary from the provided content."""
 
@@ -764,10 +879,9 @@ Content:
 Summary:
 """
 
-    _client, _model = get_user_chat_client(user_id)
     try:
-        response = _client.chat.completions.create(
-            model=_model,
+        response, _model = _create_chat_completion(
+            user_id,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
         )
@@ -777,6 +891,7 @@ Summary:
     _record_completion(response, user_id=user_id, resource_id=resource_id, feature=feature, operation="content_generation", prompt_text=prompt, model=_model, completion_text=output)
     return output
 
+@trace_generation()
 def generate_study_notes(content: str, user_id: str | None = None, resource_id: str | None = None, feature: str = "study_notes_generation"):
     """Create exceptionally deep, detailed, and beautifully structured study notes from the content."""
 
@@ -822,9 +937,8 @@ Content:
 Study Notes:
 """
 
-    _client, _model = get_user_chat_client(user_id)
-    response = _client.chat.completions.create(
-        model=_model,
+    response, _model = _create_chat_completion(
+        user_id,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.35,
     )
@@ -833,6 +947,7 @@ Study Notes:
     return output
 
 
+@trace_generation()
 def generate_chat_summary(conversation: str, user_id: str | None = None, resource_id: str | None = None, feature: str = "chat_history_summary"):
     """Summarize a conversation clearly and concisely."""
 
@@ -846,9 +961,8 @@ Conversation:
 Summary:
 """
 
-    _client, _model = get_user_chat_client(user_id)
-    response = _client.chat.completions.create(
-        model=_model,
+    response, _model = _create_chat_completion(
+        user_id,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.2,
     )
@@ -862,6 +976,7 @@ Summary:
 # =========================
 
 
+@trace_generation()
 def generate_chapters(transcript, user_id: str | None = None, resource_id: str | None = None, feature: str = "chapter_generation"):
     """Extract chapter structure from an SRT transcript and return valid JSON."""
 
@@ -899,9 +1014,8 @@ SRT:
 {transcript}
 """
 
-    _client, _model = get_user_chat_client(user_id)
-    response = _client.chat.completions.create(
-        model=_model,
+    response, _model = _create_chat_completion(
+        user_id,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3,
     )
@@ -912,6 +1026,7 @@ SRT:
     return parse_json_robustly(content)
 
 
+@trace_generation()
 def generate_subchapters(
     chapter_text: str,
     chapter_duration: int = None,
@@ -978,9 +1093,8 @@ Chapter text:
 {chapter_text}
 """
 
-    _client, _model = get_user_chat_client(user_id)
-    response = _client.chat.completions.create(
-        model=_model,
+    response, _model = _create_chat_completion(
+        user_id,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3,
     )
@@ -997,9 +1111,6 @@ Chapter text:
         return subchapters
 
     except json.JSONDecodeError as e:
-        print(f"JSON parsing error: {e}")
-        print(f"Raw content: {content}")
-
         return []
 
 
@@ -1086,6 +1197,7 @@ def validate_subchapters(subchapters, chapter_duration):
 # =========================
 
 
+@trace_generation()
 def generate_quiz(transcript, user_id: str | None = None, resource_id: str | None = None, feature: str = "quiz_generation"):
     """Generate a multiple-choice quiz from transcript content and return JSON."""
 
@@ -1120,9 +1232,8 @@ Transcript:
 {transcript}
 """
 
-    _client, _model = get_user_chat_client(user_id)
-    response = _client.chat.completions.create(
-        model=_model,
+    response, _model = _create_chat_completion(
+        user_id,
         messages=[
             {
                 "role": "user",
@@ -1139,6 +1250,7 @@ Transcript:
     return parse_json_robustly(content)
 
 
+@trace_generation()
 def generate_flashcards(transcript, user_id: str | None = None, resource_id: str | None = None, feature: str = "flashcards_generation"):
     """Generate transcript-based flashcards and return valid JSON."""
 
@@ -1171,9 +1283,8 @@ Return format:
 ]
 """
 
-    _client, _model = get_user_chat_client(user_id)
-    response = _client.chat.completions.create(
-        model=_model,
+    response, _model = _create_chat_completion(
+        user_id,
         messages=[
             {
                 "role": "user",
@@ -1190,6 +1301,7 @@ Return format:
     return parse_json_robustly(content)
 
 
+@trace_generation()
 def generate_mindmap(chapter_text, user_id: str | None = None, resource_id: str | None = None, feature: str = "mindmap_generation"):
     """Generate a study mind map from chapter text and return valid JSON."""
 
@@ -1239,9 +1351,8 @@ Content:
 {chapter_text}
 """
 
-    _client, _model = get_user_chat_client(user_id)
-    response = _client.chat.completions.create(
-        model=_model,
+    response, _model = _create_chat_completion(
+        user_id,
         messages=[
             {
                 "role": "user",
@@ -1267,6 +1378,7 @@ Content:
 # =========================
 
 
+@trace_generation()
 def answer_question(
     question: str,
     context: str,
@@ -1298,9 +1410,8 @@ Question:
 Answer:
 """
 
-    _client, _model = get_user_chat_client(user_id)
-    response = _client.chat.completions.create(
-        model=_model,
+    response, _model = _create_chat_completion(
+        user_id,
         messages=[
             {
                 "role": "system",
@@ -1323,6 +1434,7 @@ Do not invent facts.
     return output
 
 
+@trace_generation()
 def generate_suggested_questions(
     transcript: str,
     duration_seconds: int = None,
@@ -1368,9 +1480,8 @@ Transcript:
 {transcript}
 """
     try:
-        _client, _model = get_user_chat_client(user_id)
-        response = _client.chat.completions.create(
-            model=_model,
+        response, _model = _create_chat_completion(
+            user_id,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
         )
@@ -1378,7 +1489,6 @@ Transcript:
         _record_completion(response, user_id=user_id, resource_id=resource_id, feature=feature, operation="content_generation", prompt_text=prompt, model=_model, completion_text=content)
         return parse_json_robustly(content)
     except Exception as e:
-        print("Failed to generate suggested questions:", e)
         return [
             "What is the main topic discussed?",
             "What are the key takeaways?",

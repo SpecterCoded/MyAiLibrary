@@ -1079,7 +1079,7 @@ export default function App() {
       if (isBackendLogShortcut) {
         event.preventDefault();
         event.stopPropagation();
-        void window.desktop?.openBackendLogTerminal();
+        void window.desktop?.openSystemConsole();
         return;
       }
 
@@ -1544,7 +1544,7 @@ export default function App() {
         </DashboardLayout>
       )}
 
-      <AnimatePresence>
+      <AnimatePresence key="update-notifications">
         {isAuthenticated && isPrimaryWorkspaceWindow && availableUpdateVersion && dismissedAvailableVersion !== availableUpdateVersion && (
           <motion.div
             key={`available-update-${availableUpdateVersion}`}
@@ -1630,7 +1630,7 @@ export default function App() {
       </AnimatePresence>
 
       {/* Auth Expired Modal */}
-      <AnimatePresence>
+      <AnimatePresence key="auth-expired-modal">
         {authExpired && (
           <motion.div
             initial={{ opacity: 0 }}

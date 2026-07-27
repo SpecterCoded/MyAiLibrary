@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from core.logger import get_logger
 from core.metrics import _append_structured_event
+from core.time import utc_now
 from database import SessionLocal
 from embedding_service import resolve_storage_root_for_resource, search_all_resources
 from models import DocumentInsight, Resource
@@ -57,8 +58,8 @@ def get_or_create_document_insight(db, resource_id: str) -> DocumentInsight:
         id=str(uuid4()),
         resource_id=resource_id,
         status="pending",
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        created_at=utc_now(),
+        updated_at=utc_now(),
     )
     db.add(insight)
     db.commit()
@@ -316,14 +317,14 @@ def run_document_intelligence(resource_id: str) -> str:
 
         insight.status = "processing"
         insight.error_message = None
-        insight.updated_at = datetime.utcnow()
+        insight.updated_at = utc_now()
         db.commit()
 
         source_text = _truncate_source_text(resource)
         if not source_text.strip():
             insight.status = "failed"
             insight.error_message = "No document text available for analysis."
-            insight.updated_at = datetime.utcnow()
+            insight.updated_at = utc_now()
             db.commit()
             return "failed"
 
@@ -355,7 +356,7 @@ def run_document_intelligence(resource_id: str) -> str:
         )
         insight.estimated_cost = usage.get("provider_cost_usd")
         insight.status = "completed"
-        insight.updated_at = datetime.utcnow()
+        insight.updated_at = utc_now()
         db.commit()
 
         _append_structured_event(
@@ -380,7 +381,7 @@ def run_document_intelligence(resource_id: str) -> str:
             insight.retry_count = int(insight.retry_count or 0) + 1
             insight.error_message = str(exc)
             insight.analysis_duration_ms = round((time.perf_counter() - started) * 1000, 1)
-            insight.updated_at = datetime.utcnow()
+            insight.updated_at = utc_now()
             db.commit()
         _append_structured_event(
             {

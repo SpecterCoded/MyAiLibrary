@@ -5,6 +5,7 @@ import path from 'node:path'
 
 // https://vite.dev/config/
 export default defineConfig({
+  base: './',
   plugins: [
     react(),
     tailwindcss(),
@@ -45,6 +46,7 @@ export default defineConfig({
         main: path.resolve(__dirname, 'index.html'),
         attachmentViewer: path.resolve(__dirname, 'attachment-viewer.html'),
         floatingTool: path.resolve(__dirname, 'floating-tool.html'),
+        diagnostics: path.resolve(__dirname, 'diagnostics.html'),
       },
     },
   },

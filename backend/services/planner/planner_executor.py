@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import nullcontext
 from dataclasses import dataclass
 from inspect import signature
 from time import perf_counter
@@ -11,6 +12,7 @@ from typing import Callable, Protocol
 from core.metrics import log_hierarchical_retrieval, log_parent_child_expansion
 from services.hierarchical_retrieval_service import enrich_with_hierarchy
 from services.parent_child_service import expand_parent_context
+from services.pipeline_logger import RagPipelineTrace, get_current_rag_trace
 
 from .planner_models import ExecutionReport, RetrievalMode, RetrievalPlan
 
@@ -25,6 +27,7 @@ class RetrievalRequest:
     selected_resource_ids: list[str] | None = None
     available_resource_ids: list[str] | None = None
     storage_root: str | None = None
+    trace: RagPipelineTrace | None = None
 
 
 @dataclass(frozen=True)
@@ -115,6 +118,7 @@ class PlannerExecutor:
     def execute(self, plan: RetrievalPlan, request: RetrievalRequest) -> ExecutionResult:
         """Run only the modules enabled by ``plan`` and return an audit report."""
 
+        trace = request.trace or get_current_rag_trace()
         self._current_rrf_k = plan.rrf_k
         started = perf_counter()
         executed: list[str] = []
@@ -125,54 +129,105 @@ class PlannerExecutor:
 
         queries = [request.query]
         if plan.enable_multi_query:
-            queries.extend(
-                self._call_with_compatible_args(
-                    self._query_expander,
-                    request.query,
-                    2,
-                    request.user_id,
-                    request.resource_id,
+            with (
+                trace.phase("query_expansion", {"queryCount": 1})
+                if trace else nullcontext({})
+            ) as phase_details:
+                queries.extend(
+                    self._call_with_compatible_args(
+                        self._query_expander,
+                        request.query,
+                        2,
+                        request.user_id,
+                        request.resource_id,
+                    )
                 )
-            )
+                phase_details["queryCount"] = len(queries)
             executed.append("multi_query")
         else:
             skipped.append("multi_query")
+            if trace:
+                trace.skip_phase("query_expansion", reason_code="plan_disabled")
 
-        if len(queries) == 1:
-            candidates = handler(request, plan.retrieval_depth)
-        else:
-            candidates = []
-            with ThreadPoolExecutor(max_workers=len(queries)) as pool:
-                futures = [
-                    pool.submit(
-                        handler,
-                        RetrievalRequest(
-                            query=query,
-                            user_id=request.user_id,
-                            resource_id=request.resource_id,
-                            selected_resource_ids=request.selected_resource_ids,
-                            available_resource_ids=request.available_resource_ids,
-                            storage_root=request.storage_root,
-                        ),
-                        plan.retrieval_depth,
-                    )
-                    for query in queries
-                ]
-                for future in as_completed(futures):
-                    candidates.extend(future.result())
+        retrieval_phase = {
+            RetrievalMode.VECTOR_ONLY: "vector_retrieval",
+            RetrievalMode.KEYWORD_ONLY: "keyword_retrieval",
+            RetrievalMode.HYBRID: "hybrid_retrieval",
+        }[plan.retrieval_mode]
+        with (
+            trace.phase(
+                retrieval_phase,
+                {
+                    "queryCount": len(queries),
+                    "retrievalDepth": plan.retrieval_depth,
+                    "rrfK": plan.rrf_k,
+                },
+            )
+            if trace else nullcontext({})
+        ) as phase_details:
+            if len(queries) == 1:
+                candidates = handler(request, plan.retrieval_depth)
+            else:
+                candidates = []
+                with ThreadPoolExecutor(max_workers=len(queries)) as pool:
+                    futures = [
+                        pool.submit(
+                            handler,
+                            RetrievalRequest(
+                                query=query,
+                                user_id=request.user_id,
+                                resource_id=request.resource_id,
+                                selected_resource_ids=request.selected_resource_ids,
+                                available_resource_ids=request.available_resource_ids,
+                                storage_root=request.storage_root,
+                                trace=trace,
+                            ),
+                            plan.retrieval_depth,
+                        )
+                        for query in queries
+                    ]
+                    for future in as_completed(futures):
+                        candidates.extend(future.result())
+            phase_details["candidateCount"] = len(candidates)
 
         executed.append(plan.retrieval_mode.value)
         candidates = self._deduplicate(candidates)[: plan.retrieval_depth]
 
         if plan.rerank:
             # Keep a broad ranked pool so compression makes the final selection.
-            results = self._reranker(request.query, candidates, plan.retrieval_depth, user_id=request.user_id)
+            with (
+                trace.phase("reranking", {"candidateCount": len(candidates)})
+                if trace else nullcontext({})
+            ) as phase_details:
+                results = self._reranker(
+                    request.query,
+                    candidates,
+                    plan.retrieval_depth,
+                    user_id=request.user_id,
+                )
+                phase_details["resultCount"] = len(results)
             executed.append("rerank")
         else:
             results = candidates
             skipped.append("rerank")
+            if trace:
+                trace.skip_phase(
+                    "reranking",
+                    reason_code="plan_disabled",
+                    context={"candidateCount": len(candidates)},
+                )
 
-        results, hierarchy_details = self._hierarchical_expander(request.query, results, plan)
+        with (
+            trace.phase("hierarchical_retrieval", {"candidateCount": len(results)})
+            if trace else nullcontext({})
+        ) as phase_details:
+            results, hierarchy_details = self._hierarchical_expander(request.query, results, plan)
+            phase_details.update({
+                "executed": bool(hierarchy_details.get("success")),
+                "selected": bool(hierarchy_details.get("selected")),
+                "selectedLevelCount": len(hierarchy_details.get("selected_levels", [])),
+                "resultCount": len(results),
+            })
         if hierarchy_details.get("success"):
             executed.append("hierarchical_retrieval")
         else:
@@ -192,7 +247,23 @@ class PlannerExecutor:
 
         child_results = [item for item in results if not (item.get("metadata") or {}).get("hierarchy_node")]
         hierarchy_results = [item for item in results if (item.get("metadata") or {}).get("hierarchy_node")]
-        expanded_results, expansion_details = self._parent_expander(request.query, child_results, plan)
+        with (
+            trace.phase("parent_context_expansion", {"candidateCount": len(child_results)})
+            if trace else nullcontext({})
+        ) as phase_details:
+            expanded_results, expansion_details = self._parent_expander(
+                request.query,
+                child_results,
+                plan,
+            )
+            phase_details.update({
+                "executed": bool(expansion_details.get("success")),
+                "parentSectionCount": len(
+                    expansion_details.get("selected_parent_sections", [])
+                    or expansion_details.get("parent_sections", [])
+                ),
+                "resultCount": len(expanded_results),
+            })
         if expansion_details.get("success"):
             results = expanded_results + hierarchy_results
             executed.append("parent_child_expansion")
@@ -215,20 +286,31 @@ class PlannerExecutor:
         )
 
         if plan.compress_context and len(results) > plan.max_chunks:
-            selected_content = self._call_with_compatible_args(
-                self._compressor,
-                request.query,
-                [item["content"] for item in results],
-                plan.max_chunks,
-                request.user_id,
-                request.resource_id,
-            )
-            selected = set(selected_content)
-            results = [item for item in results if item["content"] in selected]
+            with (
+                trace.phase("context_compression", {"candidateCount": len(results)})
+                if trace else nullcontext({})
+            ) as phase_details:
+                selected_content = self._call_with_compatible_args(
+                    self._compressor,
+                    request.query,
+                    [item["content"] for item in results],
+                    plan.max_chunks,
+                    request.user_id,
+                    request.resource_id,
+                )
+                selected = set(selected_content)
+                results = [item for item in results if item["content"] in selected]
+                phase_details["resultCount"] = len(results)
             executed.append("context_compression")
         else:
             results = results[: plan.max_chunks]
             skipped.append("context_compression")
+            if trace:
+                trace.skip_phase(
+                    "context_compression",
+                    reason_code="plan_disabled_or_not_needed",
+                    context={"candidateCount": len(results)},
+                )
 
         report = ExecutionReport(
             modules_executed=executed,
@@ -237,7 +319,16 @@ class PlannerExecutor:
             retrieval_strategy=plan.retrieval_mode,
             execution_time_ms=(perf_counter() - started) * 1000,
         )
-        return ExecutionResult(context=self._context_builder(results), results=results, report=report)
+        with (
+            trace.phase("context_building", {"chunkCount": len(results)})
+            if trace else nullcontext({})
+        ) as phase_details:
+            context = self._context_builder(results)
+            phase_details.update({
+                "contextCharacterCount": len(context),
+                "contextTokenEstimate": round(len(context.split()) * 1.3),
+            })
+        return ExecutionResult(context=context, results=results, report=report)
 
     @staticmethod
     def _default_query_expander(
@@ -380,14 +471,63 @@ class PlannerExecutor:
                 top_k=top_k,
                 storage_root=request.storage_root,
                 rrf_k=rrf_k,
+                trace=request.trace,
             )
 
+        trace = request.trace or get_current_rag_trace()
+        vector_started = trace.begin_phase(
+            "dense_retrieval",
+            {"parallel": True, "retrievalDepth": top_k},
+        ) if trace else None
+        keyword_started = trace.begin_phase(
+            "keyword_retrieval",
+            {"parallel": True, "retrievalDepth": top_k},
+        ) if trace else None
         with ThreadPoolExecutor(max_workers=2) as pool:
             vector_future = pool.submit(self._vector_retrieval, request, top_k)
             keyword_future = pool.submit(self._keyword_retrieval, request, top_k)
-            vector_results = vector_future.result()
-            keyword_results = keyword_future.result()
-        return self._rrf(vector_results, keyword_results, rrf_k=rrf_k)[:top_k]
+            vector_error = None
+            keyword_error = None
+            try:
+                vector_results = vector_future.result()
+                if trace and vector_started is not None:
+                    trace.complete_phase(
+                        "dense_retrieval",
+                        vector_started,
+                        {"parallel": True, "resultCount": len(vector_results)},
+                    )
+            except BaseException as error:
+                vector_results = []
+                vector_error = error
+                if trace and vector_started is not None:
+                    trace.fail_phase("dense_retrieval", vector_started, error)
+            try:
+                keyword_results = keyword_future.result()
+                if trace and keyword_started is not None:
+                    trace.complete_phase(
+                        "keyword_retrieval",
+                        keyword_started,
+                        {"parallel": True, "resultCount": len(keyword_results)},
+                    )
+            except BaseException as error:
+                keyword_results = []
+                keyword_error = error
+                if trace and keyword_started is not None:
+                    trace.fail_phase("keyword_retrieval", keyword_started, error)
+            if vector_error is not None:
+                raise vector_error
+            if keyword_error is not None:
+                raise keyword_error
+        with (
+            trace.phase(
+                "reciprocal_rank_fusion",
+                {"candidateCount": len(vector_results) + len(keyword_results), "rrfK": rrf_k},
+            )
+            if trace else nullcontext({})
+        ) as phase_details:
+            fused = self._rrf(vector_results, keyword_results, rrf_k=rrf_k)[:top_k]
+            phase_details["resultCount"] = len(fused)
+        return fused
 
     @staticmethod
     def _rrf(vector_results: list[dict], keyword_results: list[dict], rrf_k: int = 60) -> list[dict]:

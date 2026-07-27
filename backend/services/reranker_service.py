@@ -1,8 +1,10 @@
 import os
 from datetime import datetime, timedelta
+from core.time import utc_now
 from services.dependency_failure_service import DependencyFailure, classify_provider_error, missing_configuration
 import requests
 import time as _time
+from services.provider_billing_service import report_provider_billing
 
 _user_reranker_cache: dict[str, tuple] = {}
 
@@ -55,7 +57,7 @@ def _notify_reranker_failure(user_id: str | None, failure: DependencyFailure) ->
 
     db = SessionLocal()
     try:
-        cutoff = datetime.utcnow() - timedelta(minutes=5)
+        cutoff = utc_now() - timedelta(minutes=5)
         recent_notification = (
             db.query(Notification.id)
             .filter(
@@ -108,6 +110,13 @@ def rerank_results(query: str, results: list, top_k: int = 5, user_id: str | Non
         response = requests.post(url, json=payload, headers=headers, timeout=30)
         response.raise_for_status()
         response_json = response.json()
+        report_provider_billing(
+            provider_service="reranking",
+            provider=_provider,
+            model=_model,
+            response=response_json,
+            unit_label="provider_billed_units",
+        )
 
         rerank_results = response_json.get("results", [])
         ranked_results = []

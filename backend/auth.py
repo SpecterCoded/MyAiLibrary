@@ -11,6 +11,7 @@ from jose import JWTError, jwt
 from models import User
 from sqlalchemy.orm import Session
 
+from core.time import utc_now
 from database import SessionLocal
 from dotenv import load_dotenv
 
@@ -89,7 +90,7 @@ def validate_registration(username: str, email: str, password: str, db: Session)
 
 
 def create_token(user_id: str, token_type: str, expires_delta: timedelta) -> str:
-    expire = datetime.utcnow() + expires_delta
+    expire = utc_now() + expires_delta
     payload = {
         "sub": user_id,
         "exp": expire,

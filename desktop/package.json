@@ -25,6 +25,8 @@
     "dev": "concurrently --kill-others-on-fail --names renderer,electron \"npm:dev:renderer\" \"npm:dev:electron\"",
     "build:ui": "npm --prefix ../frontend run build",
     "build:backend": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-backend.ps1",
+    "test:system-log": "npm run compile && node --test tests/system-log.test.cjs",
+    "verify:logging": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-structured-logging.ps1",
     "verify:resources": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-resources.ps1",
     "build": "npm run build:branding && npm run compile && npm run build:ui && npm run build:backend",
     "pack": "npm run build && npm run verify:resources && electron-builder --dir --x64",

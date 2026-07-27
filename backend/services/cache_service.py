@@ -6,6 +6,7 @@ from models import SemanticCache
 from embedding_service import embed_text
 import math
 from core.config import CACHE_TTL_HOURS, CACHE_MAX_ENTRIES
+from core.time import utc_now
 
 # Cache similarity threshold (for cosine similarity, 0.9+ is high)
 CACHE_THRESHOLD = 0.90
@@ -69,7 +70,7 @@ def get_cached_answer(
         try:
             # TTL check: skip expired entries
             if entry.created_at:
-                age = datetime.utcnow() - entry.created_at
+                age = utc_now() - entry.created_at
                 if age > timedelta(hours=CACHE_TTL_HOURS):
                     continue
 
@@ -165,7 +166,7 @@ def save_to_cache(
         existing_entry.answer = answer
         existing_entry.sources = json.dumps(sources)
         existing_entry.confidence = confidence
-        existing_entry.created_at = datetime.utcnow()
+        existing_entry.created_at = utc_now()
         for duplicate in duplicate_entries:
             if duplicate.id != existing_entry.id:
                 db.delete(duplicate)

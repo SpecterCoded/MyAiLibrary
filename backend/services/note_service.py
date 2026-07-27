@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from models import Note, Playlist, User
 from core.logger import get_logger
 from core.config import get_upload_path
+from core.time import utc_now
 from fastapi import HTTPException
 
 logger = get_logger(__name__)
@@ -220,8 +221,8 @@ class NoteService:
             subchapter_id=None,
             is_favorite=0,
             status="active" if playlist_id else "draft",
-            created_at=datetime.datetime.utcnow(),
-            updated_at=datetime.datetime.utcnow(),
+            created_at=utc_now(),
+            updated_at=utc_now(),
             playlist_id=playlist_id, # Link note to its playlist (can be None)
             user_id=user.id,
             filename=final_filename # Store the actual filename used
@@ -286,7 +287,7 @@ class NoteService:
                 if db_note.content != blocks_content or db_note.title != new_title:
                     db_note.content = blocks_content
                     db_note.title = new_title
-                    db_note.updated_at = datetime.datetime.utcnow()
+                    db_note.updated_at = utc_now()
                     self.db.add(db_note)
                     sync_stats["updated"] += 1
                     logger.info(f"Updated note {db_note.id} (file: {file_name}) in DB from file")
@@ -311,8 +312,8 @@ class NoteService:
                     user_id=user.id,
                     is_favorite=0,
                     status="active" if playlist_id else "draft",
-                    created_at=datetime.datetime.utcnow(),
-                    updated_at=datetime.datetime.utcnow(),
+                    created_at=utc_now(),
+                    updated_at=utc_now(),
                     filename=file_name # Store the actual filename
                 )
                 self.db.add(note)
@@ -342,7 +343,7 @@ class NoteService:
         note.resource_id = resource_id
         note.chapter_id = chapter_id
         note.subchapter_id = subchapter_id
-        note.updated_at = datetime.datetime.utcnow()
+        note.updated_at = utc_now()
 
         self.db.add(note)
         self.db.commit()

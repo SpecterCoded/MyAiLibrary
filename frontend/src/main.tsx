@@ -6,6 +6,7 @@ import '@fontsource/plus-jakarta-sans/600.css'
 import '@fontsource/plus-jakarta-sans/700.css'
 import './index.css'
 import App from './App'
+import { installRendererDiagnostics } from './utils/systemLogger'
 
 // Suppress browser extension connection errors globally
 if (typeof window !== 'undefined') {
@@ -29,6 +30,8 @@ if (typeof window !== 'undefined') {
       event.preventDefault();
     }
   });
+
+  installRendererDiagnostics()
 }
 
 createRoot(document.getElementById('root')!).render(

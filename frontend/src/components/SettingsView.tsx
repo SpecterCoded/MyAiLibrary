@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Slider from '@mui/material/Slider';
 import { type BackendUser } from './DashboardHeader';
-import { UploadCloud, CheckCircle2, Monitor, Moon, Sun, Plus, FolderOpen, Loader2, Info, RefreshCw, Download, ShieldCheck, ShieldAlert, Clock3, FileText, RotateCw, Copy, ExternalLink, Database, AppWindow, HardDrive, Cpu } from 'lucide-react';
+import { UploadCloud, CheckCircle2, Monitor, Moon, Sun, Plus, FolderOpen, Loader2, Info, RefreshCw, Download, ShieldCheck, ShieldAlert, Clock3, FileText, RotateCw, Copy, ExternalLink, Database, AppWindow, HardDrive, Cpu, TerminalSquare } from 'lucide-react';
 import { EmailAuthProvider, reauthenticateWithCredential, updatePassword, signOut } from 'firebase/auth';
 import { auth } from '../firebase';
 import { selectFile, selectFolder } from '../utils/desktop';
@@ -3391,6 +3391,14 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
                         </div>
                       </div>
                       <div className="flex flex-wrap gap-3">
+                        <button
+                          type="button"
+                          onClick={() => void window.desktop?.openSystemConsole()}
+                          disabled={!window.desktop}
+                          className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-indigo-600 dark:hover:bg-indigo-700"
+                        >
+                          <TerminalSquare className="h-4 w-4" /> Open System Console
+                        </button>
                         <button
                           type="button"
                           onClick={() => void openAboutPath(aboutInfo.dataDir)}

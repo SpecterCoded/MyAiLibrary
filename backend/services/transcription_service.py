@@ -6,8 +6,10 @@ import re
 import json
 import hashlib
 import shutil
+import time
 from dotenv import load_dotenv
 from services.dependency_failure_service import DependencyFailure, local_path_failure, missing_configuration
+from services.provider_billing_service import report_provider_billing
 from core.paths import EXTRA_FILES_DIR
 from subprocess_utils import popen_hidden, run_hidden
 
@@ -454,6 +456,7 @@ def transcribe_audio(
     status_callback=None,
     threads: int | None = None,
 ):
+    billing_started_at = time.perf_counter()
     output_paths = _resolve_transcription_output_paths(file_path, resource_id=resource_id)
     base_name = output_paths["base_name"]
     srt_file = output_paths["srt_file"]
@@ -519,19 +522,12 @@ def transcribe_audio(
             "Please check your Settings → AI tab."
         )
 
-    # 4. Run whisper.cpp
-    print(f"[WHISPER.CPP] Executable: {whisper_path}")
-    print(f"[WHISPER.CPP] Model:      {whisper_model_path}")
-    print(f"[WHISPER.CPP] Input:      {file_path}")
-    print(f"[WHISPER.CPP] Output:     {base_name}")
-
     if status_callback:
         try:
             status_callback("transcribing")
         except Exception:
             pass
 
-    import time
     transcription_input_path, _cleanup_paths = _prepare_audio_input_for_whisper(
         file_path,
         output_paths["output_dir"],
@@ -593,7 +589,21 @@ def transcribe_audio(
             "Transcription may have failed silently — check that the input audio is valid."
         )
 
-    print("[WHISPER.CPP] Transcription complete.")
+    try:
+        media_duration_seconds = get_media_duration(file_path)
+    except Exception:
+        media_duration_seconds = None
+    report_provider_billing(
+        provider_service="transcription",
+        provider="local_whisper_cpp",
+        model=os.path.basename(whisper_model_path),
+        correlation_id=resource_id,
+        exact_zero_cost=True,
+        zero_cost_reason="local_inference_no_provider_charge",
+        unit_count=media_duration_seconds,
+        unit_label="audio_seconds",
+        duration_ms=max(0.0, (time.perf_counter() - billing_started_at) * 1000),
+    )
     return {
         "transcript": transcript,
         "srt_file": srt_file,

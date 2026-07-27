@@ -10,6 +10,7 @@ from typing import Any
 
 from core.logger import get_logger
 from services.ai_cost_service import record_chat_completion_usage
+from services.pipeline_logger import get_current_rag_trace
 
 from .planner_models import QueryClassification, RetrievalMode, RetrievalPlan
 from .planner_prompt import build_planner_prompt
@@ -62,7 +63,16 @@ class RetrievalPlanner:
                     )
                 )
             except Exception as exc:
-                logger.warning("Retrieval planner LLM fallback: %s", exc)
+                trace = get_current_rag_trace()
+                logger.warning(
+                    "Retrieval planner used its deterministic fallback.",
+                    event="rag.planner_fallback",
+                    operation="rag_pipeline",
+                    phase="retrieval_planning",
+                    status="stopped",
+                    correlation_id=trace.correlation_id if trace else None,
+                    context={"errorType": type(exc).__name__},
+                )
 
         return self._heuristic_plan(normalized, has_chat_history)
 

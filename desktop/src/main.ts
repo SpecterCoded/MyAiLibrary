@@ -1,10 +1,15 @@
 import { randomBytes } from 'node:crypto'
-import { spawn } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { app, autoUpdater as nativeAutoUpdater, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, screen, session, shell, Tray } from 'electron'
 import { BackendRuntime, BackendState, startBackend, stopBackend } from './backend-process'
 import { createAndVerifyUpdateBackup } from './update-backup'
+import {
+  normalizeExternalLogEvent,
+  SystemLogService,
+  type SystemLogClearFilter,
+  type SystemLogEventInput,
+} from './system-log'
 import { DesktopUpdater } from './updater'
 import type { UpdatePreferences } from './update-types'
 
@@ -23,6 +28,9 @@ let attachmentViewerWindow: BrowserWindow | null = null
 let attachmentViewerReady = false
 let pendingAttachmentViewerPayload: AttachmentViewerPayload | null = null
 const attachmentViewerFilePaths = new Map<string, string>()
+let systemLogWindow: BrowserWindow | null = null
+let systemLogService: SystemLogService | null = null
+let currentBackendState: BackendState = 'stopped'
 type FloatingToolKind = 'search' | 'create-playlist' | 'import-content'
 type FloatingToolAction =
   | { type: 'navigate'; detail: Record<string, unknown> }
@@ -124,6 +132,62 @@ const ATTACHMENT_VIEWER_CHANNELS = {
   showInFolder: 'attachment-viewer:show-in-folder',
   saveAs: 'attachment-viewer:save-as',
 } as const
+
+const SYSTEM_LOG_CHANNELS = {
+  event: 'system-log:event',
+  setFilter: 'system-log:set-filter',
+  getSnapshot: 'system-log:get-snapshot',
+  getBackendState: 'system-log:get-backend-state',
+  getTheme: 'system-log:get-theme',
+  themeChanged: 'system-log:theme-changed',
+  export: 'system-log:export',
+  clear: 'system-log:clear',
+  reveal: 'system-log:reveal',
+  close: 'system-log:close',
+  minimize: 'system-log:minimize',
+  toggleMaximize: 'system-log:toggle-maximize',
+  isMaximized: 'system-log:is-maximized',
+} as const
+
+function normalizeSystemLogClearFilter(value: unknown): SystemLogClearFilter | undefined | null {
+  if (value == null) return undefined
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const candidate = value as Record<string, unknown>
+  const filter: SystemLogClearFilter = {}
+
+  if (candidate.level !== undefined) {
+    if (!['debug', 'info', 'warning', 'error', 'critical'].includes(String(candidate.level))) return null
+    filter.level = candidate.level as SystemLogClearFilter['level']
+  }
+  if (candidate.source !== undefined) {
+    if (!['desktop', 'backend', 'renderer'].includes(String(candidate.source))) return null
+    filter.source = candidate.source as SystemLogClearFilter['source']
+  }
+  if (candidate.category !== undefined) {
+    if (typeof candidate.category !== 'string' || !candidate.category.trim() || candidate.category.length > 120) return null
+    filter.category = candidate.category.trim().toUpperCase()
+  }
+  if (candidate.eventIds !== undefined) {
+    if (
+      !Array.isArray(candidate.eventIds) ||
+      candidate.eventIds.length > 10_000 ||
+      candidate.eventIds.some((id) => typeof id !== 'string' || id.length > 100)
+    ) return null
+    filter.eventIds = Array.from(new Set(candidate.eventIds))
+  }
+  return Object.keys(filter).length > 0 ? filter : undefined
+}
+
+function describeSystemLogClearFilter(filter?: SystemLogClearFilter): string {
+  if (!filter) return 'all structured diagnostic history'
+  if (filter.eventIds) return 'the events currently visible in the stream'
+  const parts = [
+    filter.level ? `${filter.level} severity` : '',
+    filter.source ? `${filter.source} source` : '',
+    filter.category ? `${filter.category} category` : '',
+  ].filter(Boolean)
+  return parts.length > 0 ? parts.join(', ') : 'all structured diagnostic history'
+}
 
 const desktopContentSecurityPolicy = [
   "default-src 'self'",
@@ -315,7 +379,17 @@ function persistWorkspaceWindowRegistry(): void {
     writeFileSync(temporaryPath, JSON.stringify(registry, null, 2), 'utf8')
     renameSync(temporaryPath, targetPath)
   } catch (error) {
-    console.warn('[desktop] failed to persist workspace windows', error)
+    emitSystemLog({
+      source: 'desktop',
+      level: 'warning',
+      category: 'WINDOWS',
+      event: 'workspace.registry_persist_failed',
+      message: 'Workspace window state could not be saved.',
+      operation: 'workspace_persistence',
+      phase: 'save',
+      status: 'failed',
+      context: { error },
+    })
   }
 }
 
@@ -329,6 +403,10 @@ function detachedWorkspaceMinimumSize(record: WorkspaceWindowRecord): { width: n
   return containsFileExplorer
     ? { width: DETACHED_FILE_EXPLORER_MIN_WIDTH, height: DETACHED_FILE_EXPLORER_MIN_HEIGHT }
     : { width: DETACHED_WORKSPACE_MIN_WIDTH, height: DETACHED_WORKSPACE_MIN_HEIGHT }
+}
+
+function emitSystemLog(event: SystemLogEventInput): void {
+  systemLogService?.emit(event)
 }
 
 function clampWorkspaceBounds(
@@ -369,10 +447,31 @@ function floatingToolRendererUrl(kind: FloatingToolKind): string {
 }
 
 function sendBackendState(state: BackendState, detail?: string): void {
+  currentBackendState = state
+  emitSystemLog({
+    source: 'desktop',
+    level: state === 'failed' ? 'error' : 'info',
+    category: 'BACKEND',
+    event: `backend.state_${state}`,
+    message: detail || `Local AI service is ${state}.`,
+    operation: 'backend_lifecycle',
+    phase: 'health',
+    status: state === 'ready'
+      ? 'completed'
+      : state === 'starting'
+        ? 'starting'
+        : state === 'stopping'
+          ? 'running'
+          : state,
+  })
   splashWindow?.webContents.send('desktop:backend-state', state, detail)
   for (const window of appWindows) {
     if (!window.isDestroyed()) window.webContents.send('desktop:backend-state', state, detail)
   }
+  if (systemLogWindow && !systemLogWindow.isDestroyed()) {
+    systemLogWindow.webContents.send('desktop:backend-state', state, detail)
+  }
+  if (state === 'failed') openSystemConsole('error')
 }
 
 function journalitPackagePath(): string {
@@ -704,7 +803,16 @@ function createAttachmentViewerWindow(): BrowserWindow {
 
 function openAttachmentViewer(payload: AttachmentViewerPayload): void {
   if (!isValidAttachmentViewerPayload(payload)) {
-    console.warn('[desktop] rejected invalid attachment viewer payload')
+    emitSystemLog({
+      source: 'desktop',
+      level: 'warning',
+      category: 'SECURITY',
+      event: 'attachment.invalid_payload_rejected',
+      message: 'An invalid attachment viewer request was rejected.',
+      operation: 'attachment_viewer',
+      phase: 'validation',
+      status: 'failed',
+    })
     return
   }
   const viewerPayload = prepareAttachmentViewerPayload(payload)
@@ -897,7 +1005,17 @@ function registerIpc(): void {
     if (!senderIsTrusted(event.senderFrame?.url ?? '')) return false
     const packagePath = journalitPackagePath()
     if (!existsSync(packagePath)) {
-      console.error(`[desktop] Journalit integration package is missing: ${packagePath}`)
+      emitSystemLog({
+        source: 'desktop',
+        level: 'error',
+        category: 'INTEGRATION',
+        event: 'journalit.package_missing',
+        message: 'The Journalit integration package is missing.',
+        operation: 'journalit_integration',
+        phase: 'open_package',
+        status: 'failed',
+        context: { packagePath },
+      })
       return false
     }
     shell.showItemInFolder(packagePath)
@@ -945,7 +1063,89 @@ function registerIpc(): void {
       installationEnabled: updateState?.installationEnabled ?? false,
     }
   })
-  ipcMain.handle('desktop:open-backend-log-terminal', (event) => senderIsTrusted(event.senderFrame?.url ?? '') ? openBackendLogTerminal() : false)
+  ipcMain.handle('desktop:open-system-console', (event) => (
+    senderIsTrusted(event.senderFrame?.url ?? '') ? openSystemConsole() : false
+  ))
+  ipcMain.handle('desktop:open-backend-log-terminal', (event) => (
+    senderIsTrusted(event.senderFrame?.url ?? '') ? openSystemConsole() : false
+  ))
+  ipcMain.on('system-log:renderer-event', (event, value: unknown) => {
+    if (!senderIsTrusted(event.senderFrame?.url ?? '')) return
+    const normalized = normalizeExternalLogEvent(value)
+    if (!normalized) return
+    emitSystemLog({ ...normalized, source: 'renderer' })
+  })
+  ipcMain.handle(SYSTEM_LOG_CHANNELS.getSnapshot, (event, limit: unknown) => {
+    if (event.sender !== systemLogWindow?.webContents || !systemLogService) return null
+    return systemLogService.snapshot(typeof limit === 'number' ? limit : undefined)
+  })
+  ipcMain.handle(SYSTEM_LOG_CHANNELS.getBackendState, (event) => (
+    event.sender === systemLogWindow?.webContents ? currentBackendState : 'stopped'
+  ))
+  ipcMain.handle(SYSTEM_LOG_CHANNELS.getTheme, (event) => (
+    event.sender === systemLogWindow?.webContents ? currentTitleBarTheme : 'dark'
+  ))
+  ipcMain.handle(SYSTEM_LOG_CHANNELS.export, async (event) => {
+    if (event.sender !== systemLogWindow?.webContents || !systemLogService) return { success: false }
+    const result = await dialog.showSaveDialog(systemLogWindow, {
+      title: 'Export sanitized diagnostics',
+      defaultPath: path.join(app.getPath('documents'), `MyAiLibrary-diagnostics-${new Date().toISOString().slice(0, 10)}.jsonl`),
+      filters: [{ name: 'JSON Lines', extensions: ['jsonl'] }],
+    })
+    if (result.canceled || !result.filePath) return { success: false }
+    const count = systemLogService.exportTo(result.filePath)
+    emitSystemLog({
+      source: 'desktop',
+      level: 'info',
+      category: 'DIAGNOSTICS',
+      event: 'diagnostics.exported',
+      message: 'Sanitized diagnostics were exported.',
+      status: 'completed',
+      context: { eventCount: count },
+    })
+    return { success: true, path: result.filePath, count }
+  })
+  ipcMain.handle(SYSTEM_LOG_CHANNELS.clear, async (event, requestedFilter: unknown) => {
+    if (event.sender !== systemLogWindow?.webContents || !systemLogService) {
+      return { success: false, deleted: 0 }
+    }
+    const filter = normalizeSystemLogClearFilter(requestedFilter)
+    if (filter === null) return { success: false, deleted: 0 }
+    const matchingCount = systemLogService.countMatching(filter)
+    if (matchingCount === 0) return { success: true, deleted: 0 }
+    const scope = describeSystemLogClearFilter(filter)
+    const result = await dialog.showMessageBox(systemLogWindow, {
+      type: 'warning',
+      title: 'Clear diagnostic history?',
+      message: `Clear ${scope}?`,
+      detail: `${matchingCount.toLocaleString()} retained event${matchingCount === 1 ? '' : 's'} will be removed. This cannot be undone. The raw backend fallback log is kept.`,
+      buttons: ['Cancel', 'Clear events'],
+      defaultId: 0,
+      cancelId: 0,
+    })
+    if (result.response !== 1) return { success: false, deleted: 0 }
+    const deleted = systemLogService.clear(filter)
+    return { success: true, deleted }
+  })
+  ipcMain.handle(SYSTEM_LOG_CHANNELS.reveal, (event) => {
+    if (event.sender !== systemLogWindow?.webContents || !systemLogService) return false
+    shell.showItemInFolder(systemLogService.currentPath)
+    return true
+  })
+  ipcMain.on(SYSTEM_LOG_CHANNELS.close, (event) => {
+    if (event.sender === systemLogWindow?.webContents) systemLogWindow.close()
+  })
+  ipcMain.on(SYSTEM_LOG_CHANNELS.minimize, (event) => {
+    if (event.sender === systemLogWindow?.webContents) systemLogWindow.minimize()
+  })
+  ipcMain.on(SYSTEM_LOG_CHANNELS.toggleMaximize, (event) => {
+    if (event.sender !== systemLogWindow?.webContents || !systemLogWindow) return
+    if (systemLogWindow.isMaximized()) systemLogWindow.unmaximize()
+    else systemLogWindow.maximize()
+  })
+  ipcMain.handle(SYSTEM_LOG_CHANNELS.isMaximized, (event) => (
+    event.sender === systemLogWindow?.webContents && !!systemLogWindow?.isMaximized()
+  ))
   ipcMain.handle('desktop:set-titlebar-theme', (event, theme: unknown) => {
     if (!senderIsTrusted(event.senderFrame?.url ?? '') || (theme !== 'light' && theme !== 'dark')) return false
     applyTitleBarTheme(theme)
@@ -1007,6 +1207,10 @@ function registerIpc(): void {
 
 function applyTitleBarTheme(theme: 'light' | 'dark'): void {
   currentTitleBarTheme = theme
+  if (systemLogWindow && !systemLogWindow.isDestroyed()) {
+    systemLogWindow.setBackgroundColor(theme === 'dark' ? '#1e1f22' : '#f5f8fd')
+    systemLogWindow.webContents.send(SYSTEM_LOG_CHANNELS.themeChanged, theme)
+  }
   if (windowControlsHidden) return
   for (const window of appWindows) {
     if (window.isDestroyed()) continue
@@ -1041,56 +1245,87 @@ function setWindowControlsHidden(hidden: boolean): void {
   }
 }
 
-function openBackendLogTerminal(): boolean {
-  const logPath = backend?.logPath ?? path.join(desktopDataRoot(), 'logs', 'backend.log')
-  if (process.platform !== 'win32') {
-    if (existsSync(logPath)) {
-      void shell.openPath(logPath)
-      return true
-    }
-    shell.showItemInFolder(logPath)
-    return false
-  }
-
-  const logDir = path.dirname(logPath)
-  mkdirSync(logDir, { recursive: true })
-  const escapedLogPath = logPath.replace(/'/g, "''")
-  const scriptPath = path.join(logDir, 'open-backend-log.ps1')
-  const script = [
-    `$host.UI.RawUI.WindowTitle = 'MyAiLibrary Backend Log'`,
-    `Write-Host 'MyAiLibrary backend log' -ForegroundColor Cyan`,
-    `Write-Host '${escapedLogPath}' -ForegroundColor DarkCyan`,
-    `Write-Host 'Press Ctrl+C to stop watching. Closing this window does not stop the app.' -ForegroundColor DarkGray`,
-    `Write-Host ''`,
-    `if (-not (Test-Path -LiteralPath '${escapedLogPath}')) {`,
-    `  Write-Host 'The backend log file does not exist yet.' -ForegroundColor Yellow`,
-    `  Read-Host 'Press Enter to close'`,
-    `  exit`,
-    `}`,
-    `Write-Host 'Watching new backend log lines from now...' -ForegroundColor DarkGray`,
-    `Write-Host ''`,
-    `Get-Content -LiteralPath '${escapedLogPath}' -Tail 0 -Wait`,
-  ].join('\r\n')
-  writeFileSync(scriptPath, script, 'utf8')
-
-  const child = spawn('cmd.exe', [
-    '/d',
-    '/c',
-    'start',
-    '""',
-    'powershell.exe',
-    '-NoProfile',
-    '-NoExit',
-    '-ExecutionPolicy',
-    'Bypass',
-    '-File',
-    scriptPath,
-  ], {
-    detached: true,
-    stdio: 'ignore',
-    windowsHide: false,
+function createSystemLogWindow(initialLevel?: string): BrowserWindow {
+  const iconPath = path.join(__dirname, '..', 'assets', 'icon.png')
+  const viewer = new BrowserWindow({
+    width: 1180,
+    height: 760,
+    minWidth: 900,
+    minHeight: 600,
+    frame: false,
+    show: false,
+    resizable: true,
+    maximizable: true,
+    minimizable: true,
+    fullscreenable: true,
+    backgroundColor: currentTitleBarTheme === 'dark' ? '#1e1f22' : '#f5f8fd',
+    icon: existsSync(iconPath) ? iconPath : undefined,
+    title: 'MyAiLibrary System Console',
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'diagnostics-preload.js'),
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      webSecurity: true,
+    },
   })
-  child.unref()
+  viewer.setMenu(null)
+  viewer.setMenuBarVisibility(false)
+  systemLogWindow = viewer
+
+  const unsubscribe = systemLogService?.subscribe((event) => {
+    if (!viewer.isDestroyed()) viewer.webContents.send(SYSTEM_LOG_CHANNELS.event, event)
+  })
+  viewer.once('ready-to-show', () => {
+    viewer.show()
+    viewer.focus()
+    if (initialLevel) viewer.webContents.send(SYSTEM_LOG_CHANNELS.setFilter, initialLevel)
+    viewer.webContents.send('desktop:backend-state', currentBackendState)
+    viewer.webContents.send(SYSTEM_LOG_CHANNELS.themeChanged, currentTitleBarTheme)
+  })
+  viewer.on('closed', () => {
+    unsubscribe?.()
+    if (systemLogWindow === viewer) systemLogWindow = null
+  })
+  viewer.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  viewer.webContents.on('will-navigate', (event) => event.preventDefault())
+
+  if (app.isPackaged) {
+    void viewer.loadFile(path.join(process.resourcesPath, 'ui', 'diagnostics.html'), {
+      query: {
+        ...(initialLevel ? { level: initialLevel } : {}),
+        theme: currentTitleBarTheme,
+      },
+    })
+  } else {
+    const rendererBase = process.env.ELECTRON_RENDERER_URL || currentRendererUrl || 'http://127.0.0.1:5173'
+    const url = new URL('/diagnostics.html', rendererBase)
+    if (initialLevel) url.searchParams.set('level', initialLevel)
+    url.searchParams.set('theme', currentTitleBarTheme)
+    void viewer.loadURL(url.toString())
+  }
+  return viewer
+}
+
+function openSystemConsole(initialLevel?: string): boolean {
+  if (!systemLogService) return false
+  if (!systemLogWindow || systemLogWindow.isDestroyed()) {
+    createSystemLogWindow(initialLevel)
+  } else {
+    if (systemLogWindow.isMinimized()) systemLogWindow.restore()
+    systemLogWindow.show()
+    systemLogWindow.focus()
+    if (initialLevel) systemLogWindow.webContents.send(SYSTEM_LOG_CHANNELS.setFilter, initialLevel)
+  }
+  emitSystemLog({
+    source: 'desktop',
+    level: 'info',
+    category: 'DIAGNOSTICS',
+    event: 'diagnostics.console_opened',
+    message: 'System Console opened.',
+    status: 'completed',
+  })
   return true
 }
 
@@ -1110,13 +1345,22 @@ function registerBackendLogShortcut(): void {
   for (const shortcut of shortcuts) {
     globalShortcut.unregister(shortcut)
   }
-  const registered = shortcuts.some((shortcut) => (
+  const registrations = shortcuts.map((shortcut) => (
     globalShortcut.register(shortcut, () => {
-      openBackendLogTerminal()
+      openSystemConsole()
     })
   ))
-  if (!registered) {
-    console.warn('[desktop] failed to register backend log shortcut')
+  if (!registrations.some(Boolean)) {
+    emitSystemLog({
+      source: 'desktop',
+      level: 'warning',
+      category: 'SHORTCUTS',
+      event: 'system_console.shortcut_registration_failed',
+      message: 'The System Console keyboard shortcut could not be registered.',
+      operation: 'application_boot',
+      phase: 'shortcut_registration',
+      status: 'failed',
+    })
   }
 }
 
@@ -1237,7 +1481,7 @@ function createWorkspaceWindow(record: WorkspaceWindowRecord): BrowserWindow {
   window.webContents.on('before-input-event', (event, input) => {
     if (isBackendLogInputShortcut(input)) {
       event.preventDefault()
-      openBackendLogTerminal()
+      openSystemConsole()
     }
   })
   if (record.maximized) window.once('ready-to-show', () => window.maximize())
@@ -1287,13 +1531,35 @@ async function openDetachedWorkspaceWindow(
     workspaceWindowRecords.delete(windowId)
     persistWorkspaceWindowRegistry()
     const detail = error instanceof Error ? error.message : String(error)
-    console.error('[desktop] failed to create detached workspace window', error)
+    emitSystemLog({
+      source: 'desktop',
+      level: 'error',
+      category: 'WINDOWS',
+      event: 'workspace.detached_window_failed',
+      message: 'A detached workspace window could not be created.',
+      operation: 'workspace_window',
+      phase: 'create',
+      status: 'failed',
+      context: { error, windowId },
+    })
     return { success: false, error: `The new window could not be opened. ${detail}` }
   }
 }
 
 async function showStartupFailure(error: unknown, logPath?: string): Promise<void> {
   const message = error instanceof Error ? error.message : String(error)
+  emitSystemLog({
+    source: 'desktop',
+    level: 'critical',
+    category: 'STARTUP',
+    event: 'application.startup_failed',
+    message: 'MyAiLibrary could not complete startup.',
+    operation: 'application_boot',
+    phase: 'startup',
+    status: 'failed',
+    context: { error },
+  })
+  openSystemConsole('error')
   let previousReleaseUrl: string | undefined
   if (logPath) {
     try {
@@ -1306,7 +1572,7 @@ async function showStartupFailure(error: unknown, logPath?: string): Promise<voi
       // A recovery report exists only after an interrupted schema migration.
     }
   }
-  const buttons = ['Retry', ...(logPath ? ['Open logs'] : []), ...(previousReleaseUrl ? ['Open previous release'] : []), 'Exit']
+  const buttons = ['Retry', ...(logPath ? ['System Console'] : []), ...(previousReleaseUrl ? ['Open previous release'] : []), 'Exit']
   const choice = await dialog.showMessageBox({
     type: 'error',
     title: 'MyAiLibrary could not start',
@@ -1319,8 +1585,8 @@ async function showStartupFailure(error: unknown, logPath?: string): Promise<voi
   const selected = buttons[choice.response]
   if (selected === 'Retry') {
     await bootApplication()
-  } else if (selected === 'Open logs' && logPath) {
-    shell.showItemInFolder(logPath)
+  } else if (selected === 'System Console' && logPath) {
+    openSystemConsole('error')
     await showStartupFailure(error, logPath)
   } else if (selected === 'Open previous release' && previousReleaseUrl) {
     await shell.openExternal(previousReleaseUrl)
@@ -1338,7 +1604,12 @@ async function bootApplication(): Promise<void> {
   const token = randomBytes(32).toString('hex')
 
   try {
-    backend = await startBackend({ dataDir: dataRoot, token, onState: sendBackendState })
+    backend = await startBackend({
+      dataDir: dataRoot,
+      token,
+      onState: sendBackendState,
+      onLogEvent: emitSystemLog,
+    })
     const rendererUrl = app.isPackaged ? backend.origin : process.env.ELECTRON_RENDERER_URL || 'http://127.0.0.1:5173'
     currentRendererUrl = rendererUrl
     allowedRendererOrigin = new URL(rendererUrl).origin
@@ -1358,7 +1629,17 @@ async function bootApplication(): Promise<void> {
         await launchWorkspaceWindow(record)
       } catch (error) {
         workspaceWindowRecords.delete(record.id)
-        console.error(`[desktop] failed to restore workspace window ${record.id}`, error)
+        emitSystemLog({
+          source: 'desktop',
+          level: 'error',
+          category: 'WINDOWS',
+          event: 'workspace.restore_failed',
+          message: 'A detached workspace window could not be restored.',
+          operation: 'application_boot',
+          phase: 'restore_windows',
+          status: 'failed',
+          context: { error, windowId: record.id },
+        })
       }
     }
     scheduleWorkspaceWindowRegistrySave()
@@ -1380,11 +1661,51 @@ app.on('second-instance', () => {
 
 app.whenReady().then(async () => {
   if (!gotSingleInstanceLock) return
+  const dataRoot = desktopDataRoot()
+  systemLogService = new SystemLogService(dataRoot)
+  emitSystemLog({
+    source: 'desktop',
+    level: 'info',
+    category: 'STARTUP',
+    event: 'application.electron_ready',
+    message: 'Electron runtime is ready.',
+    operation: 'application_boot',
+    phase: 'electron_ready',
+    status: 'completed',
+    context: {
+      version: app.getVersion(),
+      packaged: app.isPackaged,
+      platform: process.platform,
+      architecture: process.arch,
+    },
+  })
+  process.on('uncaughtException', (error) => {
+    emitSystemLog({
+      source: 'desktop',
+      level: 'critical',
+      category: 'SYSTEM',
+      event: 'desktop.uncaught_exception',
+      message: 'An uncaught Electron main-process exception occurred.',
+      status: 'failed',
+      context: { error },
+    })
+    openSystemConsole('error')
+  })
+  process.on('unhandledRejection', (reason) => {
+    emitSystemLog({
+      source: 'desktop',
+      level: 'error',
+      category: 'SYSTEM',
+      event: 'desktop.unhandled_rejection',
+      message: 'An unhandled Electron main-process promise rejection occurred.',
+      status: 'failed',
+      context: { reason },
+    })
+  })
   nativeTheme.themeSource = 'system'
   nativeTheme.on('updated', sendSystemThemeChanged)
   Menu.setApplicationMenu(null)
   configureRendererPermissions()
-  const dataRoot = desktopDataRoot()
   updater = new DesktopUpdater(dataRoot, async (targetVersion) => {
     const previousToken = backend?.token ?? randomBytes(32).toString('hex')
     await stopBackend(backend, sendBackendState)
@@ -1393,7 +1714,12 @@ app.whenReady().then(async () => {
       await createAndVerifyUpdateBackup(dataRoot, app.getVersion(), targetVersion)
     } catch (error) {
       // The installer has not started, so restore normal app service before reporting the failure.
-      backend = await startBackend({ dataDir: dataRoot, token: previousToken, onState: sendBackendState })
+      backend = await startBackend({
+        dataDir: dataRoot,
+        token: previousToken,
+        onState: sendBackendState,
+        onLogEvent: emitSystemLog,
+      })
       const rendererUrl = app.isPackaged ? backend.origin : process.env.ELECTRON_RENDERER_URL || 'http://127.0.0.1:5173'
       currentRendererUrl = rendererUrl
       allowedRendererOrigin = new URL(rendererUrl).origin
@@ -1429,6 +1755,16 @@ app.on('before-quit', (event) => {
   if (quitting) return
   event.preventDefault()
   quitting = true
+  emitSystemLog({
+    source: 'desktop',
+    level: 'info',
+    category: 'SYSTEM',
+    event: 'application.shutdown_started',
+    message: 'Application shutdown started.',
+    operation: 'application_shutdown',
+    phase: 'shutdown',
+    status: 'starting',
+  })
   persistWorkspaceWindowRegistry()
   void stopBackend(backend, sendBackendState).finally(() => app.exit(0))
 })
