@@ -362,6 +362,22 @@ def delete_resource_embeddings(
         logger.error(f"Error deleting embeddings for resource {resource_id}: {str(e)}")
 
 
+def delete_workspace_collection(storage_root: str) -> None:
+    """Delete the complete vector collection for one non-default workspace."""
+    name = collection_name_for_storage_root(storage_root)
+    _collection_cache.pop(name, None)
+    try:
+        client.delete_collection(name=name)
+        logger.info(f"Deleted workspace embedding collection {name}")
+    except Exception as exc:
+        # Chroma raises when the collection never existed; absence is already
+        # the desired end state.
+        message = str(exc).lower()
+        if "does not exist" in message or "not found" in message:
+            return
+        raise
+
+
 def _normalize_chunk_metadata(metadata: dict | None) -> dict:
     """Normalize retrieval-relevant metadata for stable chunk comparisons."""
 

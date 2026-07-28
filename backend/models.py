@@ -419,6 +419,9 @@ class StoragePath(Base):
     name = Column(String, nullable=False)
     path = Column(String, nullable=False)
     user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    is_default = Column(Integer, nullable=False, default=0)
+    is_app_managed = Column(Integer, nullable=False, default=0)
+    deletion_pending = Column(Integer, nullable=False, default=0)
     user = relationship("User", foreign_keys=[user_id], backref="storage_paths")
 
 

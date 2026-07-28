@@ -75,7 +75,7 @@ jobs:
           npm --prefix desktop test
           Push-Location backend
           try {
-            python -m unittest test_auth_persistence test_chat_stream_reliability test_generation_logging test_processing_progress test_rag_pipeline_logging
+            python -m unittest test_auth_persistence test_workspace_storage test_workspace_deletion test_chat_stream_reliability test_generation_logging test_processing_progress test_rag_pipeline_logging
             if ($LASTEXITCODE -ne 0) { throw "Backend unit tests failed." }
             python test_phase4.py
             if ($LASTEXITCODE -ne 0) { throw "RAG evaluation self-test failed." }

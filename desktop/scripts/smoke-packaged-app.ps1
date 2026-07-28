@@ -17,7 +17,11 @@ $chromiumData = Join-Path $testRoot "chromium"
 $localAppData = Join-Path $testRoot "local-app-data"
 $stdoutPath = Join-Path $testRoot "stdout.log"
 $stderrPath = Join-Path $testRoot "stderr.log"
-New-Item -ItemType Directory -Path $chromiumData, $localAppData | Out-Null
+$defaultWorkspacePath = Join-Path $testRoot "app-created-default-workspace"
+$workspacePath = Join-Path $testRoot "selected-existing-workspace"
+$workspaceSentinelPath = Join-Path $workspacePath "preserve-me.txt"
+New-Item -ItemType Directory -Path $chromiumData, $localAppData, $workspacePath | Out-Null
+Set-Content -LiteralPath $workspaceSentinelPath -Value "workspace sentinel" -Encoding utf8
 
 function Invoke-CdpCommand {
     param(
@@ -157,11 +161,15 @@ try {
     $firebaseTokenJson = $firebaseIdToken | ConvertTo-Json -Compress
     $firebaseEmailJson = $firebaseEmail | ConvertTo-Json -Compress
     $firebaseUsernameJson = $firebaseUsername | ConvertTo-Json -Compress
+    $defaultWorkspacePathJson = $defaultWorkspacePath | ConvertTo-Json -Compress
+    $workspacePathJson = $workspacePath | ConvertTo-Json -Compress
     $expression = @'
 (async () => {
   const firebaseToken = __FIREBASE_TOKEN__;
   const expectedEmail = __FIREBASE_EMAIL__;
   const expectedUsername = __FIREBASE_USERNAME__;
+  const defaultWorkspaceRoot = __DEFAULT_WORKSPACE_PATH__;
+  const workspaceRoot = __WORKSPACE_PATH__;
   const findSignInControls = () => ({
     email: document.querySelector('input[placeholder="Enter your email or username"]'),
     password: document.querySelector('input[type="password"]'),
@@ -184,6 +192,7 @@ try {
   let packagedAuthRoundTrip = false;
   let usernameResolutionRoundTrip = false;
   let secureStorageRoundTrip = false;
+  let workspaceStorageRoundTrip = false;
   let localStorageIsClean = false;
   const authStatuses = {};
   try {
@@ -231,6 +240,97 @@ try {
       });
       authStatuses.profile = profileResponse.status;
       profile = await profileResponse.json().catch(() => ({}));
+
+      const workspaceHeaders = { Authorization: `Bearer ${sessionData.access_token}` };
+      const createDefaultWorkspaceResponse = await fetch(
+        `/storage-paths/default?name=${encodeURIComponent('Packaged default')}&path=${encodeURIComponent(defaultWorkspaceRoot)}`,
+        { method: 'POST', headers: workspaceHeaders }
+      );
+      authStatuses.createDefaultWorkspace = createDefaultWorkspaceResponse.status;
+      const createdDefaultWorkspace = await createDefaultWorkspaceResponse.json().catch(() => ({}));
+
+      const createWorkspaceResponse = await fetch(
+        `/storage-paths?name=${encodeURIComponent('Packaged workspace')}&path=${encodeURIComponent(workspaceRoot)}`,
+        { method: 'POST', headers: workspaceHeaders }
+      );
+      authStatuses.createWorkspace = createWorkspaceResponse.status;
+      const createdWorkspace = await createWorkspaceResponse.json().catch(() => ({}));
+
+      const listWorkspaceResponse = await fetch('/storage-paths', {
+        headers: workspaceHeaders
+      });
+      authStatuses.listWorkspaces = listWorkspaceResponse.status;
+      const workspaces = await listWorkspaceResponse.json().catch(() => []);
+
+      const activateWorkspaceResponse = createdWorkspace.id
+        ? await fetch(
+            `/me/active-storage-path?path_id=${encodeURIComponent(createdWorkspace.id)}`,
+            { method: 'PATCH', headers: workspaceHeaders }
+          )
+        : { ok: false, status: 0 };
+      authStatuses.activateWorkspace = activateWorkspaceResponse.status;
+
+      const activeProfileResponse = await fetch('/me', {
+        headers: workspaceHeaders
+      });
+      authStatuses.activeWorkspaceProfile = activeProfileResponse.status;
+      const activeProfile = await activeProfileResponse.json().catch(() => ({}));
+
+      const deleteDefaultResponse = createdDefaultWorkspace.id
+        ? await fetch(
+            `/storage-paths/${encodeURIComponent(createdDefaultWorkspace.id)}?confirm=true`,
+            { method: 'DELETE', headers: workspaceHeaders }
+          )
+        : { ok: false, status: 0 };
+      authStatuses.deleteDefaultWorkspace = deleteDefaultResponse.status;
+
+      const deleteWorkspaceResponse = createdWorkspace.id
+        ? await fetch(
+            `/storage-paths/${encodeURIComponent(createdWorkspace.id)}?confirm=true`,
+            { method: 'DELETE', headers: workspaceHeaders }
+          )
+        : { ok: false, status: 0 };
+      authStatuses.deleteWorkspace = deleteWorkspaceResponse.status;
+      const deletedWorkspace = deleteWorkspaceResponse.json
+        ? await deleteWorkspaceResponse.json().catch(() => ({}))
+        : {};
+
+      const listAfterDeleteResponse = await fetch('/storage-paths', {
+        headers: workspaceHeaders
+      });
+      authStatuses.listAfterDelete = listAfterDeleteResponse.status;
+      const workspacesAfterDelete = await listAfterDeleteResponse.json().catch(() => []);
+
+      const profileAfterDeleteResponse = await fetch('/me', {
+        headers: workspaceHeaders
+      });
+      authStatuses.profileAfterDelete = profileAfterDeleteResponse.status;
+      const profileAfterDelete = await profileAfterDeleteResponse.json().catch(() => ({}));
+      const normalizePath = (value) => String(value || '').replaceAll('/', '\\').toLowerCase();
+      workspaceStorageRoundTrip = Boolean(
+        createDefaultWorkspaceResponse.ok &&
+        createdDefaultWorkspace.is_default === true &&
+        createWorkspaceResponse.ok &&
+        createdWorkspace.is_default === false &&
+        listWorkspaceResponse.ok &&
+        Array.isArray(workspaces) &&
+        workspaces.some((workspace) => workspace.id === createdDefaultWorkspace.id && workspace.is_default === true) &&
+        workspaces.some((workspace) => workspace.id === createdWorkspace.id) &&
+        activateWorkspaceResponse.ok &&
+        activeProfileResponse.ok &&
+        normalizePath(createdWorkspace.path) === normalizePath(workspaceRoot) &&
+        normalizePath(activeProfile.storage_root) === normalizePath(workspaceRoot) &&
+        deleteDefaultResponse.status === 403 &&
+        deleteWorkspaceResponse.ok &&
+        deletedWorkspace.switched_to_default === true &&
+        normalizePath(deletedWorkspace.active_path) === normalizePath(defaultWorkspaceRoot) &&
+        listAfterDeleteResponse.ok &&
+        Array.isArray(workspacesAfterDelete) &&
+        workspacesAfterDelete.some((workspace) => workspace.id === createdDefaultWorkspace.id) &&
+        !workspacesAfterDelete.some((workspace) => workspace.id === createdWorkspace.id) &&
+        profileAfterDeleteResponse.ok &&
+        normalizePath(profileAfterDelete.storage_root) === normalizePath(defaultWorkspaceRoot)
+      );
     }
 
     usernameResolutionRoundTrip = Boolean(
@@ -291,6 +391,7 @@ try {
     packagedAuthRoundTrip,
     usernameResolutionRoundTrip,
     secureStorageRoundTrip,
+    workspaceStorageRoundTrip,
     localStorageIsClean,
     firebaseLoginRejectedSafely,
     authStatuses
@@ -300,6 +401,8 @@ try {
     $expression = $expression.Replace("__FIREBASE_TOKEN__", $firebaseTokenJson)
     $expression = $expression.Replace("__FIREBASE_EMAIL__", $firebaseEmailJson)
     $expression = $expression.Replace("__FIREBASE_USERNAME__", $firebaseUsernameJson)
+    $expression = $expression.Replace("__DEFAULT_WORKSPACE_PATH__", $defaultWorkspacePathJson)
+    $expression = $expression.Replace("__WORKSPACE_PATH__", $workspacePathJson)
     $response = Invoke-CdpCommand -WebSocketUrl $pageTarget.webSocketDebuggerUrl -Message @{
         id = 1
         method = "Runtime.evaluate"
@@ -326,6 +429,13 @@ try {
     if (-not $result.bridgeReady -or -not $result.secureStorageRoundTrip -or -not $result.localStorageIsClean) {
         throw "Packaged encrypted-session bridge failed its round-trip validation."
     }
+    if (-not $result.workspaceStorageRoundTrip) {
+        $statusSummary = $result.authStatuses | ConvertTo-Json -Compress
+        throw "Packaged workspace registration, listing, activation, protection, or deletion failed. HTTP statuses: $statusSummary"
+    }
+    if ((Get-Content -LiteralPath $workspaceSentinelPath -Raw).Trim() -ne "workspace sentinel") {
+        throw "Packaged workspace registration or deletion modified an unrelated file."
+    }
     if (-not $result.firebaseLoginRejectedSafely) {
         throw "Packaged Firebase login did not reach the expected valid-key credential response. Renderer text: $($result.visibleText)"
     }
@@ -334,7 +444,7 @@ try {
     if ($stderr -match "auth/invalid-api-key|auth/api-key-not-valid|Uncaught FirebaseError") {
         throw "Packaged renderer reported an invalid Firebase API key."
     }
-    Write-Host "Packaged Electron startup, real Firebase signup/session exchange, username resolution, renderer mount, and encrypted-session round trip passed."
+    Write-Host "Packaged Electron startup, authentication, workspace lifecycle, renderer mount, and encrypted-session round trip passed."
     $smokeSucceeded = $true
 } catch {
     Write-Warning "Packaged smoke-test logs were retained at $testRoot"

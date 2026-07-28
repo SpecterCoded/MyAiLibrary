@@ -2997,6 +2997,15 @@ def delete_resource_knowledge(db: Session, resource_id: str, user_id: str) -> No
         db.query(RelationshipEvidence).filter(
             RelationshipEvidence.run_id.in_(run_ids)
         ).delete(synchronize_session=False)
+        db.query(RelationshipReviewCandidate).filter(
+            RelationshipReviewCandidate.run_id.in_(run_ids)
+        ).delete(synchronize_session=False)
+        db.query(ConceptCoverage).filter(
+            ConceptCoverage.run_id.in_(run_ids)
+        ).delete(synchronize_session=False)
+        db.query(KnowledgeSourceSection).filter(
+            KnowledgeSourceSection.run_id.in_(run_ids)
+        ).delete(synchronize_session=False)
         db.query(ConceptMention).filter(
             ConceptMention.run_id.in_(run_ids)
         ).delete(synchronize_session=False)
@@ -3012,6 +3021,10 @@ def delete_resource_knowledge(db: Session, resource_id: str, user_id: str) -> No
     db.query(ConceptRecommendation).filter(
         ConceptRecommendation.user_id == user_id,
         ConceptRecommendation.resource_id == resource_id,
+    ).delete(synchronize_session=False)
+    db.query(StudyEvent).filter(
+        StudyEvent.user_id == user_id,
+        StudyEvent.resource_id == resource_id,
     ).delete(synchronize_session=False)
     db.query(ResourceKnowledgeState).filter(
         ResourceKnowledgeState.resource_id == resource_id,

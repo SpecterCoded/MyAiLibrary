@@ -2,11 +2,21 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Slider from '@mui/material/Slider';
 import { type BackendUser } from './DashboardHeader';
-import { UploadCloud, CheckCircle2, Monitor, Moon, Sun, Plus, FolderOpen, Loader2, Info, RefreshCw, Download, ShieldCheck, ShieldAlert, Clock3, FileText, RotateCw, Copy, ExternalLink, Database, AppWindow, HardDrive, Cpu, TerminalSquare } from 'lucide-react';
+import { UploadCloud, CheckCircle2, Monitor, Moon, Sun, Plus, FolderOpen, Loader2, Info, RefreshCw, Download, ShieldCheck, ShieldAlert, Clock3, FileText, RotateCw, Copy, ExternalLink, Database, AppWindow, HardDrive, Cpu, TerminalSquare, Trash2 } from 'lucide-react';
 import { EmailAuthProvider, reauthenticateWithCredential, updatePassword, signOut } from 'firebase/auth';
 import { getFirebaseAuth } from '../firebase';
 import { selectFile, selectFolder } from '../utils/desktop';
 import { clearRefreshToken } from '../utils/authStorage';
+import ConfirmModal from './ConfirmModal';
+import {
+  buildWorkspaceSaveQueue,
+  deleteWorkspaceLibrary,
+  fetchWorkspaceLibraries,
+  registerWorkspaceLibraries,
+  type WorkspaceLibrary,
+  type WorkspaceLibraryDraft,
+  WorkspaceRegistrationError,
+} from '../utils/workspaceStorage';
 
 interface SettingsViewProps {
   user: BackendUser | null;
@@ -156,7 +166,7 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
   const [downloadingModel, setDownloadingModel] = useState<string | null>(null);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [activeStorage, setActiveStorage] = useState(user?.storage_root || '');
-  const [storageLibraries, setStorageLibraries] = useState<Array<{ id: string; name: string; path: string }>>([]);
+  const [storageLibraries, setStorageLibraries] = useState<WorkspaceLibrary[]>([]);
   const [autoSync, setAutoSync] = useState(true);
   const [s3Endpoint, setS3Endpoint] = useState('');
   const [s3AccessKey, setS3AccessKey] = useState('');
@@ -260,6 +270,8 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
   const [newLibPath, setNewLibPath] = useState('');
   const [isAddingLib, setIsAddingLib] = useState(false);
   const [pendingLibraries, setPendingLibraries] = useState<{name: string, path: string}[]>([]);
+  const [workspaceToDelete, setWorkspaceToDelete] = useState<WorkspaceLibrary | null>(null);
+  const [deletingWorkspaceId, setDeletingWorkspaceId] = useState<string | null>(null);
 
   const tabs: { id: TabType; label: string }[] = [
     { id: 'account', label: 'My Account' },
@@ -656,7 +668,10 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
     e.preventDefault();
     if (!newLibName.trim() || !newLibPath.trim()) return;
 
-    setPendingLibraries([...pendingLibraries, { name: newLibName.trim(), path: newLibPath.trim() }]);
+    setPendingLibraries((current) => [
+      ...current,
+      { name: newLibName.trim(), path: newLibPath.trim() },
+    ]);
     setNewLibName('');
     setNewLibPath('');
     setIsAddingLib(false);
@@ -691,6 +706,32 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
       setErrorMessage('Network error switching storage path.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDeleteWorkspace = async () => {
+    const target = workspaceToDelete;
+    const token = localStorage.getItem('access_token');
+    if (!target || !token || target.is_default) return;
+
+    setDeletingWorkspaceId(target.id);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    try {
+      const result = await deleteWorkspaceLibrary(target.id, token);
+      setStorageLibraries(await fetchWorkspaceLibraries(token));
+      if (result.switched_to_default && result.active_path) {
+        setActiveStorage(result.active_path);
+        onUserUpdate?.();
+        window.dispatchEvent(new Event('workspace-changed'));
+      }
+      setSuccessMessage('Workspace and all of its My AI Library data were permanently deleted.');
+      setTimeout(() => setSuccessMessage(null), 4000);
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'The workspace could not be deleted.');
+    } finally {
+      setDeletingWorkspaceId(null);
+      setWorkspaceToDelete(null);
     }
   };
 
@@ -777,6 +818,9 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
     setCompactMode(settingsSnapshot.compactMode ?? false);
     setLanguage(settingsSnapshot.language ?? 'en');
     setPendingLibraries([]);
+    setNewLibName('');
+    setNewLibPath('');
+    setIsAddingLib(false);
     setNotificationsEnabled(settingsSnapshot.notificationsEnabled ?? true);
     setSuccessMessage('Changes reverted.');
     setTimeout(() => { setSuccessMessage(null); setCancelState('done'); }, 1800);
@@ -792,7 +836,22 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
     const token = localStorage.getItem('access_token');
     if (!token) {
       setErrorMessage('Session expired. Please log in again.');
+      setSaveState('error');
+      setTimeout(() => setSaveState('idle'), 2500);
       setLoading(false);
+      return;
+    }
+
+    let workspaceSaveQueue: WorkspaceLibraryDraft[];
+    try {
+      workspaceSaveQueue = buildWorkspaceSaveQueue(
+        pendingLibraries,
+        { name: newLibName, path: newLibPath },
+      );
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'Complete the new library details before saving.');
+      setSaveState('error');
+      setTimeout(() => setSaveState('idle'), 2500);
       return;
     }
 
@@ -908,19 +967,16 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
         });
       }
 
-      // 4. Register any pending new libraries
-      if (pendingLibraries.length > 0) {
-        for (const lib of pendingLibraries) {
-          const response = await fetch(
-            `/storage-paths?name=${encodeURIComponent(lib.name)}&path=${encodeURIComponent(lib.path)}`,
-            { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } }
-          );
-          if (response.ok) {
-            const newLib = await response.json();
-            setStorageLibraries(prev => [...prev, newLib]);
-          }
-        }
+      // 4. Register staged libraries and a complete open draft. The backend is
+      // idempotent, so retrying after an uncertain response cannot duplicate it.
+      if (workspaceSaveQueue.length > 0) {
+        await registerWorkspaceLibraries(workspaceSaveQueue, token);
+        const refreshedLibraries = await fetchWorkspaceLibraries(token);
+        setStorageLibraries(refreshedLibraries);
         setPendingLibraries([]);
+        setNewLibName('');
+        setNewLibPath('');
+        setIsAddingLib(false);
       }
 
       const missingAI = [];
@@ -961,18 +1017,28 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
         localStorage.removeItem('email');
         window.location.reload();
       }
-    } catch (err: any) {
-      setErrorMessage(err.message || 'An error occurred while saving.');
+      // Keep spinner visible long enough to make the completed save legible.
+      await new Promise(r => setTimeout(r, 2000));
+      setSaveState('success');
+      setTimeout(() => setSaveState('idle'), 2000);
+    } catch (err: unknown) {
+      if (err instanceof WorkspaceRegistrationError) {
+        setPendingLibraries(err.remaining);
+        setNewLibName('');
+        setNewLibPath('');
+        setIsAddingLib(false);
+        try {
+          setStorageLibraries(await fetchWorkspaceLibraries(token));
+        } catch {
+          // The registration error remains the most actionable feedback.
+        }
+        setErrorMessage(`Settings were saved, but the workspace change was not. ${err.message}`);
+      } else {
+        setErrorMessage(err instanceof Error ? err.message : 'An error occurred while saving.');
+      }
       setSaveState('error');
       setTimeout(() => setSaveState('idle'), 2500);
     } finally {
-      if (saveState !== 'error') {
-        // Keep spinner visible for at least 2s so users feel the saving
-        await new Promise(r => setTimeout(r, 2000));
-        setSaveState('success');
-        // Hold "Saved" long enough for users to register the confirmation
-        setTimeout(() => setSaveState('idle'), 2000);
-      }
       setLoading(false);
     }
   };
@@ -2863,21 +2929,47 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
                     </div>
                     <div className="space-y-3">
                       {storageLibraries.map((lib) => (
-                        <div key={lib.id} className="flex items-center justify-between p-3 border border-gray-200 dark:border-white/10 rounded-lg bg-white dark:bg-white/5 shadow-sm hover:border-indigo-300 transition-colors">
+                        <div key={lib.id} className="flex items-center justify-between p-3 border border-gray-200 dark:border-white/10 rounded-lg bg-white dark:bg-white/5 shadow-sm hover:border-indigo-300 dark:hover:border-indigo-500/40 transition-colors">
                           <div className="flex items-center gap-3 overflow-hidden">
-                            <FolderOpen className="w-4 h-4 text-gray-400 shrink-0" />
+                            <FolderOpen className="w-4 h-4 text-indigo-500 dark:text-indigo-400 shrink-0" />
                             <div className="flex flex-col overflow-hidden">
-                              <span className="text-sm font-semibold text-gray-700 dark:text-slate-300">{lib.name}</span>
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-semibold text-gray-700 dark:text-slate-300">{lib.name}</span>
+                                {lib.is_default && (
+                                  <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-indigo-600 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-300">
+                                    Default
+                                  </span>
+                                )}
+                                {lib.deletion_pending && (
+                                  <span className="rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-rose-600 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">
+                                    Deletion pending
+                                  </span>
+                                )}
+                              </div>
                               <span className="text-xs text-gray-400 font-mono truncate">{lib.path}</span>
                             </div>
                           </div>
-                          <div className="flex gap-2 shrink-0">
-                            {lib.path !== activeStorage && (
+                          <div className="flex items-center gap-1 shrink-0">
+                            {!lib.deletion_pending && lib.path !== activeStorage && (
                               <button 
                                 onClick={() => handleSwitchActiveStorage(lib.id)}
-                                className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors px-2 py-1"
+                                className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 transition-colors px-2 py-1"
                               >
                                 Switch
+                              </button>
+                            )}
+                            {!lib.is_default && (
+                              <button
+                                type="button"
+                                onClick={() => setWorkspaceToDelete(lib)}
+                                disabled={deletingWorkspaceId === lib.id}
+                                aria-label={`Delete ${lib.name} workspace`}
+                                title={lib.deletion_pending ? 'Retry permanent deletion' : 'Delete workspace'}
+                                className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-rose-50 hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-500 dark:hover:bg-rose-500/10 dark:hover:text-rose-400"
+                              >
+                                {deletingWorkspaceId === lib.id
+                                  ? <Loader2 className="h-4 w-4 animate-spin" />
+                                  : <Trash2 className="h-4 w-4" />}
                               </button>
                             )}
                           </div>
@@ -2931,7 +3023,7 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
                                 <button 
                                   type="button"
                                   onClick={handleBrowseFolder}
-                                  className="px-2.5 py-1.5 bg-gray-200 border border-gray-300 dark:border-white/20 rounded-lg text-gray-600 dark:text-slate-400 hover:bg-gray-300 transition-colors shrink-0"
+                                  className="px-2.5 py-1.5 bg-gray-200 dark:bg-white/10 border border-gray-300 dark:border-white/15 rounded-lg text-gray-600 dark:text-indigo-300 hover:bg-gray-300 dark:hover:bg-white/15 transition-colors shrink-0"
                                 >
                                   <FolderOpen className="w-4 h-4" />
                                 </button>
@@ -3641,6 +3733,23 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
           </div>}
         </div>
       </div>
+
+      <ConfirmModal
+        isOpen={workspaceToDelete !== null}
+        onClose={() => {
+          if (!deletingWorkspaceId) setWorkspaceToDelete(null);
+        }}
+        onConfirm={() => void handleDeleteWorkspace()}
+        title="Permanently delete workspace?"
+        message={workspaceToDelete
+          ? workspaceToDelete.is_app_managed
+            ? `This permanently deletes "${workspaceToDelete.name}", all of its My AI Library data, indexes, generated content, and the app-owned folder at ${workspaceToDelete.path}. This cannot be undone.`
+            : `This permanently deletes all My AI Library data, indexes, generated content, and tracked files for "${workspaceToDelete.name}". The existing folder at ${workspaceToDelete.path} and unrelated personal files will be preserved. This cannot be undone.`
+          : ''}
+        confirmText="Delete workspace"
+        cancelText="Keep workspace"
+        isDanger
+      />
 
       {/* Terminate Session Modal */}
       <AnimatePresence>

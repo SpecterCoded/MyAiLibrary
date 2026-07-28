@@ -74,6 +74,7 @@ from embedding_service import (
     answer_question,
     build_context,
     delete_resource_embeddings,
+    delete_workspace_collection,
     extract_sources_from_metadatas,
 )
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, Header, Request, Body
@@ -207,6 +208,13 @@ from services.queue_service import (
 from services.resource_service import create_resource
 from services.resource_service import compute_bytes_content_hash, compute_file_content_hash
 from services.note_service import NoteService, _sanitize_filename
+from services.workspace_storage_service import (
+    WorkspaceStorageError,
+    migrate_storage_paths_schema,
+    register_workspace_path,
+    remove_workspace_directory,
+    workspace_path_key,
+)
 from sqlalchemy import or_, and_, text, func
 from sqlalchemy.orm import Session
 from database import DATABASE_PATH, SessionLocal, engine
@@ -428,8 +436,7 @@ with schema_migration_connection(engine, migration_required) as conn:
             ")"
         ))
 
-    if "storage_paths" not in inspector.get_table_names():
-        conn.execute(text("CREATE TABLE storage_paths (id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL, user_id TEXT NOT NULL)"))
+    migrate_storage_paths_schema(conn, inspector)
 
     if "users" in inspector.get_table_names():
         existing_users = [c["name"] for c in inspector.get_columns("users")]
@@ -2314,7 +2321,12 @@ def start_wtp_model_warmup():
 # ==================================================
 
 
-def _get_folder_path(folder: Folder, db: Session, current_user: User) -> str:
+def _get_folder_path(
+    folder: Folder,
+    db: Session,
+    current_user: User,
+    storage_root_override: str | None = None,
+) -> str:
     playlist_name = None
     if folder.playlist_id:
         if folder.playlist:
@@ -2323,7 +2335,7 @@ def _get_folder_path(folder: Folder, db: Session, current_user: User) -> str:
             playlist = db.query(Playlist).filter(Playlist.id == folder.playlist_id, Playlist.user_id == current_user.id).first()
             playlist_name = playlist.name if playlist else None
         
-    root = current_user.storage_root or UPLOADS_ROOT
+    root = storage_root_override or current_user.storage_root or UPLOADS_ROOT
     if playlist_name:
         if folder.name == 'root':
             return os.path.join(root, current_user.username, playlist_name)
@@ -2987,6 +2999,36 @@ def _delete_resource_instance(resource: Resource, db: Session):
     sys_logger.info(f"[DELETE]   Deleted {links_deleted} concept link(s)")
 
     # ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ 15. Resource row ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+    # Resource-scoped caches, diagnostics, cost records, and conversations.
+    from models import AiUsageEvent, AnswerFeedback, SemanticCache, StudyEvent
+
+    session_ids = [
+        row[0]
+        for row in db.query(ChatSession.id).filter(ChatSession.resource_id == rid).all()
+    ]
+    if session_ids:
+        db.query(ChatMessage).filter(
+            ChatMessage.session_id.in_(session_ids)
+        ).delete(synchronize_session=False)
+        db.query(ChatSession).filter(
+            ChatSession.id.in_(session_ids)
+        ).delete(synchronize_session=False)
+    db.query(DocumentInsight).filter(
+        DocumentInsight.resource_id == rid
+    ).delete(synchronize_session=False)
+    db.query(SemanticCache).filter(
+        SemanticCache.resource_id == rid
+    ).delete(synchronize_session=False)
+    db.query(AnswerFeedback).filter(
+        AnswerFeedback.resource_id == rid
+    ).delete(synchronize_session=False)
+    db.query(AiUsageEvent).filter(
+        AiUsageEvent.resource_id == rid
+    ).delete(synchronize_session=False)
+    db.query(StudyEvent).filter(
+        StudyEvent.resource_id == rid
+    ).delete(synchronize_session=False)
+
     db.delete(resource)
     sys_logger.info(f"[DELETE]   Resource row queued for deletion: {rid}")
 
@@ -5632,16 +5674,40 @@ def get_note(
     return serialize_note(note)
 
 
-def _get_note_physical_dir_path(db: Session, user: User, playlist_id: str | None, folder_id: str | None) -> str:
+def _get_note_physical_dir_path(
+    db: Session,
+    user: User,
+    playlist_id: str | None,
+    folder_id: str | None,
+    storage_root_override: str | None = None,
+) -> str:
     if folder_id:
         folder = db.query(Folder).filter(Folder.id == folder_id, Folder.user_id == user.id).first()
         if folder:
-            return _get_folder_path(folder, db, user)
+            return _get_folder_path(
+                folder,
+                db,
+                user,
+                storage_root_override=storage_root_override,
+            )
     
     # Fallback to playlist/global notes directory
-    from services.note_service import NoteService
-    ns = NoteService(db)
-    return ns._get_note_dir(user, playlist_id)
+    storage_root = storage_root_override or user.storage_root
+    if playlist_id:
+        playlist = db.query(Playlist).filter(
+            Playlist.id == playlist_id,
+            Playlist.user_id == user.id,
+        ).first()
+        if not playlist:
+            raise ValueError("The note's playlist could not be resolved.")
+        base_path = get_upload_path(
+            user.username,
+            playlist.name,
+            custom_root=storage_root,
+        )
+    else:
+        base_path = get_upload_path(user.username, custom_root=storage_root)
+    return os.path.join(base_path, "Notes")
 
 
 @app.put("/notes/{note_id}")
@@ -8894,27 +8960,45 @@ def create_storage_path(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Check if path already exists
-    if os.path.exists(path):
-        raise HTTPException(
-            status_code=400,
-            detail="A folder at this path already exists. Please choose a different folder name or path."
-        )
-    
-    # Attempt to create the folder
     try:
-        os.makedirs(path, exist_ok=True)
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to create workspace directory: {str(e)}"
-        )
+        storage_path = register_workspace_path(db, current_user, name, path)
+    except WorkspaceStorageError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return {
+        "id": storage_path.id,
+        "name": storage_path.name,
+        "path": storage_path.path,
+        "is_default": bool(storage_path.is_default),
+        "is_app_managed": bool(storage_path.is_app_managed),
+        "deletion_pending": bool(storage_path.deletion_pending),
+    }
 
-    storage_path = StoragePath(id=str(uuid4()), name=name, path=path, user_id=current_user.id)
-    db.add(storage_path)
-    db.commit()
-    db.refresh(storage_path)
-    return {"id": storage_path.id, "name": storage_path.name, "path": storage_path.path}
+
+@app.post("/storage-paths/default")
+def create_default_storage_path(
+    name: str,
+    path: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        storage_path = register_workspace_path(
+            db,
+            current_user,
+            name,
+            path,
+            is_default=True,
+        )
+    except WorkspaceStorageError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return {
+        "id": storage_path.id,
+        "name": storage_path.name,
+        "path": storage_path.path,
+        "is_default": True,
+        "is_app_managed": bool(storage_path.is_app_managed),
+        "deletion_pending": bool(storage_path.deletion_pending),
+    }
 
 
 @app.get("/storage-paths")
@@ -8923,7 +9007,17 @@ def get_storage_paths(
     current_user: User = Depends(get_current_user),
 ):
     paths = db.query(StoragePath).filter(StoragePath.user_id == current_user.id).all()
-    return [{"id": p.id, "name": p.name, "path": p.path} for p in paths]
+    return [
+        {
+            "id": p.id,
+            "name": p.name,
+            "path": p.path,
+            "is_default": bool(p.is_default),
+            "is_app_managed": bool(p.is_app_managed),
+            "deletion_pending": bool(p.deletion_pending),
+        }
+        for p in paths
+    ]
 
 
 @app.patch("/me/active-storage-path")
@@ -8936,6 +9030,8 @@ def set_active_storage_path(
     path = db.query(StoragePath).filter(StoragePath.id == path_id, StoragePath.user_id == user_id).first()
     if not path:
         raise HTTPException(status_code=404, detail="Storage path not found")
+    if path.deletion_pending:
+        raise HTTPException(status_code=409, detail="This workspace is pending deletion and cannot be activated.")
 
     # Fetch user fresh from the current session context
     user = db.query(User).filter(User.id == user_id).one()
@@ -8946,6 +9042,169 @@ def set_active_storage_path(
     db.commit()
     db.refresh(user)
     return {"message": "Active storage path updated", "path": path.path}
+
+
+@app.delete("/storage-paths/{path_id}")
+def delete_storage_path(
+    path_id: str,
+    confirm: bool = False,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not confirm:
+        raise HTTPException(status_code=400, detail="Workspace deletion requires explicit confirmation.")
+
+    storage_path = db.query(StoragePath).filter(
+        StoragePath.id == path_id,
+        StoragePath.user_id == current_user.id,
+    ).first()
+    if not storage_path:
+        raise HTTPException(status_code=404, detail="Workspace not found.")
+    if storage_path.is_default:
+        raise HTTPException(status_code=403, detail="The default onboarding workspace cannot be deleted.")
+
+    default_path = db.query(StoragePath).filter(
+        StoragePath.user_id == current_user.id,
+        StoragePath.is_default == 1,
+    ).first()
+    if not default_path:
+        raise HTTPException(
+            status_code=409,
+            detail="The default workspace could not be found. Deletion was stopped for safety.",
+        )
+
+    target_key = workspace_path_key(storage_path.path)
+    switched_to_default = current_user.active_storage_path_id == storage_path.id
+
+    # Mark first so a failed physical cleanup remains retryable and can never be
+    # activated in a half-deleted state.
+    storage_path.deletion_pending = 1
+    if switched_to_default:
+        current_user.active_storage_path_id = default_path.id
+        current_user.storage_root = default_path.path
+    db.commit()
+
+    tracked_directories: list[str] = []
+    try:
+        playlists = [
+            playlist
+            for playlist in db.query(Playlist).filter(Playlist.user_id == current_user.id).all()
+            if playlist.storage_root and workspace_path_key(playlist.storage_root) == target_key
+        ]
+        playlist_ids = [playlist.id for playlist in playlists]
+
+        folders = [
+            folder
+            for folder in db.query(Folder).filter(Folder.user_id == current_user.id).all()
+            if folder.storage_root and workspace_path_key(folder.storage_root) == target_key
+        ]
+        folder_ids = [folder.id for folder in folders]
+        for folder in folders:
+            try:
+                tracked_directories.append(
+                    _get_folder_path(
+                        folder,
+                        db,
+                        current_user,
+                        storage_root_override=storage_path.path,
+                    )
+                )
+            except Exception:
+                pass
+
+        note_membership_filters = []
+        if folder_ids:
+            note_membership_filters.append(Note.folder_id.in_(folder_ids))
+        if playlist_ids:
+            note_membership_filters.append(Note.playlist_id.in_(playlist_ids))
+        workspace_notes = (
+            db.query(Note)
+            .filter(
+                Note.user_id == current_user.id,
+                or_(*note_membership_filters),
+            )
+            .all()
+            if note_membership_filters
+            else []
+        )
+        note_file_paths: list[str] = []
+        for note in workspace_notes:
+            if not note.filename:
+                continue
+            note_directory = _get_note_physical_dir_path(
+                db,
+                current_user,
+                note.playlist_id,
+                note.folder_id,
+                storage_root_override=storage_path.path,
+            )
+            note_file_paths.append(os.path.join(note_directory, note.filename))
+
+        resources = (
+            db.query(Resource)
+            .filter(
+                Resource.user_id == current_user.id,
+                Resource.folder_id.in_(folder_ids) if folder_ids else False,
+            )
+            .all()
+        )
+        for resource in resources:
+            _delete_resource_instance(resource, db)
+
+        workspace_membership = []
+        if folder_ids:
+            workspace_membership.append(DownloadTask.folder_id.in_(folder_ids))
+        if playlist_ids:
+            workspace_membership.append(DownloadTask.playlist_id.in_(playlist_ids))
+        if workspace_membership:
+            db.query(DownloadTask).filter(
+                DownloadTask.user_id == current_user.id,
+                or_(*workspace_membership),
+            ).delete(synchronize_session=False)
+
+        note_membership = []
+        if folder_ids:
+            note_membership.append(Note.folder_id.in_(folder_ids))
+        if playlist_ids:
+            note_membership.append(Note.playlist_id.in_(playlist_ids))
+        if note_membership:
+            db.query(Note).filter(
+                Note.user_id == current_user.id,
+                or_(*note_membership),
+            ).delete(synchronize_session=False)
+        if folder_ids:
+            db.query(Folder).filter(Folder.id.in_(folder_ids)).delete(synchronize_session=False)
+        if playlist_ids:
+            db.query(Playlist).filter(Playlist.id.in_(playlist_ids)).delete(synchronize_session=False)
+
+        for note_file_path in note_file_paths:
+            if os.path.isfile(note_file_path):
+                os.remove(note_file_path)
+        delete_workspace_collection(storage_path.path)
+        remove_workspace_directory(storage_path, tracked_directories)
+
+        db.delete(storage_path)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        sys_logger.error(f"[WORKSPACE_DELETE] Workspace purge failed for {path_id}: {exc}")
+        detail = (
+            exc.detail
+            if isinstance(exc, WorkspaceStorageError)
+            else "Workspace data or files could not be completely deleted."
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"{detail} The workspace remains locked; close any programs using it and retry.",
+        ) from exc
+
+    if switched_to_default:
+        _notify_explorer_changed()
+    return {
+        "message": "Workspace permanently deleted.",
+        "active_path": default_path.path if switched_to_default else current_user.storage_root,
+        "switched_to_default": switched_to_default,
+    }
 
 
 @app.post("/library/ask", response_model=AskQuestionResponse)

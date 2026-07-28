@@ -127,7 +127,7 @@ export function MacSetupAssistant({ user, onSetupComplete, isTempOnboarding = fa
       const pathParts = storagePath.trim().split(/[/\\]/);
       const nameFromPath = pathParts[pathParts.length - 1].trim() || 'MyLibrary';
 
-      const createRes = await fetch(`/storage-paths?name=${encodeURIComponent(nameFromPath)}&path=${encodeURIComponent(storagePath.trim())}`, {
+      const createRes = await fetch(`/storage-paths/default?name=${encodeURIComponent(nameFromPath)}&path=${encodeURIComponent(storagePath.trim())}`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`

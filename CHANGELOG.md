@@ -4,6 +4,36 @@ All notable changes to My AI Library are documented here. Every release also has
 
 This project follows semantic versioning. Beta builds use the Testing update channel; Stable updates remain disabled until signed Windows packages are available.
 
+## [0.1.0-beta.5] - 2026-07-28
+
+### Added
+
+- Added permanent deletion for workspaces created from Settings, with a project-themed confirmation dialog and retry-safe progress state.
+- Protected the original onboarding workspace from deletion in both the interface and backend.
+- Added workspace ownership markers so the application can distinguish an app-created directory from an existing folder adopted by the user.
+
+### Fixed
+
+- Fixed workspace registration when the desktop folder picker returns an existing directory.
+- Made global Settings save include a complete open workspace draft and retain failed drafts for retry.
+- Corrected dark-theme folder icon and folder-picker contrast in Workspace Storage.
+- Made canonical Windows paths, capitalization, and duplicate registration behave consistently.
+- Prevented failed workspace saves from being overwritten by a false “Saved” state.
+
+### Data safety
+
+- Workspace deletion removes its library records, resources, notes, generated study data, conversations, diagnostics, vector index, tracked files, and app-owned generated directories.
+- If My AI Library created the workspace root, a matching ownership marker is required before the root can be removed.
+- If the user selected an existing folder, its root and unrelated personal files are preserved; only My AI Library-owned data and tracked files are removed.
+- Deleting the active secondary workspace safely switches the account back to its protected default workspace.
+- Schema migration marks the first existing workspace per account as the protected onboarding workspace without requiring a database reset.
+
+### Release safeguards
+
+- Added backend coverage for creation, persistence, canonical duplicates, ownership isolation, default protection, migration, deletion, retry locking, and preservation of unrelated files.
+- Added frontend coverage for complete drafts, partial failures, authoritative refresh, and protected deletion requests.
+- Expanded the packaged Windows smoke gate to create a default workspace, register and activate a secondary workspace, reject default deletion, delete the secondary workspace, and verify the active workspace returns to the default.
+
 ## [0.1.0-beta.4] - 2026-07-28
 
 ### Fixed
