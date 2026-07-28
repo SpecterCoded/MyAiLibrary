@@ -258,7 +258,8 @@ try {
       const createdWorkspace = await createWorkspaceResponse.json().catch(() => ({}));
 
       const listWorkspaceResponse = await fetch('/storage-paths', {
-        headers: workspaceHeaders
+        headers: workspaceHeaders,
+        cache: 'no-store'
       });
       authStatuses.listWorkspaces = listWorkspaceResponse.status;
       const workspaces = await listWorkspaceResponse.json().catch(() => []);
@@ -272,7 +273,8 @@ try {
       authStatuses.activateWorkspace = activateWorkspaceResponse.status;
 
       const activeProfileResponse = await fetch('/me', {
-        headers: workspaceHeaders
+        headers: workspaceHeaders,
+        cache: 'no-store'
       });
       authStatuses.activeWorkspaceProfile = activeProfileResponse.status;
       const activeProfile = await activeProfileResponse.json().catch(() => ({}));
@@ -297,13 +299,15 @@ try {
         : {};
 
       const listAfterDeleteResponse = await fetch('/storage-paths', {
-        headers: workspaceHeaders
+        headers: workspaceHeaders,
+        cache: 'no-store'
       });
       authStatuses.listAfterDelete = listAfterDeleteResponse.status;
       const workspacesAfterDelete = await listAfterDeleteResponse.json().catch(() => []);
 
-      const profileAfterDeleteResponse = await fetch('/me', {
-        headers: workspaceHeaders
+      const profileAfterDeleteResponse = await fetch('/me?workspace_state=after-delete', {
+        headers: workspaceHeaders,
+        cache: 'no-store'
       });
       authStatuses.profileAfterDelete = profileAfterDeleteResponse.status;
       const profileAfterDelete = await profileAfterDeleteResponse.json().catch(() => ({}));

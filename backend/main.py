@@ -688,6 +688,13 @@ async def structured_request_logging(request: Request, call_next):
         context={**safe_context, "statusCode": status_code},
     )
     response.headers["x-request-id"] = correlation_id
+    if request.method == "GET" and (
+        request.url.path == "/me"
+        or request.url.path.startswith("/storage-paths")
+    ):
+        # These responses reflect mutable per-user workspace state. Electron's
+        # renderer must never reuse an earlier profile after a switch/delete.
+        response.headers["Cache-Control"] = "no-store, private"
     return response
 
 
