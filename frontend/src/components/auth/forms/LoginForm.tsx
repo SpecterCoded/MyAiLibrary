@@ -4,6 +4,7 @@ import { Input } from '../ui/Input';
 import { Button } from '../ui/Button';
 import { logActivity } from '../../../utils/activityLogger';
 import { storeRefreshToken } from '../../../utils/authStorage';
+import { resolveLoginEmail } from '../../../utils/authFlow';
 
 export function LoginForm({ ctx }: { ctx: AuthContextType }) {
   const [password, setPassword] = useState('');
@@ -30,15 +31,7 @@ export function LoginForm({ ctx }: { ctx: AuthContextType }) {
 
     setLoading(true);
     try {
-      let targetEmail = ctx.email.trim();
-      if (!targetEmail.includes('@')) {
-        const resolveRes = await fetch(`/auth/resolve-email?username_or_email=${encodeURIComponent(targetEmail)}`);
-        if (!resolveRes.ok) {
-          throw new Error('Username not found');
-        }
-        const resolveData = await resolveRes.json();
-        targetEmail = resolveData.email;
-      }
+      const targetEmail = await resolveLoginEmail(ctx.email);
 
       const { getFirebaseAuth } = await import('../../../firebase');
       const { signInWithEmailAndPassword, setPersistence, browserLocalPersistence, browserSessionPersistence } = await import('firebase/auth');
@@ -99,11 +92,15 @@ export function LoginForm({ ctx }: { ctx: AuthContextType }) {
 
       logActivity('auth', 'Logged in', targetEmail);
       ctx.onLoginSuccess();
-    } catch (err: any) {
-      if (err.code === 'auth/invalid-credential') {
+    } catch (err: unknown) {
+      const firebaseCode =
+        typeof err === 'object' && err !== null && 'code' in err
+          ? String((err as { code?: unknown }).code)
+          : '';
+      if (firebaseCode === 'auth/invalid-credential') {
         setSubmitError('Invalid email or password');
       } else {
-        setSubmitError(err.message || 'An error occurred during log in');
+        setSubmitError(err instanceof Error ? err.message : 'An error occurred during log in');
       }
     } finally {
       setLoading(false);

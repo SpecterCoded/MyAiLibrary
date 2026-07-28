@@ -4,7 +4,9 @@ param(
 
     [int]$RemoteDebuggingPort = 9323,
 
-    [string]$ApplicationPath = ""
+    [string]$ApplicationPath = "",
+
+    [string]$FirebaseApiKey = $env:VITE_FIREBASE_API_KEY
 )
 
 $ErrorActionPreference = "Stop"
@@ -82,7 +84,35 @@ function Invoke-CdpCommand {
 $previousLocalAppData = $env:LOCALAPPDATA
 $appProcess = $null
 $smokeSucceeded = $false
+$firebaseCleanupFailed = $false
+$firebaseIdToken = $null
+$firebaseEmail = "release-validation-$([guid]::NewGuid().ToString('N'))@example.com"
+$firebasePassword = "Release-$([guid]::NewGuid().ToString('N'))!A9"
+$firebaseUsername = "ReleaseValidation$([guid]::NewGuid().ToString('N').Substring(0, 12))"
 try {
+    if ([string]::IsNullOrWhiteSpace($FirebaseApiKey)) {
+        throw "Packaged authentication smoke test requires the Firebase web API key."
+    }
+    try {
+        $signupUri = "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=$FirebaseApiKey"
+        $firebaseSignup = Invoke-RestMethod `
+            -Method Post `
+            -Uri $signupUri `
+            -ContentType "application/json" `
+            -Body (@{
+                email = $firebaseEmail
+                password = $firebasePassword
+                returnSecureToken = $true
+            } | ConvertTo-Json -Compress) `
+            -TimeoutSec 30
+        $firebaseIdToken = $firebaseSignup.idToken
+        if ([string]::IsNullOrWhiteSpace($firebaseIdToken)) {
+            throw "Firebase did not return an ID token."
+        }
+    } catch {
+        throw "Unable to create the ephemeral Firebase packaged-auth validation account."
+    }
+
     $env:LOCALAPPDATA = $localAppData
     $arguments = @(
         "--remote-debugging-port=$RemoteDebuggingPort",
@@ -124,8 +154,14 @@ try {
         throw "Packaged renderer did not expose a page target within 45 seconds."
     }
 
+    $firebaseTokenJson = $firebaseIdToken | ConvertTo-Json -Compress
+    $firebaseEmailJson = $firebaseEmail | ConvertTo-Json -Compress
+    $firebaseUsernameJson = $firebaseUsername | ConvertTo-Json -Compress
     $expression = @'
 (async () => {
+  const firebaseToken = __FIREBASE_TOKEN__;
+  const expectedEmail = __FIREBASE_EMAIL__;
+  const expectedUsername = __FIREBASE_USERNAME__;
   const findSignInControls = () => ({
     email: document.querySelector('input[placeholder="Enter your email or username"]'),
     password: document.querySelector('input[type="password"]'),
@@ -145,14 +181,86 @@ try {
     window.desktop?.getRefreshToken &&
     window.desktop?.clearRefreshToken
   );
+  let packagedAuthRoundTrip = false;
+  let usernameResolutionRoundTrip = false;
   let secureStorageRoundTrip = false;
   let localStorageIsClean = false;
-  if (bridgeReady) {
-    const stored = await window.desktop.setRefreshToken('packaged.smoke.refresh-token');
-    const recovered = await window.desktop.getRefreshToken();
-    const cleared = await window.desktop.clearRefreshToken();
-    secureStorageRoundTrip = stored && recovered === 'packaged.smoke.refresh-token' && cleared;
-    localStorageIsClean = localStorage.getItem('refresh_token') === null;
+  const authStatuses = {};
+  try {
+    const completionResponse = await fetch('/auth/complete-signup', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${firebaseToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        username: expectedUsername,
+        avatar_url: ''
+      })
+    });
+    authStatuses.completeSignup = completionResponse.status;
+    const completion = await completionResponse.json().catch(() => ({}));
+
+    const exactResolutionResponse = await fetch(
+      `/auth/resolve-email?username_or_email=${encodeURIComponent(expectedUsername)}`
+    );
+    authStatuses.resolveExact = exactResolutionResponse.status;
+    const exactResolution = await exactResolutionResponse.json().catch(() => ({}));
+
+    const mixedResolutionResponse = await fetch(
+      `/auth/resolve-email?username_or_email=${encodeURIComponent(expectedUsername.toUpperCase())}`
+    );
+    authStatuses.resolveMixedCase = mixedResolutionResponse.status;
+    const mixedResolution = await mixedResolutionResponse.json().catch(() => ({}));
+
+    const sessionResponse = await fetch('/auth/firebase-session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        firebase_token: firebaseToken,
+        remember_me: true
+      })
+    });
+    authStatuses.firebaseSession = sessionResponse.status;
+    const sessionData = await sessionResponse.json().catch(() => ({}));
+
+    let profile = {};
+    if (sessionResponse.ok && sessionData.access_token) {
+      const profileResponse = await fetch('/me', {
+        headers: { Authorization: `Bearer ${sessionData.access_token}` }
+      });
+      authStatuses.profile = profileResponse.status;
+      profile = await profileResponse.json().catch(() => ({}));
+    }
+
+    usernameResolutionRoundTrip = Boolean(
+      exactResolutionResponse.ok &&
+      mixedResolutionResponse.ok &&
+      exactResolution.email?.toLowerCase() === expectedEmail.toLowerCase() &&
+      mixedResolution.email?.toLowerCase() === expectedEmail.toLowerCase()
+    );
+    packagedAuthRoundTrip = Boolean(
+      completionResponse.ok &&
+      completion.username === expectedUsername &&
+      sessionResponse.ok &&
+      sessionData.user?.username === expectedUsername &&
+      profile.username === expectedUsername &&
+      profile.email?.toLowerCase() === expectedEmail.toLowerCase()
+    );
+
+    if (bridgeReady && sessionData.refresh_token) {
+      const stored = await window.desktop.setRefreshToken(sessionData.refresh_token);
+      const recovered = await window.desktop.getRefreshToken();
+      const cleared = await window.desktop.clearRefreshToken();
+      secureStorageRoundTrip = Boolean(
+        stored &&
+        recovered === sessionData.refresh_token &&
+        cleared
+      );
+      localStorageIsClean = localStorage.getItem('refresh_token') === null;
+    }
+  } catch {
+    // Status flags are returned to PowerShell without exposing credentials.
   }
   const { email, password: passwordInput, signIn } = controls;
   let firebaseLoginRejectedSafely = false;
@@ -180,12 +288,18 @@ try {
     rootChildren: root?.childElementCount ?? 0,
     visibleText: document.body?.innerText?.slice(0, 2000) ?? '',
     bridgeReady,
+    packagedAuthRoundTrip,
+    usernameResolutionRoundTrip,
     secureStorageRoundTrip,
     localStorageIsClean,
-    firebaseLoginRejectedSafely
+    firebaseLoginRejectedSafely,
+    authStatuses
   };
 })()
 '@
+    $expression = $expression.Replace("__FIREBASE_TOKEN__", $firebaseTokenJson)
+    $expression = $expression.Replace("__FIREBASE_EMAIL__", $firebaseEmailJson)
+    $expression = $expression.Replace("__FIREBASE_USERNAME__", $firebaseUsernameJson)
     $response = Invoke-CdpCommand -WebSocketUrl $pageTarget.webSocketDebuggerUrl -Message @{
         id = 1
         method = "Runtime.evaluate"
@@ -205,6 +319,10 @@ try {
     if ($result.visibleText -notmatch "Log in to your account") {
         throw "Packaged renderer did not show the expected authentication interface."
     }
+    if (-not $result.packagedAuthRoundTrip -or -not $result.usernameResolutionRoundTrip) {
+        $statusSummary = $result.authStatuses | ConvertTo-Json -Compress
+        throw "Packaged Firebase signup, session, profile, or username resolution failed. HTTP statuses: $statusSummary"
+    }
     if (-not $result.bridgeReady -or -not $result.secureStorageRoundTrip -or -not $result.localStorageIsClean) {
         throw "Packaged encrypted-session bridge failed its round-trip validation."
     }
@@ -216,13 +334,27 @@ try {
     if ($stderr -match "auth/invalid-api-key|auth/api-key-not-valid|Uncaught FirebaseError") {
         throw "Packaged renderer reported an invalid Firebase API key."
     }
-    Write-Host "Packaged Electron startup, renderer mount, encrypted-session round trip, and Firebase login validation passed."
+    Write-Host "Packaged Electron startup, real Firebase signup/session exchange, username resolution, renderer mount, and encrypted-session round trip passed."
     $smokeSucceeded = $true
 } catch {
     Write-Warning "Packaged smoke-test logs were retained at $testRoot"
     throw
 } finally {
     $env:LOCALAPPDATA = $previousLocalAppData
+    if ($firebaseIdToken) {
+        try {
+            $deleteUri = "https://identitytoolkit.googleapis.com/v1/accounts:delete?key=$FirebaseApiKey"
+            Invoke-RestMethod `
+                -Method Post `
+                -Uri $deleteUri `
+                -ContentType "application/json" `
+                -Body (@{ idToken = $firebaseIdToken } | ConvertTo-Json -Compress) `
+                -TimeoutSec 30 | Out-Null
+        } catch {
+            $firebaseCleanupFailed = $true
+            Write-Warning "The ephemeral Firebase packaged-auth validation account could not be deleted automatically."
+        }
+    }
     if ($appProcess -and -not $appProcess.HasExited) {
         Stop-Process -Id $appProcess.Id -Force -ErrorAction SilentlyContinue
     }
@@ -235,5 +367,8 @@ try {
         if ($resolvedTestRoot.StartsWith($resolvedTemporaryRoot + [IO.Path]::DirectorySeparatorChar)) {
             Remove-Item -LiteralPath $resolvedTestRoot -Recurse -Force
         }
+    }
+    if ($firebaseCleanupFailed) {
+        throw "The packaged-auth validation account cleanup failed."
     }
 }

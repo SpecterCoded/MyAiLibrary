@@ -4,6 +4,24 @@ All notable changes to My AI Library are documented here. Every release also has
 
 This project follows semantic versioning. Beta builds use the Testing update channel; Stable updates remain disabled until signed Windows packages are available.
 
+## [0.1.0-beta.4] - 2026-07-28
+
+### Fixed
+
+- Replaced packaged Firebase certificate parsing with JSON Web Key verification so installed Windows builds authenticate through the same standards-based path as development.
+- Made Firebase signing-key caching resilient to key rotation and temporary network failures while continuing to fail closed when no trusted key is available.
+- Prevented email verification from reporting signup success until the local account has actually been created.
+- Preserved the originally selected username throughout signup and made username availability, login resolution, and account updates consistently case-insensitive.
+- Added a clear recovery path for accounts that need one email login to restore their local username mapping.
+- Removed internal token-verification exception details from user-facing authentication errors.
+
+### Release safeguards
+
+- Added Firebase token and account regression tests, including the pure-Python RSA backend used by frozen applications.
+- Added frontend signup and username-resolution regression tests.
+- The exact packaged Electron application must now create an ephemeral Firebase account, verify its real ID token, complete signup, resolve mixed-case usernames, establish a session, load `/me`, and round-trip the refresh token through encrypted Windows storage before release publication.
+- The release workflow deletes its ephemeral Firebase account after validation and verifies every published prerelease asset.
+
 ## [0.1.0-beta.3] - 2026-07-28
 
 ### Fixed
@@ -75,6 +93,7 @@ This project follows semantic versioning. Beta builds use the Testing update cha
 - Every release requires both this cumulative changelog and a detailed version-specific release-notes file.
 - The unsigned Windows beta is published as a GitHub prerelease and may show Windows SmartScreen's expected Unknown Publisher warning.
 
+[0.1.0-beta.4]: https://github.com/SpecterCoded/MyAiLibrary/releases/tag/v0.1.0-beta.4
 [0.1.0-beta.3]: https://github.com/SpecterCoded/MyAiLibrary/releases/tag/v0.1.0-beta.3
 [0.1.0-beta.2]: https://github.com/SpecterCoded/MyAiLibrary/releases/tag/v0.1.0-beta.2
 [0.1.0-beta.1]: https://github.com/SpecterCoded/MyAiLibrary/releases/tag/v0.1.0-beta.1

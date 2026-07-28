@@ -10,7 +10,7 @@
     "validate:firebase-config": "node scripts/validate-firebase-config.mjs",
     "validate:firebase-live": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/validate-firebase-live.ps1",
     "test:stream": "vitest run tests/sseStream.test.ts",
-    "test:release": "vitest run tests/sseStream.test.ts tests/authStorage.test.ts tests/firebaseConfig.test.ts",
+    "test:release": "vitest run tests/sseStream.test.ts tests/authStorage.test.ts tests/authFlow.test.ts tests/firebaseConfig.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {

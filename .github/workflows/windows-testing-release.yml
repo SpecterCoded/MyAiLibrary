@@ -68,7 +68,7 @@ jobs:
           npm --prefix desktop test
           Push-Location backend
           try {
-            python -m unittest test_auth_persistence test_chat_stream_reliability test_generation_logging test_processing_progress test_rag_pipeline_logging
+            python -m unittest test_auth_persistence test_firebase_auth test_chat_stream_reliability test_generation_logging test_processing_progress test_rag_pipeline_logging
             if ($LASTEXITCODE -ne 0) { throw "Backend unit tests failed." }
             python test_phase4.py
             if ($LASTEXITCODE -ne 0) { throw "RAG evaluation self-test failed." }
@@ -102,7 +102,7 @@ jobs:
             Pop-Location
           }
 
-      - name: Smoke test packaged Electron startup and secure session storage
+      - name: Smoke test packaged Electron authentication and secure session storage
         shell: pwsh
         run: ./desktop/scripts/smoke-packaged-app.ps1 -ExecutablePath ./desktop/release/win-unpacked/MyAILibrary.exe
 
@@ -124,19 +124,57 @@ jobs:
           $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $installer.FullName
           "$($hash.Hash.ToLower())  $($installer.Name)" | Set-Content desktop/release/SHA256SUMS.txt -Encoding ascii
 
-      - name: Publish verified beta prerelease
+      - name: Stage verified beta prerelease as a draft
         shell: pwsh
         run: |
           $tag = "v$env:RELEASE_VERSION"
+          $versionParts = $env:RELEASE_VERSION -split "-beta\."
+          $releaseTitle = "My AI Library v$($versionParts[0]) Beta $($versionParts[1])"
           gh release view $tag *> $null
           if ($LASTEXITCODE -eq 0) {
-            gh release edit $tag --title "My AI Library $env:RELEASE_VERSION" --notes-file "$env:RELEASE_NOTES_FILE" --prerelease
+            gh release edit $tag --title $releaseTitle --notes-file "$env:RELEASE_NOTES_FILE" --prerelease --draft
           } else {
-            gh release create $tag --title "My AI Library $env:RELEASE_VERSION" --notes-file "$env:RELEASE_NOTES_FILE" --prerelease --verify-tag
+            gh release create $tag --title $releaseTitle --notes-file "$env:RELEASE_NOTES_FILE" --prerelease --draft --verify-tag
           }
-          if ($LASTEXITCODE -ne 0) { throw "Failed to create or update GitHub prerelease $tag." }
+          if ($LASTEXITCODE -ne 0) { throw "Failed to stage GitHub prerelease $tag." }
           gh release upload $tag desktop/release/MyAI-Library-Setup-*-x64.exe desktop/release/MyAI-Library-Setup-*-x64.exe.blockmap desktop/release/beta.yml desktop/release/SHA256SUMS.txt --clobber
           if ($LASTEXITCODE -ne 0) { throw "Failed to upload one or more release assets for $tag." }
+
+      - name: Verify staged prerelease metadata and assets
+        shell: pwsh
+        run: |
+          $tag = "v$env:RELEASE_VERSION"
+          $release = gh release view $tag --json tagName,isDraft,isPrerelease,assets | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw "Failed to read staged prerelease $tag." }
+          if ($release.tagName -ne $tag -or -not $release.isDraft -or -not $release.isPrerelease) {
+            throw "Staged release metadata is not the expected draft prerelease."
+          }
+          $expectedAssets = @(
+            "MyAI-Library-Setup-$env:RELEASE_VERSION-x64.exe",
+            "MyAI-Library-Setup-$env:RELEASE_VERSION-x64.exe.blockmap",
+            "beta.yml",
+            "SHA256SUMS.txt"
+          )
+          $publishedAssets = @($release.assets | ForEach-Object { $_.name })
+          foreach ($asset in $expectedAssets) {
+            if ($asset -notin $publishedAssets) { throw "Staged prerelease is missing $asset." }
+          }
+
+      - name: Publish validated beta prerelease
+        shell: pwsh
+        run: |
+          $tag = "v$env:RELEASE_VERSION"
+          gh release edit $tag --draft=false --prerelease
+          if ($LASTEXITCODE -ne 0) { throw "Failed to publish validated prerelease $tag." }
+          $release = gh release view $tag --json tagName,isDraft,isPrerelease | ConvertFrom-Json
+          if (
+            $LASTEXITCODE -ne 0 -or
+            $release.tagName -ne $tag -or
+            $release.isDraft -or
+            -not $release.isPrerelease
+          ) {
+            throw "Published release metadata is not the expected public prerelease."
+          }
 
       - name: Retain beta artifacts
         uses: actions/upload-artifact@v4

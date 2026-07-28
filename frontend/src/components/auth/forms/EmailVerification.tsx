@@ -4,6 +4,11 @@ import { Button } from '../ui/Button';
 import { ArrowLeft, Mail, RefreshCw, CheckCircle2, ShieldAlert } from 'lucide-react';
 import { getFirebaseAuth } from '../../../firebase';
 import { sendEmailVerification } from 'firebase/auth';
+import {
+  clearPendingSignup,
+  completeVerifiedSignup,
+  getPendingSignup,
+} from '../../../utils/authFlow';
 
 export function EmailVerification({ ctx }: { ctx: AuthContextType }) {
   const [loading, setLoading] = useState(false);
@@ -23,17 +28,15 @@ export function EmailVerification({ ctx }: { ctx: AuthContextType }) {
         
         if (auth.currentUser.emailVerified) {
           const idToken = await auth.currentUser.getIdToken();
-          await fetch('/auth/complete-signup', {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${idToken}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              username: ctx.name || ctx.email?.split('@')[0] || 'user',
-              avatar_url: ctx.avatar || '',
-            }),
-          });
+          const pendingSignup = getPendingSignup();
+          const username =
+            pendingSignup?.username ||
+            ctx.name.trim() ||
+            ctx.email?.split('@')[0]?.trim() ||
+            'user';
+          const avatarUrl = ctx.avatar || sessionStorage.getItem('temp_avatar') || '';
+          await completeVerifiedSignup(idToken, username, avatarUrl);
+          clearPendingSignup();
           setVerified(true);
           setTimeout(() => {
             ctx.setView('login');
@@ -47,8 +50,8 @@ export function EmailVerification({ ctx }: { ctx: AuthContextType }) {
       } else {
         setError("No user session found. Please sign up or log in again.");
       }
-    } catch (err: any) {
-      setError(err.message || 'An error occurred while checking verification status');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'An error occurred while checking verification status');
     } finally {
       setChecking(false);
     }
@@ -66,8 +69,8 @@ export function EmailVerification({ ctx }: { ctx: AuthContextType }) {
       } else {
         setError("No active user session to resend email.");
       }
-    } catch (err: any) {
-      setError(err.message || 'Failed to resend verification link');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to resend verification link');
     } finally {
       setLoading(false);
     }

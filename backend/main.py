@@ -55,7 +55,21 @@ sys_logger.info(
     status="starting",
 )
 
-from auth import create_access_token, create_refresh_token, get_current_user, get_current_user_id, validate_registration, validate_token, verify_firebase_token
+from auth import (
+    UsernameAlreadyExistsError,
+    complete_firebase_signup_user,
+    create_access_token,
+    create_refresh_token,
+    find_user_by_email,
+    find_user_by_username,
+    get_current_user,
+    get_current_user_id,
+    get_or_create_firebase_session_user,
+    username_is_available,
+    validate_registration,
+    validate_token,
+    verify_firebase_token,
+)
 from embedding_service import (
     answer_question,
     build_context,
@@ -8477,13 +8491,12 @@ def select_folder():
 
 @app.get("/auth/check-username")
 def check_username(username: str, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.username == username).first()
-    return {"available": user is None}
+    return {"available": username_is_available(db, username)}
 
 
 @app.get("/auth/check-email")
 def check_email(email: str, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == email).first()
+    user = find_user_by_email(db, email)
     return {"available": user is None}
 
 
@@ -8491,10 +8504,13 @@ def check_email(email: str, db: Session = Depends(get_db)):
 def resolve_email(username_or_email: str, db: Session = Depends(get_db)):
     if "@" in username_or_email:
         return {"email": username_or_email.strip()}
-    user = db.query(User).filter(User.username == username_or_email.strip()).first()
+    user = find_user_by_username(db, username_or_email)
     if user:
         return {"email": user.email}
-    raise HTTPException(status_code=404, detail="Username not found")
+    raise HTTPException(
+        status_code=404,
+        detail="Username not found on this device. Sign in once with your email address to restore username login.",
+    )
 
 
 @app.post("/auth/register")
@@ -8609,7 +8625,10 @@ def login(
     db: Session = Depends(get_db),
 ):
 
-    user = db.query(User).filter((User.email == form_data.username) | (User.username == form_data.username)).first()
+    identifier = form_data.username.strip().lower()
+    user = db.query(User).filter(
+        (func.lower(User.email) == identifier) | (func.lower(User.username) == identifier)
+    ).first()
 
     if not user or not verify_password(form_data.password, user.password_hash):
         raise HTTPException(
@@ -8647,6 +8666,25 @@ class RefreshRequest(BaseModel):
     remember_me: bool = False
 
 
+def _verified_firebase_identity(token: str, operation: str) -> dict:
+    try:
+        project_id = os.environ.get("VITE_FIREBASE_PROJECT_ID", "bannana-487713")
+        return verify_firebase_token(token, project_id)
+    except Exception as exc:
+        sys_logger.warning(
+            "Firebase identity verification was rejected.",
+            event="auth.firebase_token_rejected",
+            operation=operation,
+            phase="token_verification",
+            status="failed",
+            context={"errorType": type(exc).__name__},
+        )
+        raise HTTPException(
+            status_code=401,
+            detail="Unable to verify your sign-in. Please try again.",
+        ) from exc
+
+
 @app.post("/auth/complete-signup")
 def complete_signup(
     request: Request,
@@ -8657,42 +8695,31 @@ def complete_signup(
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing Firebase token")
 
-    firebase_token = authorization.split(" ")[1]
-
-    try:
-        project_id = os.environ.get("VITE_FIREBASE_PROJECT_ID", "bannana-487713")
-        decoded = verify_firebase_token(firebase_token, project_id)
-    except Exception as e:
-        raise HTTPException(status_code=401, detail=f"Invalid Firebase token: {e}")
+    firebase_token = authorization.split(" ", 1)[1].strip()
+    decoded = _verified_firebase_identity(firebase_token, "complete_signup")
 
     firebase_uid = decoded.get("sub")
     email = decoded.get("email", "")
-    display_name = body.username.strip()
+    try:
+        user, created = complete_firebase_signup_user(
+            db,
+            firebase_uid=firebase_uid,
+            email=email,
+            username=body.username,
+            avatar_url=body.avatar_url,
+        )
+    except UsernameAlreadyExistsError as exc:
+        raise HTTPException(status_code=409, detail="Username already taken") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="The signup information is incomplete.") from exc
 
-    existing = db.query(User).filter(User.id == firebase_uid).first()
-    if existing:
-        return {"message": "User already exists", "user_id": firebase_uid}
-
-    username = display_name
-    base_username = username
-    counter = 1
-    while db.query(User).filter(User.username == username).first():
-        username = f"{base_username}{counter}"
-        counter += 1
-
-    new_user = User(
-        id=firebase_uid,
-        username=username,
-        email=email,
-        password_hash="firebase_managed",
-        avatar_url=body.avatar_url,
-    )
-    db.add(new_user)
-    db.commit()
-
-    push_user(new_user)
-
-    return {"message": "Account created", "user_id": firebase_uid}
+    if created:
+        push_user(user)
+    return {
+        "message": "Account created" if created else "User already exists",
+        "user_id": user.id,
+        "username": user.username,
+    }
 
 
 @app.post("/auth/firebase-session")
@@ -8701,52 +8728,22 @@ def firebase_session(
     body: FirebaseSessionRequest,
     db: Session = Depends(get_db),
 ):
+    decoded = _verified_firebase_identity(body.firebase_token, "firebase_session")
     try:
-        project_id = os.environ.get("VITE_FIREBASE_PROJECT_ID", "bannana-487713")
-        decoded = verify_firebase_token(body.firebase_token, project_id)
-    except Exception as e:
-        raise HTTPException(status_code=401, detail=f"Invalid Firebase token: {e}")
-
-    firebase_uid = decoded.get("sub")
-    email = decoded.get("email", "")
-    display_name = decoded.get("name", "")
-
-    user = db.query(User).filter(User.id == firebase_uid).first()
-
-    if not user:
-        if email:
-            existing_by_email = db.query(User).filter(User.email == email).first()
-            if existing_by_email:
-                existing_by_email.id = firebase_uid
-                db.commit()
-                db.refresh(existing_by_email)
-                user = existing_by_email
-
-        if not user:
-            username = display_name or (email.split("@")[0] if email else f"user_{firebase_uid[:8]}")
-            username = username.strip()
-            base_username = username
-            counter = 1
-            while db.query(User).filter(User.username == username).first():
-                username = f"{base_username}{counter}"
-                counter += 1
-
-            user = User(
-                id=firebase_uid,
-                username=username,
-                email=email or f"{firebase_uid}@firebase.local",
-                password_hash="firebase_managed",
-            )
-            db.add(user)
-            db.commit()
-            db.refresh(user)
+        user, created = get_or_create_firebase_session_user(db, decoded)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=401,
+            detail="Unable to verify your sign-in. Please try again.",
+        ) from exc
 
     access_token = create_access_token(user.id, remember_me=body.remember_me)
     refresh_token = create_refresh_token(user.id, remember_me=body.remember_me)
 
     record_session(db, user.id, request)
 
-    push_user(user)
+    if created:
+        push_user(user)
 
     return {
         "access_token": access_token,
@@ -10519,7 +10516,8 @@ def update_account_details(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    if request.username is not None and request.username.strip() != "" and request.username != user.username:
+    requested_username = request.username.strip() if request.username is not None else None
+    if requested_username and requested_username != user.username:
         # Enforce a 14-day cooldown between username changes.
         if user.username_changed_at is not None:
             next_allowed = user.username_changed_at + timedelta(days=14)
@@ -10530,10 +10528,9 @@ def update_account_details(
                     detail=f"You can only change your username once every 14 days. Try again in {days_left} day(s).",
                 )
         # Check if username is available
-        existing_user = db.query(User).filter(User.username == request.username).first()
-        if existing_user:
+        if not username_is_available(db, requested_username, exclude_user_id=user.id):
             raise HTTPException(status_code=400, detail="Username already exists")
-        user.username = request.username
+        user.username = requested_username
         user.username_changed_at = utc_now()
 
     # Email is immutable and cannot be changed after registration.
