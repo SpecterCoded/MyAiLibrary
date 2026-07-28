@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: No GitHub account? Contact us on Telegram
+    url: https://t.me/ChartedByICT
+    about: Use the Telegram community link if you cannot submit a GitHub issue.

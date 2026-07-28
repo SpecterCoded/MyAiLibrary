@@ -1,0 +1,95 @@
+name: Bug report
+description: Report a reproducible problem in My AI Library
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve My AI Library.
+
+        Before submitting, remove API keys, access tokens, private file contents, and other sensitive information from screenshots and logs.
+
+  - type: input
+    id: app-version
+    attributes:
+      label: App version
+      description: Find this in Settings > Updates.
+      placeholder: e.g. 0.1.0-beta.1
+    validations:
+      required: true
+
+  - type: dropdown
+    id: windows-version
+    attributes:
+      label: Windows version
+      options:
+        - Windows 11
+        - Windows 10
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: update-channel
+    attributes:
+      label: Update channel
+      options:
+        - Testing (beta / prerelease)
+        - Stable
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the problem clearly, including what you were doing when it occurred.
+      placeholder: Tell us what went wrong.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: List the smallest reliable sequence that makes the problem happen.
+      placeholder: |
+        1. Open...
+        2. Click...
+        3. See...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      placeholder: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots or recordings
+      description: Drag and drop images or short recordings here when they help explain the problem.
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Sanitized diagnostics
+      description: Paste relevant exported diagnostics or updater logs after removing secrets and private information.
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Final checks
+      options:
+        - label: I searched existing issues and did not find the same problem.
+          required: true
+        - label: I removed API keys, tokens, and private information from this report.
+          required: true
