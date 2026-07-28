@@ -4,17 +4,17 @@ import { app, BrowserWindow, shell } from 'electron'
 import log from 'electron-log/main'
 import { autoUpdater, type ProgressInfo, type UpdateInfo } from 'electron-updater'
 import {
-  DEFAULT_UPDATE_PREFERENCES,
   type UpdatePreferences,
   type UpdateState,
   type InstalledUpdateInfo,
+  type UpdateChannel,
 } from './update-types'
+import {
+  resolveUpdatePreferences,
+  type StoredUpdatePreferences,
+} from './update-preferences'
 
 type PrepareInstall = (targetVersion: string) => Promise<void>
-
-interface StoredUpdatePreferences extends UpdatePreferences {
-  lastCheckedAt?: string
-}
 
 function plainReleaseNotes(value: UpdateInfo['releaseNotes']): string | undefined {
   const raw = Array.isArray(value)
@@ -76,14 +76,12 @@ export class DesktopUpdater {
     mkdirSync(path.dirname(this.logPath), { recursive: true })
     log.transports.file.resolvePathFn = () => this.logPath
     log.transports.file.level = 'info'
-    log.info('Desktop updater initialized', { version: app.getVersion(), channel: 'stable' })
     autoUpdater.logger = log
     autoUpdater.autoDownload = false
     autoUpdater.autoInstallOnAppQuit = false
     autoUpdater.allowDowngrade = false
     autoUpdater.channel = 'stable'
 
-    this.preferences = this.readPreferences()
     let releaseEnablesUpdates = false
     let packageAllowsLocalTesting = false
     let packageAllowsUnsignedTesting = false
@@ -99,6 +97,14 @@ export class DesktopUpdater {
     } catch (error) {
       log.warn('Could not read packaged update policy', safeError(error))
     }
+    this.releaseUpdatesEnabled = app.isPackaged && (releaseEnablesUpdates || process.env.MYAI_ENABLE_SIGNED_UPDATES === '1')
+    this.unsignedTestingAvailable = app.isPackaged && packageAllowsUnsignedTesting
+    this.preferences = this.readPreferences(this.unsignedTestingAvailable ? 'testing' : 'stable')
+    log.info('Desktop updater initialized', {
+      version: app.getVersion(),
+      channel: this.preferences.channel,
+      testingChannelAvailable: this.unsignedTestingAvailable,
+    })
     const requestedLocalFeed = validatedLoopbackFeed(process.env.MYAI_LOCAL_UPDATE_URL)
     this.localTestFeed = app.isPackaged && packageAllowsLocalTesting && process.env.MYAI_ENABLE_TEST_UPDATES === '1'
       ? requestedLocalFeed
@@ -109,8 +115,6 @@ export class DesktopUpdater {
     } else if (packageAllowsLocalTesting && process.env.MYAI_ENABLE_TEST_UPDATES === '1') {
       log.warn('Local engineering update mode was requested without a valid loopback HTTP feed.')
     }
-    this.releaseUpdatesEnabled = app.isPackaged && (releaseEnablesUpdates || process.env.MYAI_ENABLE_SIGNED_UPDATES === '1')
-    this.unsignedTestingAvailable = app.isPackaged && packageAllowsUnsignedTesting
     if (!this.unsignedTestingAvailable && this.preferences.channel === 'testing') this.preferences.channel = 'stable'
     this.configureChannel()
     const installationEnabled = this.installationEnabled()
@@ -148,17 +152,11 @@ export class DesktopUpdater {
     this.registerEvents()
   }
 
-  private readPreferences(): StoredUpdatePreferences {
+  private readPreferences(defaultChannel: UpdateChannel): StoredUpdatePreferences {
     try {
-      const stored = JSON.parse(readFileSync(this.preferencesPath, 'utf8')) as Partial<StoredUpdatePreferences>
-      return {
-        automaticallyCheck: typeof stored.automaticallyCheck === 'boolean' ? stored.automaticallyCheck : true,
-        automaticallyDownload: typeof stored.automaticallyDownload === 'boolean' ? stored.automaticallyDownload : false,
-        channel: stored.channel === 'testing' ? 'testing' : 'stable',
-        lastCheckedAt: typeof stored.lastCheckedAt === 'string' ? stored.lastCheckedAt : undefined,
-      }
+      return resolveUpdatePreferences(JSON.parse(readFileSync(this.preferencesPath, 'utf8')), defaultChannel)
     } catch {
-      return { ...DEFAULT_UPDATE_PREFERENCES }
+      return resolveUpdatePreferences(undefined, defaultChannel)
     }
   }
 

@@ -48,7 +48,7 @@ def draw_round_line(draw: ImageDraw.ImageDraw, points: list[tuple[int, int]], wi
         draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=fill)
 
 
-def draw_lucide_sparkles(draw: ImageDraw.ImageDraw, size: int, icon_ratio: float = 0.7) -> None:
+def draw_lucide_sparkles(draw: ImageDraw.ImageDraw, size: int, icon_ratio: float = 0.84) -> None:
     # Sidebar source: <Sparkles className="w-5 h-5 text-white" strokeWidth={2} />
     # inside a 40x40 rounded-2xl gradient square.
     icon_size = size * icon_ratio
@@ -77,7 +77,7 @@ def draw_lucide_sparkles(draw: ImageDraw.ImageDraw, size: int, icon_ratio: float
     draw.ellipse((cx - r, cy - r, cx + r, cy + r), outline=white, width=stroke)
 
 
-def draw_mark(size: int, *, radius_ratio: float = 0.4, icon_ratio: float = 0.7) -> Image.Image:
+def draw_mark(size: int, *, radius_ratio: float = 0.4, icon_ratio: float = 0.84) -> Image.Image:
     image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
     margin = 0
@@ -89,14 +89,17 @@ def draw_mark(size: int, *, radius_ratio: float = 0.4, icon_ratio: float = 0.7) 
 
 mark = draw_mark(1024)
 mark.save(ASSETS / "icon.png", optimize=True)
-mark.save(BUILD / "icon.ico", sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
+mark.save(
+    BUILD / "icon.ico",
+    sizes=[(16, 16), (20, 20), (24, 24), (32, 32), (40, 40), (48, 48), (64, 64), (128, 128), (256, 256)],
+)
 shutil.copyfile(BUILD / "icon.ico", BUILD / "installerIcon.ico")
 shutil.copyfile(BUILD / "icon.ico", BUILD / "uninstallerIcon.ico")
 
 # The Windows notification area is physically tiny. A dedicated high-resolution
 # mark with squarer corners and a larger sparkle uses substantially more of the
 # available tray pixels than the full application artwork.
-tray_mark = draw_mark(512, radius_ratio=0.26, icon_ratio=0.7)
+tray_mark = draw_mark(512, radius_ratio=0.26, icon_ratio=0.84)
 tray_mark.save(ASSETS / "tray-icon.png", optimize=True)
 tray_mark.save(
     ASSETS / "tray-icon.ico",

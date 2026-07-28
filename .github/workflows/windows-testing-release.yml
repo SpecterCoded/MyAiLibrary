@@ -1,12 +1,6 @@
 name: Windows unsigned beta release
 
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: Beta semantic version, for example 0.1.4-beta.1
-        required: true
-        type: string
   push:
     tags:
       - "v*-beta.*"
@@ -21,6 +15,7 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
       EP_PRE_RELEASE: "true"
+      PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -40,11 +35,12 @@ jobs:
             backend/requirements.txt
             backend/requirements-build.txt
 
-      - name: Validate beta version and release notes
+      - name: Validate tag, committed version, and release documentation
         shell: pwsh
         run: |
-          $version = if ("${{ github.event_name }}" -eq "workflow_dispatch") { "${{ inputs.version }}" } else { "${{ github.ref_name }}".TrimStart("v") }
-          if ($version -notmatch '^\d+\.\d+\.\d+-beta\.\d+$') { throw "Testing releases require a version like 0.1.4-beta.1." }
+          if ("${{ github.ref_type }}" -ne "tag") { throw "Beta releases must run from a pushed tag." }
+          $version = "${{ github.ref_name }}".Substring(1)
+          ./desktop/scripts/validate-release.ps1 -Version $version -Channel beta
           $releaseNotes = (Resolve-Path "desktop/release-notes/$version.md" -ErrorAction Stop).Path
           "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "RELEASE_NOTES_FILE=$releaseNotes" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
@@ -56,10 +52,25 @@ jobs:
           npm ci --prefix desktop
           python -m pip install -r backend/requirements.txt -r backend/requirements-build.txt
 
+      - name: Run release test gates
+        shell: pwsh
+        run: |
+          npm --prefix frontend run test:stream
+          npm --prefix frontend run build
+          npm --prefix desktop test
+          Push-Location backend
+          try {
+            python -m unittest test_chat_stream_reliability test_generation_logging test_processing_progress test_rag_pipeline_logging
+            if ($LASTEXITCODE -ne 0) { throw "Backend unit tests failed." }
+            python test_phase4.py
+            if ($LASTEXITCODE -ne 0) { throw "RAG evaluation self-test failed." }
+          } finally {
+            Pop-Location
+          }
+
       - name: Enable only the unsigned beta channel
         shell: pwsh
         run: |
-          npm --prefix desktop version $env:RELEASE_VERSION --no-git-tag-version
           npm --prefix desktop pkg set updatesEnabled=false --json
           npm --prefix desktop pkg set updatesTestMode=false --json
           npm --prefix desktop pkg set updatesTestingEnabled=true --json
@@ -86,12 +97,18 @@ jobs:
       - name: Verify package and generate checksum
         shell: pwsh
         run: |
+          $expectedName = "MyAI-Library-Setup-$env:RELEASE_VERSION-x64.exe"
           $installers = @(Get-ChildItem desktop/release/MyAI-Library-Setup-*-x64.exe)
           if ($installers.Count -ne 1) { throw "Expected exactly one NSIS installer, found $($installers.Count)." }
           $installer = $installers[0]
+          if ($installer.Name -ne $expectedName) { throw "Unexpected installer name: $($installer.Name)" }
           $blockMap = "$($installer.FullName).blockmap"
           if (-not (Test-Path -LiteralPath $blockMap)) { throw "Installer block map is missing: $blockMap" }
           if (-not (Test-Path -LiteralPath desktop/release/beta.yml)) { throw "Beta update metadata is missing." }
+          $signature = Get-AuthenticodeSignature -LiteralPath $installer.FullName
+          if ($signature.Status -notin @("NotSigned", "UnknownError")) {
+            throw "Unsigned beta unexpectedly reported Authenticode status $($signature.Status)."
+          }
           $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $installer.FullName
           "$($hash.Hash.ToLower())  $($installer.Name)" | Set-Content desktop/release/SHA256SUMS.txt -Encoding ascii
 

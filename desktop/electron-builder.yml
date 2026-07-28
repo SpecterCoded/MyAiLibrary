@@ -24,7 +24,10 @@ extraResources:
   - from: vendor/ffmpeg
     to: ffmpeg
     filter:
-      - "**/*"
+      - "ffmpeg.exe"
+      - "ffprobe.exe"
+      - "LICENSE-FFMPEG.txt"
+      - "README.txt"
   - from: ../Journalit-Local-1.8.1-Fresh.zip
     to: integrations/journalit/Journalit-Local-1.8.1-Fresh.zip
 
