@@ -2,13 +2,26 @@ import { getApps, initializeApp, type FirebaseApp, type FirebaseOptions } from '
 import { getAuth, type Auth } from 'firebase/auth';
 import { getFirestore, type Firestore } from 'firebase/firestore';
 
+export function normalizeFirebaseConfigValue(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  if (trimmed.length >= 2) {
+    const first = trimmed[0];
+    const last = trimmed[trimmed.length - 1];
+    if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+      return trimmed.slice(1, -1).trim();
+    }
+  }
+  return trimmed;
+}
+
 const firebaseConfig: FirebaseOptions = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID
+  apiKey: normalizeFirebaseConfigValue(import.meta.env.VITE_FIREBASE_API_KEY),
+  authDomain: normalizeFirebaseConfigValue(import.meta.env.VITE_FIREBASE_AUTH_DOMAIN),
+  projectId: normalizeFirebaseConfigValue(import.meta.env.VITE_FIREBASE_PROJECT_ID),
+  storageBucket: normalizeFirebaseConfigValue(import.meta.env.VITE_FIREBASE_STORAGE_BUCKET),
+  messagingSenderId: normalizeFirebaseConfigValue(import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID),
+  appId: normalizeFirebaseConfigValue(import.meta.env.VITE_FIREBASE_APP_ID),
 };
 
 const requiredConfig = [

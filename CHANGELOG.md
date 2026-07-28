@@ -4,6 +4,22 @@ All notable changes to My AI Library are documented here. Every release also has
 
 This project follows semantic versioning. Beta builds use the Testing update channel; Stable updates remain disabled until signed Windows packages are available.
 
+## [0.1.0-beta.3] - 2026-07-28
+
+### Fixed
+
+- Corrected the Windows release configuration used by Firebase authentication.
+- Normalized configuration values defensively before Firebase initialization.
+- Moved persistent refresh tokens from renderer `localStorage` into Electron `safeStorage`, encrypted through Windows data protection.
+- Added automatic migration of legacy refresh tokens after a successful encrypted write.
+
+### Release safeguards
+
+- Firebase release validation now rejects values with wrapping quotes.
+- Firebase API keys must match the expected Google web API-key format before packaging can begin.
+- The configured public web key is validated against Firebase before release.
+- The packaged Electron application must mount its renderer and pass an encrypted refresh-token round trip before release assets can be uploaded.
+
 ## [0.1.0-beta.2] - 2026-07-28
 
 ### Fixed
@@ -59,5 +75,6 @@ This project follows semantic versioning. Beta builds use the Testing update cha
 - Every release requires both this cumulative changelog and a detailed version-specific release-notes file.
 - The unsigned Windows beta is published as a GitHub prerelease and may show Windows SmartScreen's expected Unknown Publisher warning.
 
+[0.1.0-beta.3]: https://github.com/SpecterCoded/MyAiLibrary/releases/tag/v0.1.0-beta.3
 [0.1.0-beta.2]: https://github.com/SpecterCoded/MyAiLibrary/releases/tag/v0.1.0-beta.2
 [0.1.0-beta.1]: https://github.com/SpecterCoded/MyAiLibrary/releases/tag/v0.1.0-beta.1

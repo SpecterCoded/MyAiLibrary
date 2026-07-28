@@ -29,6 +29,7 @@ import DocumentIntelligencePage from './components/DocumentIntelligencePage';
 import RagExplorerPage from './components/rag-explorer/RagExplorerPage';
 import WorkspaceTitleBar from './components/WorkspaceTitleBar';
 import { init as initActivityLogger, destroy as destroyActivityLogger } from './utils/activityLogger';
+import { clearRefreshToken, getRefreshToken } from './utils/authStorage';
 import type { WorkspaceTab, WorkspaceTabKind, WorkspaceTabParams, WorkspaceTabsState } from './types/workspaceTabs';
 
 interface PlaylistData {
@@ -262,23 +263,27 @@ export default function App() {
   const [hasActiveDownloads, setHasActiveDownloads] = useState(false);
   const authExpiredRef = useRef(false);
 
-  const clearStoredAuth = () => {
+  const clearStoredAuth = async () => {
     localStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
+    try {
+      await clearRefreshToken();
+    } catch (error) {
+      console.error('Failed to clear encrypted refresh token:', error);
+    }
   };
 
   const handleAuthExpired = () => {
     if (authExpiredRef.current) return;
     authExpiredRef.current = true;
     setAuthExpired(true);
-    clearStoredAuth();
+    void clearStoredAuth();
     setTimeout(() => {
       window.location.reload();
     }, 3000);
   };
 
   const refreshBackendAccessToken = async (): Promise<string | null> => {
-    const refreshToken = localStorage.getItem('refresh_token');
+    const refreshToken = await getRefreshToken();
     if (!refreshToken) return null;
 
     try {
@@ -293,7 +298,7 @@ export default function App() {
 
       if (!res.ok) {
         if (res.status === 401 || res.status === 403) {
-          clearStoredAuth();
+          await clearStoredAuth();
         }
         return null;
       }
@@ -908,7 +913,7 @@ export default function App() {
         setCurrentUser(profileData);
         setIsAuthenticated(true);
       } else {
-        clearStoredAuth();
+        await clearStoredAuth();
         setCurrentUser(null);
         setIsAuthenticated(false);
       }
@@ -928,7 +933,7 @@ export default function App() {
   // Proactively refresh backend JWT token every 30 minutes
   useEffect(() => {
     const interval = setInterval(async () => {
-      const refreshToken = localStorage.getItem('refresh_token');
+      const refreshToken = await getRefreshToken();
       const accessToken = localStorage.getItem('access_token');
       if (!refreshToken || !accessToken) return;
       

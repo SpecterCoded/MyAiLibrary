@@ -66,9 +66,22 @@ jobs:
           npm ci --prefix desktop
           python -m pip install -r backend/requirements.txt -r backend/requirements-build.txt
 
-      - name: Validate Firebase release configuration
+      - name: Run release test gates
         shell: pwsh
-        run: npm --prefix frontend run validate:firebase-config
+        run: |
+          npm --prefix frontend run validate:firebase-config
+          npm --prefix frontend run validate:firebase-live
+          npm --prefix frontend run test:release
+          npm --prefix desktop test
+          Push-Location backend
+          try {
+            python -m unittest test_auth_persistence test_chat_stream_reliability test_generation_logging test_processing_progress test_rag_pipeline_logging
+            if ($LASTEXITCODE -ne 0) { throw "Backend unit tests failed." }
+            python test_phase4.py
+            if ($LASTEXITCODE -ne 0) { throw "RAG evaluation self-test failed." }
+          } finally {
+            Pop-Location
+          }
 
       - name: Enable only the signed stable channel
         shell: pwsh
@@ -95,6 +108,10 @@ jobs:
           } finally {
             Pop-Location
           }
+
+      - name: Smoke test packaged Electron startup and secure session storage
+        shell: pwsh
+        run: ./desktop/scripts/smoke-packaged-app.ps1 -ExecutablePath ./desktop/release/win-unpacked/MyAILibrary.exe
 
       - name: Verify Authenticode and generate checksum
         shell: pwsh

@@ -89,6 +89,9 @@ declare global {
     revealPath(targetPath: string): Promise<boolean>
     openJournalitPackage(): Promise<boolean>
     getVersion(): Promise<string>
+    setRefreshToken(refreshToken: string): Promise<boolean>
+    getRefreshToken(): Promise<string | null>
+    clearRefreshToken(): Promise<boolean>
     getUpdateState(): Promise<DesktopUpdateState | null>
     checkForUpdates(): Promise<DesktopUpdateState | null>
     downloadUpdate(): Promise<DesktopUpdateState | null>

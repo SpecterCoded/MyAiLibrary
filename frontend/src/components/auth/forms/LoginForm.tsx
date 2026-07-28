@@ -3,6 +3,7 @@ import type { AuthContextType } from '../../../App';
 import { Input } from '../ui/Input';
 import { Button } from '../ui/Button';
 import { logActivity } from '../../../utils/activityLogger';
+import { storeRefreshToken } from '../../../utils/authStorage';
 
 export function LoginForm({ ctx }: { ctx: AuthContextType }) {
   const [password, setPassword] = useState('');
@@ -71,9 +72,10 @@ export function LoginForm({ ctx }: { ctx: AuthContextType }) {
 
       const sessionData = await sessionRes.json();
       
-      // Store backend JWT tokens (these last 2 days or 30 days with remember_me)
+      // Persist the long-lived refresh token with Electron safeStorage before
+      // keeping the shorter-lived access token in renderer storage.
+      await storeRefreshToken(sessionData.refresh_token);
       localStorage.setItem('access_token', sessionData.access_token);
-      localStorage.setItem('refresh_token', sessionData.refresh_token);
 
       // Store user details
       if (sessionData.user) {

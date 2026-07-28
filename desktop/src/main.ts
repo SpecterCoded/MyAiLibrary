@@ -2,8 +2,9 @@ import { randomBytes } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
-import { app, autoUpdater as nativeAutoUpdater, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, screen, session, shell, Tray } from 'electron'
+import { app, autoUpdater as nativeAutoUpdater, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, safeStorage, screen, session, shell, Tray } from 'electron'
 import { BackendRuntime, BackendState, startBackend, stopBackend } from './backend-process'
+import { SecureAuthStore } from './secure-auth-store'
 import { createAndVerifyUpdateBackup } from './update-backup'
 import {
   isBackgroundPollingLogEvent,
@@ -34,6 +35,7 @@ let systemLogWindow: BrowserWindow | null = null
 let systemLogService: SystemLogService | null = null
 let currentBackendState: BackendState = 'stopped'
 let lastBackendTerminalLaunchAt = 0
+let secureAuthStore: SecureAuthStore | null = null
 type FloatingToolKind = 'search' | 'create-playlist' | 'import-content'
 type FloatingToolAction =
   | { type: 'navigate'; detail: Record<string, unknown> }
@@ -219,6 +221,16 @@ if (process.platform === 'win32') {
 function desktopDataRoot(): string {
   const base = process.env.LOCALAPPDATA || app.getPath('userData')
   return path.join(base, 'MyAILibrary')
+}
+
+function getSecureAuthStore(): SecureAuthStore {
+  if (!secureAuthStore) {
+    secureAuthStore = new SecureAuthStore(
+      path.join(desktopDataRoot(), 'secrets', 'auth-session.json'),
+      safeStorage,
+    )
+  }
+  return secureAuthStore
 }
 
 function workspaceWindowRegistryPath(): string {
@@ -1024,6 +1036,22 @@ function registerIpc(): void {
     return true
   })
   ipcMain.handle('desktop:get-version', (event) => senderIsTrusted(event.senderFrame?.url ?? '') ? app.getVersion() : '')
+  ipcMain.handle('desktop:set-refresh-token', (event, refreshToken: unknown) => {
+    if (!senderIsTrusted(event.senderFrame?.url ?? '')) return false
+    try {
+      return getSecureAuthStore().setRefreshToken(refreshToken)
+    } catch {
+      return false
+    }
+  })
+  ipcMain.handle('desktop:get-refresh-token', (event) => {
+    if (!senderIsTrusted(event.senderFrame?.url ?? '')) return null
+    return getSecureAuthStore().getRefreshToken()
+  })
+  ipcMain.handle('desktop:clear-refresh-token', (event) => {
+    if (!senderIsTrusted(event.senderFrame?.url ?? '')) return false
+    return getSecureAuthStore().clearRefreshToken()
+  })
   ipcMain.handle('desktop:get-system-theme', (event) => senderIsTrusted(event.senderFrame?.url ?? '') ? resolvedSystemTheme() : 'light')
   ipcMain.handle('desktop:get-update-state', (event) => senderIsTrusted(event.senderFrame?.url ?? '') ? updater?.getState() ?? null : null)
   ipcMain.handle('desktop:check-for-updates', (event) => senderIsTrusted(event.senderFrame?.url ?? '') ? updater?.checkForUpdates(true) ?? null : null)

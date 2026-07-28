@@ -6,6 +6,7 @@ import { UploadCloud, CheckCircle2, Monitor, Moon, Sun, Plus, FolderOpen, Loader
 import { EmailAuthProvider, reauthenticateWithCredential, updatePassword, signOut } from 'firebase/auth';
 import { getFirebaseAuth } from '../firebase';
 import { selectFile, selectFolder } from '../utils/desktop';
+import { clearRefreshToken } from '../utils/authStorage';
 
 interface SettingsViewProps {
   user: BackendUser | null;
@@ -950,7 +951,11 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
           console.error('Firebase signOut error:', err);
         }
         localStorage.removeItem('access_token');
-        localStorage.removeItem('refresh_token');
+        try {
+          await clearRefreshToken();
+        } catch (err) {
+          console.error('Encrypted session cleanup failed:', err);
+        }
         localStorage.removeItem('user_id');
         localStorage.removeItem('username');
         localStorage.removeItem('email');

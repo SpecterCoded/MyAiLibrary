@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { LogOut, Settings, User as UserIcon, Sun, Moon, ChevronRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { logActivity } from '../utils/activityLogger';
+import { clearRefreshToken } from '../utils/authStorage';
 
 export interface BackendUser {
   user_id: string;
@@ -104,7 +105,11 @@ export default function DashboardHeader({ onSearchClick, onNotificationClick, on
       console.error('Firebase signOut error:', err);
     }
     localStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
+    try {
+      await clearRefreshToken();
+    } catch (err) {
+      console.error('Encrypted session cleanup failed:', err);
+    }
     localStorage.removeItem('user_id');
     localStorage.removeItem('username');
     localStorage.removeItem('email');
