@@ -381,7 +381,7 @@ export default function VideoPlayerApp({ embedded = false, mediaUrl, resourceId:
           >
 
             {/* Tabs Setup */}
-            <div className="px-8 flex items-center flex-wrap gap-2 mb-5">
+            <div className="px-8 py-1 flex items-center flex-nowrap gap-1 xl:gap-2 mb-5 overflow-x-auto no-scrollbar">
               {tabs.map((tab) => {
                 const isAskAI = tab === 'Ask AI';
                 const isDisabled = isAskAI && !!pendingReindex;
@@ -390,7 +390,7 @@ export default function VideoPlayerApp({ embedded = false, mediaUrl, resourceId:
                   key={tab}
                   onClick={() => !isDisabled && setActiveTab(tab)}
                   title={isDisabled ? 'Embed this resource first to use Ask AI' : undefined}
-                  className={`px-4.5 py-2.5 rounded-full text-[14px] font-semibold transition-all ${isDisabled
+                  className={`shrink-0 whitespace-nowrap px-3 xl:px-4.5 py-2.5 rounded-full text-[14px] font-semibold transition-all ${isDisabled
                     ? 'cursor-not-allowed opacity-40 text-slate-400 dark:text-slate-600'
                     : `cursor-pointer ${activeTab === tab
                       ? 'bg-[#1a1a1a] dark:bg-white text-white dark:text-slate-900 shadow-sm scale-110 font-bold'

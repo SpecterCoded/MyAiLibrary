@@ -292,7 +292,7 @@ export const CarouselPreview: React.FC<CarouselPreviewProps> = ({
         );
       case "video":
         return (
-          <VideoPlayer src={previewSrc} />
+          <VideoPlayer src={previewSrc} hideFullscreen />
         );
       case "audio":
         return (

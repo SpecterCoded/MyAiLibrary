@@ -25,6 +25,10 @@
     inset: 0;
   }
 
+  .video-player-container .media-button--fullscreen {
+    display: none !important;
+  }
+
   .custom-scrollbar::-webkit-scrollbar {
     width: 5px;
   }

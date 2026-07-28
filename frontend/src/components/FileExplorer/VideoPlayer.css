@@ -1,0 +1,3 @@
+.file-video-player--hide-fullscreen .media-button--fullscreen {
+  display: none !important;
+}
