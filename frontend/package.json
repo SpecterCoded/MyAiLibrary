@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "validate:firebase-config": "node scripts/validate-firebase-config.mjs",
     "test:stream": "vitest run tests/sseStream.test.ts",
     "preview": "vite preview"
   },

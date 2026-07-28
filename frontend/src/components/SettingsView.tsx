@@ -4,7 +4,7 @@ import Slider from '@mui/material/Slider';
 import { type BackendUser } from './DashboardHeader';
 import { UploadCloud, CheckCircle2, Monitor, Moon, Sun, Plus, FolderOpen, Loader2, Info, RefreshCw, Download, ShieldCheck, ShieldAlert, Clock3, FileText, RotateCw, Copy, ExternalLink, Database, AppWindow, HardDrive, Cpu, TerminalSquare } from 'lucide-react';
 import { EmailAuthProvider, reauthenticateWithCredential, updatePassword, signOut } from 'firebase/auth';
-import { auth } from '../firebase';
+import { getFirebaseAuth } from '../firebase';
 import { selectFile, selectFolder } from '../utils/desktop';
 
 interface SettingsViewProps {
@@ -850,6 +850,7 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
 
       // Client-side guards so we fail fast before hitting the backend.
       if (wantsPasswordChange) {
+        const auth = getFirebaseAuth();
         if (!currentPassword) {
           throw new Error('Please enter your current password to set a new one.');
         }
@@ -944,7 +945,7 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
       // If password changed successfully, automatically log out
       if (wantsPasswordChange) {
         try {
-          await signOut(auth);
+          await signOut(getFirebaseAuth());
         } catch (err) {
           console.error('Firebase signOut error:', err);
         }

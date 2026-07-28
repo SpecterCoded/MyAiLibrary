@@ -97,9 +97,9 @@ export default function DashboardHeader({ onSearchClick, onNotificationClick, on
   const handleLogout = async () => {
     logActivity('auth', 'Logged out');
     try {
-      const { auth } = await import('../firebase');
+      const { getFirebaseAuth } = await import('../firebase');
       const { signOut } = await import('firebase/auth');
-      await signOut(auth);
+      await signOut(getFirebaseAuth());
     } catch (err) {
       console.error('Firebase signOut error:', err);
     }

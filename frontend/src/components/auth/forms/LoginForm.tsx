@@ -39,8 +39,9 @@ export function LoginForm({ ctx }: { ctx: AuthContextType }) {
         targetEmail = resolveData.email;
       }
 
-      const { auth } = await import('../../../firebase');
+      const { getFirebaseAuth } = await import('../../../firebase');
       const { signInWithEmailAndPassword, setPersistence, browserLocalPersistence, browserSessionPersistence } = await import('firebase/auth');
+      const auth = getFirebaseAuth();
 
       localStorage.setItem('remember_me', rememberMe.toString());
       await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);

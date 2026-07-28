@@ -29,7 +29,6 @@ import DocumentIntelligencePage from './components/DocumentIntelligencePage';
 import RagExplorerPage from './components/rag-explorer/RagExplorerPage';
 import WorkspaceTitleBar from './components/WorkspaceTitleBar';
 import { init as initActivityLogger, destroy as destroyActivityLogger } from './utils/activityLogger';
-import { auth } from './firebase';
 import type { WorkspaceTab, WorkspaceTabKind, WorkspaceTabParams, WorkspaceTabsState } from './types/workspaceTabs';
 
 interface PlaylistData {

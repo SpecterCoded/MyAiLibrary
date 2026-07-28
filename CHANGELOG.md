@@ -4,6 +4,20 @@ All notable changes to My AI Library are documented here. Every release also has
 
 This project follows semantic versioning. Beta builds use the Testing update channel; Stable updates remain disabled until signed Windows packages are available.
 
+## [0.1.0-beta.2] - 2026-07-28
+
+### Fixed
+
+- Fixed the installed Windows application opening to a blank black window when the release build did not receive its Firebase web configuration.
+- Changed Firebase initialization to occur only when an authentication action needs it, so an unavailable optional service can no longer crash the renderer before the interface appears.
+- Authentication screens now show a clear in-app configuration error if a custom build omits Firebase values.
+
+### Release safeguards
+
+- Windows beta and stable workflows now inject the required Firebase web configuration from GitHub Actions secrets.
+- Release builds now fail before packaging when any required Firebase build value is absent or malformed, preventing another unusable installer from being published silently.
+- No Firebase values, user credentials, backend secrets, or GitHub credentials are committed to the repository.
+
 ## [0.1.0-beta.1] - 2026-07-28
 
 ### Added
@@ -45,4 +59,5 @@ This project follows semantic versioning. Beta builds use the Testing update cha
 - Every release requires both this cumulative changelog and a detailed version-specific release-notes file.
 - The unsigned Windows beta is published as a GitHub prerelease and may show Windows SmartScreen's expected Unknown Publisher warning.
 
+[0.1.0-beta.2]: https://github.com/SpecterCoded/MyAiLibrary/releases/tag/v0.1.0-beta.2
 [0.1.0-beta.1]: https://github.com/SpecterCoded/MyAiLibrary/releases/tag/v0.1.0-beta.1

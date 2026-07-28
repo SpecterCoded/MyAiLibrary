@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import type { AuthContextType } from '../../../App';
 import { Button } from '../ui/Button';
 import { ArrowLeft, Mail, RefreshCw, CheckCircle2, ShieldAlert } from 'lucide-react';
-import { auth } from '../../../firebase';
+import { getFirebaseAuth } from '../../../firebase';
 import { sendEmailVerification } from 'firebase/auth';
 
 export function EmailVerification({ ctx }: { ctx: AuthContextType }) {
@@ -17,6 +17,7 @@ export function EmailVerification({ ctx }: { ctx: AuthContextType }) {
     setChecking(true);
     setError(null);
     try {
+      const auth = getFirebaseAuth();
       if (auth.currentUser) {
         await auth.currentUser.reload();
         
@@ -58,6 +59,7 @@ export function EmailVerification({ ctx }: { ctx: AuthContextType }) {
     setError(null);
     setResendMessage(null);
     try {
+      const auth = getFirebaseAuth();
       if (auth.currentUser) {
         await sendEmailVerification(auth.currentUser);
         setResendMessage('Verification link resent successfully. Please check your inbox.');

@@ -3,7 +3,7 @@ import type { AuthContextType } from '../../../App';
 import { Input } from '../ui/Input';
 import { Button } from '../ui/Button';
 import { CheckCircle2, ShieldAlert, KeyRound, Loader2 } from 'lucide-react';
-import { auth } from '../../../firebase';
+import { getFirebaseAuth } from '../../../firebase';
 import { applyActionCode, confirmPasswordReset, verifyPasswordResetCode } from 'firebase/auth';
 
 interface ActionHandlerProps {
@@ -46,7 +46,7 @@ export function ActionHandler({ ctx, mode, oobCode }: ActionHandlerProps) {
 
   const handleVerifyEmail = async () => {
     try {
-      await applyActionCode(auth, oobCode);
+      await applyActionCode(getFirebaseAuth(), oobCode);
       setSuccess(true);
     } catch (err: any) {
       setError(err.message || 'Failed to verify email. The code may be expired or already used.');
@@ -57,7 +57,7 @@ export function ActionHandler({ ctx, mode, oobCode }: ActionHandlerProps) {
 
   const handleVerifyResetCode = async () => {
     try {
-      const email = await verifyPasswordResetCode(auth, oobCode);
+      const email = await verifyPasswordResetCode(getFirebaseAuth(), oobCode);
       setEmailForReset(email);
       setSuccess(true);
     } catch (err: any) {
@@ -81,7 +81,7 @@ export function ActionHandler({ ctx, mode, oobCode }: ActionHandlerProps) {
     setLoading(true);
     setError(null);
     try {
-      await confirmPasswordReset(auth, oobCode, newPassword);
+      await confirmPasswordReset(getFirebaseAuth(), oobCode, newPassword);
       setSuccess(true);
       // Clear URL query parameters
       window.history.replaceState({}, document.title, window.location.pathname);

@@ -23,9 +23,9 @@ export function ForgotPassword({ ctx }: { ctx: AuthContextType }) {
     setError('');
     setLoading(true);
     try {
-      const { auth } = await import('../../../firebase');
+      const { getFirebaseAuth } = await import('../../../firebase');
       const { sendPasswordResetEmail } = await import('firebase/auth');
-      await sendPasswordResetEmail(auth, ctx.email.trim());
+      await sendPasswordResetEmail(getFirebaseAuth(), ctx.email.trim());
       setSubmitted(true);
     } catch (err: any) {
       setError(err.message || 'Failed to request password reset.');

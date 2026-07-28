@@ -24,8 +24,9 @@ export function AvatarSelection({ ctx }: { ctx: AuthContextType }) {
       const tempSignup = JSON.parse(tempSignupStr);
 
       // Use Firebase Auth
-      const { auth } = await import('../../../firebase');
+      const { getFirebaseAuth } = await import('../../../firebase');
       const { createUserWithEmailAndPassword, updateProfile, sendEmailVerification } = await import('firebase/auth');
+      const auth = getFirebaseAuth();
 
       // 1. Create account on Firebase
       const userCredential = await createUserWithEmailAndPassword(auth, tempSignup.email.trim(), tempSignup.password);

@@ -1,6 +1,6 @@
 {
   "name": "my-ai-library-desktop",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.0-beta.2",
   "private": true,
   "description": "Desktop shell and Windows installer for MyAiLibrary",
   "main": "dist/main.js",
