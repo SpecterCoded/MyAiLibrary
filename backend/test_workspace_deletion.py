@@ -124,6 +124,9 @@ class WorkspaceDeletionTests(unittest.TestCase):
         note_id = self.workspace_note.id
         download_id = self.workspace_download.id
         default_playlist_id = self.default_playlist.id
+        # Packaged requests may have already resolved this relationship before
+        # deletion. Keep it loaded to guard against stale ORM synchronization.
+        self.assertEqual(self.user.active_storage_path.id, secondary_id)
         with (
             patch("main.delete_workspace_collection"),
             patch("main._notify_explorer_changed") as notify,

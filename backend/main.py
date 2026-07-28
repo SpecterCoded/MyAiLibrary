@@ -9191,7 +9191,24 @@ def delete_storage_path(
         remove_workspace_directory(storage_path, tracked_directories)
 
         db.delete(storage_path)
+        if switched_to_default:
+            # Re-apply the fallback in the same final transaction that removes
+            # the StoragePath row. This avoids ORM relationship synchronization
+            # restoring stale active-workspace columns while the referenced row
+            # is being deleted in packaged SQLite builds.
+            db.query(User).filter(User.id == current_user.id).update(
+                {
+                    User.active_storage_path_id: default_path.id,
+                    User.storage_root: default_path.path,
+                },
+                synchronize_session=False,
+            )
         db.commit()
+        db.expire_all()
+        persisted_user = db.query(User).filter(User.id == current_user.id).one()
+        active_path_after_delete = persisted_user.storage_root
+        if switched_to_default and workspace_path_key(active_path_after_delete) != workspace_path_key(default_path.path):
+            raise RuntimeError("The active workspace fallback was not persisted.")
     except Exception as exc:
         db.rollback()
         sys_logger.error(f"[WORKSPACE_DELETE] Workspace purge failed for {path_id}: {exc}")
@@ -9209,7 +9226,7 @@ def delete_storage_path(
         _notify_explorer_changed()
     return {
         "message": "Workspace permanently deleted.",
-        "active_path": default_path.path if switched_to_default else current_user.storage_root,
+        "active_path": active_path_after_delete,
         "switched_to_default": switched_to_default,
     }
 
