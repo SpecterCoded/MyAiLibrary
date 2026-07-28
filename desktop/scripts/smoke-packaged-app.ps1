@@ -193,6 +193,7 @@ try {
   let usernameResolutionRoundTrip = false;
   let secureStorageRoundTrip = false;
   let workspaceStorageRoundTrip = false;
+  let workspaceDiagnostics = {};
   let localStorageIsClean = false;
   const authStatuses = {};
   try {
@@ -306,31 +307,56 @@ try {
       });
       authStatuses.profileAfterDelete = profileAfterDeleteResponse.status;
       const profileAfterDelete = await profileAfterDeleteResponse.json().catch(() => ({}));
-      const normalizePath = (value) => String(value || '').replaceAll('/', '\\').toLowerCase();
-      workspaceStorageRoundTrip = Boolean(
-        createDefaultWorkspaceResponse.ok &&
-        createdDefaultWorkspace.is_default === true &&
-        createWorkspaceResponse.ok &&
-        createdWorkspace.is_default === false &&
-        listWorkspaceResponse.ok &&
-        Array.isArray(workspaces) &&
-        workspaces.some((workspace) => workspace.id === createdDefaultWorkspace.id && workspace.is_default === true) &&
-        workspaces.some((workspace) => workspace.id === createdWorkspace.id) &&
-        activateWorkspaceResponse.ok &&
-        activeProfileResponse.ok &&
-        normalizePath(createdWorkspace.path) === normalizePath(workspaceRoot) &&
-        normalizePath(activeProfile.storage_root) === normalizePath(workspaceRoot) &&
-        deleteDefaultResponse.status === 403 &&
-        deleteWorkspaceResponse.ok &&
-        deletedWorkspace.switched_to_default === true &&
-        normalizePath(deletedWorkspace.active_path) === normalizePath(defaultWorkspaceRoot) &&
-        listAfterDeleteResponse.ok &&
-        Array.isArray(workspacesAfterDelete) &&
-        workspacesAfterDelete.some((workspace) => workspace.id === createdDefaultWorkspace.id) &&
-        !workspacesAfterDelete.some((workspace) => workspace.id === createdWorkspace.id) &&
-        profileAfterDeleteResponse.ok &&
-        normalizePath(profileAfterDelete.storage_root) === normalizePath(defaultWorkspaceRoot)
-      );
+      const normalizePath = (value) => String(value || '')
+        .replace(/^\\\\\?\\/, '')
+        .replaceAll('/', '\\')
+        .replace(/\\+$/, '')
+        .toLowerCase();
+      const workspaceChecks = {
+        defaultCreated: createDefaultWorkspaceResponse.ok,
+        defaultProtected: createdDefaultWorkspace.is_default === true,
+        secondaryCreated: createWorkspaceResponse.ok,
+        secondaryDeletable: createdWorkspace.is_default === false,
+        initialListLoaded: listWorkspaceResponse.ok && Array.isArray(workspaces),
+        defaultListed: Array.isArray(workspaces) && workspaces.some(
+          (workspace) => workspace.id === createdDefaultWorkspace.id && workspace.is_default === true
+        ),
+        secondaryListed: Array.isArray(workspaces) && workspaces.some(
+          (workspace) => workspace.id === createdWorkspace.id
+        ),
+        secondaryActivated: activateWorkspaceResponse.ok && activeProfileResponse.ok,
+        secondaryPathCanonical:
+          normalizePath(createdWorkspace.path) === normalizePath(workspaceRoot),
+        activeProfileUsesSecondary:
+          normalizePath(activeProfile.storage_root) === normalizePath(createdWorkspace.path),
+        defaultDeleteRejected: deleteDefaultResponse.status === 403,
+        secondaryDeleted: deleteWorkspaceResponse.ok,
+        deletionReportedFallback: deletedWorkspace.switched_to_default === true,
+        deletionFallbackMatchesDefault:
+          normalizePath(deletedWorkspace.active_path) === normalizePath(createdDefaultWorkspace.path),
+        finalListLoaded: listAfterDeleteResponse.ok && Array.isArray(workspacesAfterDelete),
+        defaultStillListed: Array.isArray(workspacesAfterDelete) && workspacesAfterDelete.some(
+          (workspace) => workspace.id === createdDefaultWorkspace.id
+        ),
+        secondaryNoLongerListed: Array.isArray(workspacesAfterDelete) && !workspacesAfterDelete.some(
+          (workspace) => workspace.id === createdWorkspace.id
+        ),
+        finalProfileLoaded: profileAfterDeleteResponse.ok,
+        finalProfileUsesDefault:
+          normalizePath(profileAfterDelete.storage_root) === normalizePath(createdDefaultWorkspace.path)
+      };
+      const failedWorkspaceChecks = Object.entries(workspaceChecks)
+        .filter(([, passed]) => !passed)
+        .map(([name]) => name);
+      workspaceStorageRoundTrip = failedWorkspaceChecks.length === 0;
+      workspaceDiagnostics = {
+        failedChecks: failedWorkspaceChecks,
+        createdDefaultPath: normalizePath(createdDefaultWorkspace.path),
+        createdSecondaryPath: normalizePath(createdWorkspace.path),
+        activeProfilePath: normalizePath(activeProfile.storage_root),
+        deletionFallbackPath: normalizePath(deletedWorkspace.active_path),
+        finalProfilePath: normalizePath(profileAfterDelete.storage_root)
+      };
     }
 
     usernameResolutionRoundTrip = Boolean(
@@ -392,6 +418,7 @@ try {
     usernameResolutionRoundTrip,
     secureStorageRoundTrip,
     workspaceStorageRoundTrip,
+    workspaceDiagnostics,
     localStorageIsClean,
     firebaseLoginRejectedSafely,
     authStatuses
@@ -431,7 +458,8 @@ try {
     }
     if (-not $result.workspaceStorageRoundTrip) {
         $statusSummary = $result.authStatuses | ConvertTo-Json -Compress
-        throw "Packaged workspace registration, listing, activation, protection, or deletion failed. HTTP statuses: $statusSummary"
+        $workspaceSummary = $result.workspaceDiagnostics | ConvertTo-Json -Depth 4 -Compress
+        throw "Packaged workspace registration, listing, activation, protection, or deletion failed. HTTP statuses: $statusSummary. Diagnostics: $workspaceSummary"
     }
     if ((Get-Content -LiteralPath $workspaceSentinelPath -Raw).Trim() -ne "workspace sentinel") {
         throw "Packaged workspace registration or deletion modified an unrelated file."
