@@ -19,6 +19,7 @@ writeFileSync(path.join(packagedAppRoot, 'package.json'), JSON.stringify({
 let checkCalls = 0
 let downloadCalls = 0
 let installCalls = 0
+let installArguments = []
 const autoUpdater = new EventEmitter()
 Object.assign(autoUpdater, {
   logger: null,
@@ -44,8 +45,9 @@ Object.assign(autoUpdater, {
       files: [{ size: 1024 }],
     })
   },
-  quitAndInstall: () => {
+  quitAndInstall: (...args) => {
     installCalls += 1
+    installArguments = args
   },
   setFeedURL: () => {},
 })
@@ -115,6 +117,7 @@ test('packaged beta updater defaults to Testing, exercises update states, and pr
   await updater.installUpdate()
   assert.equal(preparedVersion, '0.1.0-beta.2')
   assert.equal(installCalls, 1)
+  assert.deepEqual(installArguments, [true, true])
   assert.equal(updater.getState().status, 'installing')
 
   updater.setPreferences({ channel: 'stable' })

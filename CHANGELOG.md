@@ -21,6 +21,7 @@ This project follows semantic versioning. Beta builds use the Testing update cha
 - The native tray menu now uses the clearer `Open MyAiLibrary` and `Quit MyAiLibrary` actions, with no separator and an updated application tooltip.
 - Standardized the visible product, shortcut, splash, installer, and release name as `MyAiLibrary`.
 - Set the Windows installer to the built-in Segoe UI font for reliable, crisp rendering without an external font dependency.
+- Approved Testing-channel updates now launch the verified NSIS package silently after the pre-update safety gate, preventing an installer wizard from stalling behind the application.
 
 ### Reliability
 

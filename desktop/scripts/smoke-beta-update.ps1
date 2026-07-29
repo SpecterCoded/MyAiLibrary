@@ -488,6 +488,27 @@ try {
         throw "Beta 6 did not exit to start the installer. Last updater state: $summary"
     }
 
+    # Public Beta 6 intentionally launches electron-builder's assisted NSIS
+    # package interactively. A real user can complete that wizard, but the
+    # headless GitHub runner cannot click it. After proving Beta 6 discovered,
+    # downloaded, verified, and launched the exact staged installer, stop only
+    # that isolated wizard and run the same downloaded file silently.
+    Start-Sleep -Seconds 2
+    Stop-IsolatedProcesses
+    $pendingInstaller = Join-Path $localAppData "my-ai-library-desktop-updater\pending\MyAI-Library-Setup-$ExpectedVersion-x64.exe"
+    if (-not (Test-Path -LiteralPath $pendingInstaller -PathType Leaf)) {
+        throw "Beta 6 launched the updater, but its verified pending installer is missing."
+    }
+    $headlessInstaller = Start-Process `
+        -FilePath $pendingInstaller `
+        -ArgumentList @("/S", "/currentuser", "--updated", "--force-run", "/D=$installRoot") `
+        -WindowStyle Hidden `
+        -PassThru `
+        -Wait
+    if ($headlessInstaller.ExitCode -ne 0) {
+        throw "The verified Beta 7 installer failed in headless mode with exit code $($headlessInstaller.ExitCode)."
+    }
+
     $updateDeadline = [DateTime]::UtcNow.AddMinutes(8)
     $installedVersion = ""
     while ([DateTime]::UtcNow -lt $updateDeadline) {

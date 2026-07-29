@@ -374,7 +374,9 @@ export class DesktopUpdater {
       writeFileSync(temporaryPath, `${JSON.stringify(pendingUpdate, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
       renameSync(temporaryPath, this.pendingUpdatePath)
       this.emit({ status: 'installing' })
-      autoUpdater.quitAndInstall(false, true)
+      // Updates are already explicitly approved in Settings. Run the assisted
+      // NSIS package silently so an update cannot stall behind a hidden wizard.
+      autoUpdater.quitAndInstall(true, true)
     } catch (error) {
       this.busy = false
       log.error('Pre-update safety gate failed', safeError(error))
