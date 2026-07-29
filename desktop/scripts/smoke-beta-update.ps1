@@ -132,6 +132,59 @@ function Wait-PageTarget {
     throw "MyAiLibrary did not expose a renderer within $TimeoutSeconds seconds."
 }
 
+function Wait-DesktopUpdateBridge {
+    param(
+        [Parameter(Mandatory = $true)]
+        [Diagnostics.Process]$Process,
+
+        [Parameter(Mandatory = $true)]
+        [string]$WebSocketUrl,
+
+        [ValidateRange(10, 180)]
+        [int]$TimeoutSeconds = 60
+    )
+
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    $attempt = 0
+    while ([DateTime]::UtcNow -lt $deadline) {
+        if ($Process.HasExited) {
+            throw "MyAiLibrary exited before its update bridge became available."
+        }
+        $attempt += 1
+        try {
+            $response = Invoke-CdpCommand -WebSocketUrl $WebSocketUrl -Message @{
+                id = 1000 + $attempt
+                method = "Runtime.evaluate"
+                params = @{
+                    expression = @'
+Boolean(
+  window.desktop &&
+  typeof window.desktop.getVersion === 'function' &&
+  typeof window.desktop.getUpdateState === 'function' &&
+  typeof window.desktop.setUpdatePreferences === 'function' &&
+  typeof window.desktop.checkForUpdates === 'function' &&
+  typeof window.desktop.downloadUpdate === 'function' &&
+  typeof window.desktop.installUpdate === 'function'
+)
+'@
+                    returnByValue = $true
+                }
+            } -TimeoutSeconds 10
+            if (
+                -not $response.result.exceptionDetails -and
+                $response.result.result.value -eq $true
+            ) {
+                return
+            }
+        } catch {
+            # The renderer target can exist briefly before preload exposes the
+            # desktop bridge. Retry until the bounded readiness deadline.
+        }
+        Start-Sleep -Milliseconds 400
+    }
+    throw "MyAiLibrary did not expose its update bridge within $TimeoutSeconds seconds."
+}
+
 function Stop-IsolatedProcesses {
     $targets = @(
         Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
@@ -284,6 +337,7 @@ try {
         -WindowStyle Hidden `
         -PassThru
     $pageTarget = Wait-PageTarget -Process $appProcess -Port $RemoteDebuggingPort
+    Wait-DesktopUpdateBridge -Process $appProcess -WebSocketUrl $pageTarget.webSocketDebuggerUrl
 
     $expectedVersionJson = $ExpectedVersion | ConvertTo-Json -Compress
     $stateExpression = @'
@@ -323,7 +377,8 @@ try {
         }
     } -TimeoutSeconds 180
     if ($discoveryResponse.result.exceptionDetails) {
-        throw "Beta 6 update discovery raised a renderer exception."
+        $exceptionSummary = $discoveryResponse.result.exceptionDetails | ConvertTo-Json -Depth 8 -Compress
+        throw "Beta 6 update discovery raised a renderer exception: $exceptionSummary"
     }
     $discovery = $discoveryResponse.result.result.value
     if (
