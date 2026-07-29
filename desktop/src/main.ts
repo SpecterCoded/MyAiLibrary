@@ -15,6 +15,7 @@ import {
 } from './system-log'
 import { DesktopUpdater } from './updater'
 import type { UpdatePreferences } from './update-types'
+import { buildTrayMenuTemplate } from './tray-menu'
 
 let mainWindow: BrowserWindow | null = null
 let splashWindow: BrowserWindow | null = null
@@ -450,6 +451,9 @@ function clampWorkspaceBounds(
 function workspaceRendererUrl(windowId: string): string {
   const url = new URL(currentRendererUrl)
   url.searchParams.set('workspaceWindow', windowId)
+  if (process.argv.includes('--myai-release-smoke')) {
+    url.searchParams.set('releaseSmoke', 'background-ai')
+  }
   return url.toString()
 }
 
@@ -522,12 +526,11 @@ function createTray(): void {
 
   const trayIcon = nativeImage.createFromPath(iconPath)
   tray = new Tray(trayIcon)
-  tray.setToolTip('MyAiLibrary')
-  tray.setContextMenu(Menu.buildFromTemplate([
-    { label: 'Open', click: showMainWindow },
-    { type: 'separator' },
-    { label: 'Close', click: () => app.quit() },
-  ]))
+  tray.setToolTip('My AI Library')
+  tray.setContextMenu(Menu.buildFromTemplate(buildTrayMenuTemplate({
+    open: showMainWindow,
+    quit: () => app.quit(),
+  })))
   tray.on('click', showMainWindow)
 }
 

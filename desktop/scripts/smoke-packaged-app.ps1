@@ -127,6 +127,7 @@ try {
     $arguments = @(
         "--remote-debugging-port=$RemoteDebuggingPort",
         "--user-data-dir=$chromiumData",
+        "--myai-release-smoke",
         "--disable-gpu",
         "--enable-logging=stderr"
     )
@@ -203,12 +204,26 @@ try {
   let usernameResolutionRoundTrip = false;
   let secureStorageRoundTrip = false;
   let workspaceStorageRoundTrip = false;
+  let backgroundAiRoundTrip = false;
+  let backgroundAiDiagnostics = {};
   let workspaceDiagnostics = {};
   let wtpModelRoundTrip = !testWtpModel;
   let wtpDiagnostics = {};
   let localStorageIsClean = false;
   const authStatuses = {};
   try {
+    const releaseSmokeDeadline = Date.now() + 10000;
+    while (
+      typeof window.__MYAI_RELEASE_SMOKE__ !== 'function' &&
+      Date.now() < releaseSmokeDeadline
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    if (typeof window.__MYAI_RELEASE_SMOKE__ === 'function') {
+      backgroundAiDiagnostics = await window.__MYAI_RELEASE_SMOKE__();
+      backgroundAiRoundTrip = backgroundAiDiagnostics.passed === true;
+    }
+
     const completionResponse = await fetch('/auth/complete-signup', {
       method: 'POST',
       headers: {
@@ -499,6 +514,8 @@ try {
     secureStorageRoundTrip,
     workspaceStorageRoundTrip,
     workspaceDiagnostics,
+    backgroundAiRoundTrip,
+    backgroundAiDiagnostics,
     wtpModelRoundTrip,
     wtpDiagnostics,
     localStorageIsClean,
@@ -545,6 +562,10 @@ try {
         $workspaceSummary = $result.workspaceDiagnostics | ConvertTo-Json -Depth 4 -Compress
         throw "Packaged workspace registration, listing, activation, protection, or deletion failed. HTTP statuses: $statusSummary. Diagnostics: $workspaceSummary"
     }
+    if (-not $result.backgroundAiRoundTrip) {
+        $backgroundAiSummary = $result.backgroundAiDiagnostics | ConvertTo-Json -Depth 4 -Compress
+        throw "Packaged background AI navigation persistence or wall-clock catch-up failed. Diagnostics: $backgroundAiSummary"
+    }
     if (-not $result.wtpModelRoundTrip) {
         $statusSummary = $result.authStatuses | ConvertTo-Json -Compress
         $wtpSummary = $result.wtpDiagnostics | ConvertTo-Json -Depth 4 -Compress
@@ -561,7 +582,7 @@ try {
     if ($stderr -match "auth/invalid-api-key|auth/api-key-not-valid|Uncaught FirebaseError") {
         throw "Packaged renderer reported an invalid Firebase API key."
     }
-    Write-Host "Packaged Electron startup, authentication, workspace lifecycle, WtP model, renderer mount, and encrypted-session round trip passed."
+    Write-Host "Packaged Electron startup, background AI persistence, authentication, workspace lifecycle, WtP model, renderer mount, and encrypted-session round trip passed."
     $smokeSucceeded = $true
 } catch {
     Write-Warning "Packaged smoke-test logs were retained at $testRoot"

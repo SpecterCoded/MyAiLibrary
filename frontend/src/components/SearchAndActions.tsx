@@ -1,10 +1,11 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import './AskAIButton.css';
 import { GradientText } from './gradienttext';
 import { TypewriterText } from './hellotypewriter';
 import { type BackendUser } from './DashboardHeader';
 import AskAIResult from './AskAIResult';
+import { useBackgroundAiTasks } from '../lib/backgroundAiTasks';
 
 interface SearchAndActionsProps {
   onCreatePlaylistClick: () => void;
@@ -19,6 +20,22 @@ export default function SearchAndActions({ onCreatePlaylistClick, onImportClick,
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [validationError, setValidationError] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+  const { getLatest } = useBackgroundAiTasks();
+  const latestHomeTask = getLatest('home');
+
+  useEffect(() => {
+    if (!latestHomeTask || latestHomeTask.dismissed) return;
+    setActiveQuery(latestHomeTask.query);
+    const restoredSubmissionId = Number(
+      latestHomeTask.id.replace('home-ask-ai-', ''),
+    );
+    setSubmissionId(
+      Number.isFinite(restoredSubmissionId)
+        ? restoredSubmissionId
+        : latestHomeTask.startedAt,
+    );
+    setIsAiLoading(latestHomeTask.status === 'running');
+  }, [latestHomeTask]);
 
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -43,7 +60,7 @@ export default function SearchAndActions({ onCreatePlaylistClick, onImportClick,
     }
     setValidationError('');
     setActiveQuery(trimmed);
-    setSubmissionId((current) => current + 1);
+    setSubmissionId(Date.now());
     setQuery('');
     setTimeout(() => inputRef.current?.focus(), 50);
   }

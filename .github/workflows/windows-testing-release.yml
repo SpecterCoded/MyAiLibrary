@@ -146,7 +146,16 @@ jobs:
           ./desktop/scripts/verify-beta-update.ps1 `
             -MetadataPath ./desktop/release/beta.yml `
             -InstallerPath $installer.FullName `
-            -PreviousVersion 0.1.0-beta.5 `
+            -PreviousVersion 0.1.0-beta.6 `
+            -ExpectedVersion $env:RELEASE_VERSION
+
+      - name: Exercise the complete Beta 6 to Beta 7 update path
+        shell: pwsh
+        run: |
+          ./desktop/scripts/smoke-beta-update.ps1 `
+            -Mode staged-install `
+            -ReleaseDirectory ./desktop/release `
+            -PreviousVersion 0.1.0-beta.6 `
             -ExpectedVersion $env:RELEASE_VERSION
 
       - name: Stage verified beta prerelease as a draft
@@ -203,6 +212,17 @@ jobs:
           ) {
             throw "Published release metadata is not the expected public prerelease."
           }
+
+      - name: Verify public Beta 6 Testing-channel discovery
+        if: env.PUBLISH_RELEASE == 'true'
+        shell: pwsh
+        run: |
+          ./desktop/scripts/smoke-beta-update.ps1 `
+            -Mode public-discovery `
+            -ReleaseDirectory ./desktop/release `
+            -PreviousVersion 0.1.0-beta.6 `
+            -ExpectedVersion $env:RELEASE_VERSION `
+            -RemoteDebuggingPort 9333
 
       - name: Retain beta artifacts
         uses: actions/upload-artifact@v4

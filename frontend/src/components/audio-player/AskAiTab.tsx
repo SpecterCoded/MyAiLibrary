@@ -11,6 +11,7 @@ import {
   isConfirmedPartialInterruption,
   normalizeStreamTerminalState,
 } from "../../lib/streamCompletion";
+import { useBackgroundAiTasks } from "../../lib/backgroundAiTasks";
 
 interface AskAiTabProps {
   isActive?: boolean;
@@ -39,9 +40,63 @@ export default function AskAiTab({ isActive, initialQuestion, onClearInitialQues
   const [reactions, setReactions] = useState<Record<string, 'like' | 'dislike'>>({});
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
+  const {
+    tasks: backgroundTasks,
+    startTask,
+    clearOwner,
+  } = useBackgroundAiTasks();
+  const audioTasks = backgroundTasks.filter(
+    (task) => task.surface === "audio" && task.ownerKey === `audio:${resourceId}`,
+  );
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatCacheKey = sessionId ? `ask-ai-cache:${sessionId}` : null;
   const chatMetaCacheKey = sessionId ? `ask-ai-meta:${sessionId}` : null;
+
+  useEffect(() => {
+    setMessages((current) => {
+      let next = current;
+      for (const task of audioTasks) {
+        if (!task.targetMessageId) continue;
+        const existing = next.find((message) => message.id === task.targetMessageId);
+        const details = {
+          ...existing?.details,
+          ...(task.details as Partial<RAGResponseDetails> | undefined),
+          ...(task.status === "stopped"
+            ? { completionStatus: "stopped", canContinue: Boolean(task.answer) }
+            : task.status === "interrupted"
+              ? { completionStatus: "interrupted", canContinue: Boolean(task.answer) }
+              : task.status === "error"
+                ? { completionStatus: "error", canContinue: false }
+                : {}),
+        };
+        const updated: ChatMessage = {
+          ...(existing || {
+            id: task.targetMessageId,
+            sender: "ai" as const,
+            timestamp: new Date(task.startedAt).toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            }),
+          }),
+          text:
+            task.answer ||
+            (task.status === "error"
+              ? task.error || "The AI request failed."
+              : existing?.text || ""),
+          query: task.query,
+          sources: task.sources.length > 0
+            ? task.sources as ChatMessage["sources"]
+            : existing?.sources,
+          details,
+        };
+        next = existing
+          ? next.map((message) => message.id === task.targetMessageId ? updated : message)
+          : [...next, updated];
+      }
+      return next;
+    });
+    setLoading(audioTasks.some((task) => task.status === "running"));
+  }, [backgroundTasks, historyLoaded, resourceId]);
 
   type CachedAiMetadata = {
     query?: string;
@@ -435,10 +490,16 @@ export default function AskAiTab({ isActive, initialQuestion, onClearInitialQues
       ]);
     }
 
-    setLoading(true);
     setError(null);
-
-    try {
+    let requestSessionId = activeSessionId;
+    const ownerKey = `audio:${resourceId}`;
+    startTask({
+      id: `audio-task:${requestSessionId}:${aiMessageId}`,
+      ownerKey,
+      surface: "audio",
+      query: textToSend.trim(),
+      targetMessageId: aiMessageId,
+      runner: async ({ signal, appendText, patch, complete }) => {
       const sendChatStreamRequest = async (activeSessionId: string) => fetch(`/resources/${resourceId}/chat-stream`, {
         method: "POST",
         headers: {
@@ -450,9 +511,10 @@ export default function AskAiTab({ isActive, initialQuestion, onClearInitialQues
           session_id: activeSessionId,
           question: textToSend.trim(),
         }),
+        signal,
       });
 
-      let response = await sendChatStreamRequest(activeSessionId);
+      let response = await sendChatStreamRequest(requestSessionId);
 
       if (!response.ok) {
         let detail = "Failed to reach Gemini assistant. Please try again.";
@@ -469,8 +531,8 @@ export default function AskAiTab({ isActive, initialQuestion, onClearInitialQues
           const title = textToSend.trim().length > 25 ? textToSend.trim().substring(0, 25) + '...' : textToSend.trim();
           const freshSessionId = await createChatSession(title);
           if (freshSessionId) {
-            activeSessionId = freshSessionId;
-            response = await sendChatStreamRequest(activeSessionId);
+            requestSessionId = freshSessionId;
+            response = await sendChatStreamRequest(requestSessionId);
           }
         }
       }
@@ -491,114 +553,75 @@ export default function AskAiTab({ isActive, initialQuestion, onClearInitialQues
         throw new Error("Streaming response body is unavailable.");
       }
 
-      const updateAiMessage = (updater: (current: ChatMessage) => ChatMessage) => {
-        setMessages((prev) => prev.map((msg) => (
-          msg.id === aiMessageId ? updater(msg) : msg
-        )));
-      };
-
       const processEvent = (payload: any) => {
         if (payload.type === "token") {
-          updateAiMessage((current) => ({
-            ...current,
-            text: (current.text || "") + (payload.content || ""),
-          }));
+          appendText(String(payload.content || ""));
           return;
         }
 
         if (payload.type === "final") {
-          updateAiMessage((current) => ({
-            ...current,
-            text: payload.answer || current.text || "No reply from assistant.",
-            sources: payload.sources || current.sources || [],
-            details: buildResponseDetails(payload, textToSend.trim()),
-            query: textToSend.trim(),
-          }));
+          complete({
+            ...(payload.answer ? { answer: payload.answer } : {}),
+            sources: payload.sources || [],
+            details: buildResponseDetails(payload, textToSend.trim()) as Record<string, unknown>,
+          });
           return;
         }
 
         if (payload.type === "sources") {
-          updateAiMessage((current) => ({
-            ...current,
-            text: payload.answer || current.text || "No reply from assistant.",
-            sources: payload.sources || current.sources || [],
-            query: textToSend.trim(),
-          }));
+          patch({
+            ...(payload.answer ? { answer: payload.answer } : {}),
+            sources: payload.sources || [],
+          });
           return;
         }
 
       };
 
       await consumeSSEStream(response.body, processEvent);
-    } catch (err: any) {
-      console.error(err);
-      setError(err.message || "Something went wrong.");
-      setMessages((prev) => prev.map((msg) => (
-        msg.id === aiMessageId
-          ? (() => {
-            const hasPartialAnswer = Boolean(msg.text);
-            return {
-              ...msg,
-              text: msg.text || err.message || "I couldn't contact my server because it might still be initializing. Please try again.",
-              details: {
-                ...msg.details,
-                completionStatus: hasPartialAnswer ? "interrupted" : "error",
-                canContinue: hasPartialAnswer,
-              },
-            };
-          })()
-          : msg
-      )));
-    } finally {
-      setLoading(false);
-    }
+      },
+    });
   };
 
   const handleContinueAnswer = async (messageId: string) => {
     if (loading || !sessionId || !token) return;
-    setLoading(true);
     setError(null);
-    let receivedContinuationToken = false;
-    try {
-      const response = await fetch(`/chat/sessions/${sessionId}/continue-stream`, {
-        method: "POST",
-        headers: { "Authorization": `Bearer ${token}` },
-      });
-      if (!response.ok) throw new Error(`Continuation failed with status ${response.status}`);
-      if (!response.body) throw new Error("Streaming response body is unavailable.");
-      const result = await consumeSSEStream(response.body, (payload) => {
-        if (payload.type !== "token") return;
-        receivedContinuationToken = true;
-        setMessages(prev => prev.map(message => message.id !== messageId ? message : {
-          ...message,
-          text: (message.text || "") + String(payload.content || ""),
-        }));
-      });
-      const finalPayload = result.final as any;
-      setMessages(prev => prev.map(message => message.id !== messageId ? message : {
-        ...message,
-        text: finalPayload.answer || message.text,
-        sources: finalPayload.sources || message.sources,
-        details: buildResponseDetails(finalPayload, message.query || ""),
-      }));
-    } catch (err: any) {
-      setError(err.message || "The answer was interrupted.");
-      setMessages(prev => prev.map(message => message.id !== messageId ? message : {
-        ...message,
-        details: {
-          ...message.details,
-          completionStatus: receivedContinuationToken
-            ? "interrupted"
-            : message.details?.completionStatus,
-          canContinue: receivedContinuationToken || Boolean(message.details?.canContinue),
-        },
-      }));
-    } finally {
-      setLoading(false);
-    }
+    const existing = messages.find((message) => message.id === messageId);
+    if (!existing) return;
+    const activeSessionId = sessionId;
+    startTask({
+      id: `audio-continue:${activeSessionId}:${messageId}:${Date.now()}`,
+      ownerKey: `audio:${resourceId}`,
+      surface: "audio",
+      query: existing.query || "",
+      targetMessageId: messageId,
+      initialAnswer: existing.text,
+      runner: async ({ signal, appendText, complete }) => {
+        const response = await fetch(`/chat/sessions/${activeSessionId}/continue-stream`, {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${token}` },
+          signal,
+        });
+        if (!response.ok) throw new Error(`Continuation failed with status ${response.status}`);
+        if (!response.body) throw new Error("Streaming response body is unavailable.");
+        const result = await consumeSSEStream(response.body, (payload) => {
+          if (payload.type === "token") appendText(String(payload.content || ""));
+        });
+        const finalPayload = result.final as any;
+        complete({
+          ...(finalPayload?.answer ? { answer: finalPayload.answer } : {}),
+          sources: finalPayload?.sources || existing.sources || [],
+          details: buildResponseDetails(
+            finalPayload || {},
+            existing.query || "",
+          ) as Record<string, unknown>,
+        });
+      },
+    });
   };
 
   const clearChat = async () => {
+    if (resourceId) clearOwner(`audio:${resourceId}`);
     if (!sessionId || !token) {
       setMessages([]);
       setError(null);
@@ -821,8 +844,9 @@ export default function AskAiTab({ isActive, initialQuestion, onClearInitialQues
                         <TypewriterMessage
                           content={m.text || ''}
                           msgId={m.id}
-                          animate={loading && messages[messages.length - 1]?.id === m.id && m.sender === 'ai'}
-                          streaming={loading && messages[messages.length - 1]?.id === m.id && m.sender === 'ai'}
+                          animate={audioTasks.some((task) => task.targetMessageId === m.id && task.status === "running")}
+                          streaming={audioTasks.some((task) => task.targetMessageId === m.id && task.status === "running")}
+                          timelineStartedAt={audioTasks.find((task) => task.targetMessageId === m.id)?.firstContentAt}
                           formatTextContent={(text) => (
                             <InlineCitationContent text={text} sources={m.sources} onSeek={onSeek} theme={document.documentElement.classList.contains("dark") ? "dark" : "light"} />
                           )}

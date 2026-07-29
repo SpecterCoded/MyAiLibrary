@@ -9,8 +9,8 @@
     "lint": "eslint .",
     "validate:firebase-config": "node scripts/validate-firebase-config.mjs",
     "validate:firebase-live": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/validate-firebase-live.ps1",
-    "test:stream": "vitest run tests/sseStream.test.ts tests/typewriterTiming.test.ts tests/streamCompletion.test.ts",
-    "test:release": "vitest run tests/sseStream.test.ts tests/typewriterTiming.test.ts tests/streamCompletion.test.ts tests/authStorage.test.ts tests/authFlow.test.ts tests/firebaseConfig.test.ts tests/workspaceStorage.test.ts",
+    "test:stream": "vitest run tests/sseStream.test.ts tests/typewriterTiming.test.ts tests/sharedTypewriterUsage.test.ts tests/streamCompletion.test.ts tests/backgroundAiTasks.test.ts",
+    "test:release": "vitest run tests/sseStream.test.ts tests/typewriterTiming.test.ts tests/sharedTypewriterUsage.test.ts tests/streamCompletion.test.ts tests/backgroundAiTasks.test.ts tests/releaseSmoke.test.ts tests/composerControlActivation.test.ts tests/authStorage.test.ts tests/authFlow.test.ts tests/firebaseConfig.test.ts tests/workspaceStorage.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {

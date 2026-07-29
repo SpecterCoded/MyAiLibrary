@@ -31,6 +31,20 @@ import WorkspaceTitleBar from './components/WorkspaceTitleBar';
 import { init as initActivityLogger, destroy as destroyActivityLogger } from './utils/activityLogger';
 import { clearRefreshToken, getRefreshToken } from './utils/authStorage';
 import type { WorkspaceTab, WorkspaceTabKind, WorkspaceTabParams, WorkspaceTabsState } from './types/workspaceTabs';
+import {
+  BackgroundAiTaskProvider,
+  useBackgroundAiTasks,
+} from './lib/backgroundAiTasks';
+import {
+  runBackgroundAiReleaseSmoke,
+  type BackgroundAiReleaseSmokeResult,
+} from './lib/releaseSmoke';
+
+declare global {
+  interface Window {
+    __MYAI_RELEASE_SMOKE__?: () => Promise<BackgroundAiReleaseSmokeResult>;
+  }
+}
 
 interface PlaylistData {
   id: number;
@@ -162,11 +176,28 @@ const readInitialWorkspaceTabsState = (): WorkspaceTabsState => {
   return { tabs: [tab], activeTabId: tab.id };
 };
 
-export default function App() {
+function AppContent() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentUser, setCurrentUser] = useState<BackendUser | null>(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
   const [authExpired, setAuthExpired] = useState(false);
+  const { clearTasks, store: backgroundAiTaskStore } = useBackgroundAiTasks();
+
+  useEffect(() => {
+    if (!loadingAuth && !isAuthenticated) clearTasks();
+  }, [clearTasks, isAuthenticated, loadingAuth]);
+
+  useEffect(() => {
+    const smokeEnabled =
+      new URLSearchParams(window.location.search).get('releaseSmoke') ===
+      'background-ai';
+    if (!smokeEnabled) return;
+    window.__MYAI_RELEASE_SMOKE__ = () =>
+      runBackgroundAiReleaseSmoke(backgroundAiTaskStore);
+    return () => {
+      delete window.__MYAI_RELEASE_SMOKE__;
+    };
+  }, [backgroundAiTaskStore]);
 
   // Global Glassmorphism Theme State (default to dark)
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>(() => {
@@ -1659,6 +1690,14 @@ export default function App() {
         )}
       </AnimatePresence>
     </>
+  );
+}
+
+export default function App() {
+  return (
+    <BackgroundAiTaskProvider>
+      <AppContent />
+    </BackgroundAiTaskProvider>
   );
 }
 

@@ -10,6 +10,7 @@ import {
   isConfirmedPartialInterruption,
   normalizeStreamTerminalState,
 } from "../../../lib/streamCompletion";
+import { useBackgroundAiTasks } from "../../../lib/backgroundAiTasks";
 
 interface ChatMessage {
   id: string;
@@ -47,9 +48,63 @@ export function AskAiView({ isActive, initialQuestion, onClearInitialQuestion, t
   const [reactions, setReactions] = useState<Record<string, 'like' | 'dislike'>>({});
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
+  const {
+    tasks: backgroundTasks,
+    startTask,
+    clearOwner,
+  } = useBackgroundAiTasks();
+  const videoTasks = backgroundTasks.filter(
+    (task) => task.surface === "video" && task.ownerKey === `video:${resourceId}`,
+  );
   const scrollRef = useRef<HTMLDivElement>(null);
   const chatCacheKey = sessionId ? `ask-ai-cache:${sessionId}` : null;
   const chatMetaCacheKey = sessionId ? `ask-ai-meta:${sessionId}` : null;
+
+  useEffect(() => {
+    setMessages((current) => {
+      let next = current;
+      for (const task of videoTasks) {
+        if (!task.targetMessageId) continue;
+        const existing = next.find((message) => message.id === task.targetMessageId);
+        const details = {
+          ...existing?.details,
+          ...(task.details as Partial<RAGResponseDetails> | undefined),
+          ...(task.status === "stopped"
+            ? { completionStatus: "stopped", canContinue: Boolean(task.answer) }
+            : task.status === "interrupted"
+              ? { completionStatus: "interrupted", canContinue: Boolean(task.answer) }
+              : task.status === "error"
+                ? { completionStatus: "error", canContinue: false }
+                : {}),
+        };
+        const updated: ChatMessage = {
+          ...(existing || {
+            id: task.targetMessageId,
+            sender: "ai" as const,
+            timestamp: new Date(task.startedAt).toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            }),
+          }),
+          text:
+            task.answer ||
+            (task.status === "error"
+              ? task.error || "The AI request failed."
+              : existing?.text || ""),
+          query: task.query,
+          sources: task.sources.length > 0
+            ? task.sources as RAGSource[]
+            : existing?.sources,
+          details,
+        };
+        next = existing
+          ? next.map((message) => message.id === task.targetMessageId ? updated : message)
+          : [...next, updated];
+      }
+      return next;
+    });
+    setIsTyping(videoTasks.some((task) => task.status === "running"));
+  }, [backgroundTasks, historyLoaded, resourceId]);
 
   type CachedAiMetadata = {
     query?: string;
@@ -489,9 +544,15 @@ export function AskAiView({ isActive, initialQuestion, onClearInitialQuestion, t
       ]);
     }
 
-    setIsTyping(true);
-
-    try {
+    let requestSessionId = activeSessionId;
+    const ownerKey = `video:${resourceId}`;
+    startTask({
+      id: `video-task:${requestSessionId}:${aiMessageId}`,
+      ownerKey,
+      surface: "video",
+      query: text.trim(),
+      targetMessageId: aiMessageId,
+      runner: async ({ signal, appendText, patch, complete }) => {
       const sendChatStreamRequest = async (activeSessionId: string) => fetch(`/resources/${resourceId}/chat-stream`, {
         method: "POST",
         headers: {
@@ -503,9 +564,10 @@ export function AskAiView({ isActive, initialQuestion, onClearInitialQuestion, t
           session_id: activeSessionId,
           question: text.trim(),
         }),
+        signal,
       });
 
-      let response = await sendChatStreamRequest(activeSessionId);
+      let response = await sendChatStreamRequest(requestSessionId);
 
       if (!response.ok) {
         let detail = "Failed to reach Gemini assistant. Please try again.";
@@ -522,8 +584,8 @@ export function AskAiView({ isActive, initialQuestion, onClearInitialQuestion, t
           const title = text.trim().length > 25 ? text.trim().substring(0, 25) + '...' : text.trim();
           const freshSessionId = await createChatSession(title);
           if (freshSessionId) {
-            activeSessionId = freshSessionId;
-            response = await sendChatStreamRequest(activeSessionId);
+            requestSessionId = freshSessionId;
+            response = await sendChatStreamRequest(requestSessionId);
           }
         }
       }
@@ -544,18 +606,9 @@ export function AskAiView({ isActive, initialQuestion, onClearInitialQuestion, t
         throw new Error("Streaming response body is unavailable.");
       }
 
-      const updateAiMessage = (updater: (current: ChatMessage) => ChatMessage) => {
-        setMessages((prev) => prev.map((msg) => (
-          msg.id === aiMessageId ? updater(msg) : msg
-        )));
-      };
-
       const processEvent = (payload: any) => {
         if (payload.type === "token") {
-          updateAiMessage((current) => ({
-            ...current,
-            text: (current.text || "") + (payload.content || ""),
-          }));
+          appendText(String(payload.content || ""));
           return;
         }
 
@@ -566,13 +619,11 @@ export function AskAiView({ isActive, initialQuestion, onClearInitialQuestion, t
             sourcesCount: Array.isArray(payload.sources) ? payload.sources.length : 0,
             hasDetails: Boolean(payload.confidence != null || payload.processing_time_ms != null),
           });
-          updateAiMessage((current) => ({
-            ...current,
-            text: payload.answer || current.text || "No reply from assistant.",
-            sources: payload.sources || current.sources || [],
-            details: buildResponseDetails(payload, text.trim()),
-            query: text.trim(),
-          }));
+          complete({
+            ...(payload.answer ? { answer: payload.answer } : {}),
+            sources: payload.sources || [],
+            details: buildResponseDetails(payload, text.trim()) as Record<string, unknown>,
+          });
           return;
         }
 
@@ -585,84 +636,58 @@ export function AskAiView({ isActive, initialQuestion, onClearInitialQuestion, t
               ? payload.sources.map((source: RAGSource) => source?.chunk_index)
               : [],
           });
-          updateAiMessage((current) => ({
-            ...current,
-            text: payload.answer || current.text || "No reply from assistant.",
-            sources: payload.sources || current.sources || [],
-            query: text.trim(),
-          }));
+          patch({
+            ...(payload.answer ? { answer: payload.answer } : {}),
+            sources: payload.sources || [],
+          });
           return;
         }
 
       };
 
       await consumeSSEStream(response.body, processEvent);
-    } catch (err: any) {
-      console.error(err);
-      setMessages((prev) => prev.map((msg) => (
-        msg.id === aiMessageId
-          ? (() => {
-            const hasPartialAnswer = Boolean(msg.text);
-            return {
-              ...msg,
-              text: msg.text || err.message || "I couldn't contact my server because it might still be initializing. Please try again.",
-              details: {
-                ...msg.details,
-                completionStatus: hasPartialAnswer ? "interrupted" : "error",
-                canContinue: hasPartialAnswer,
-              },
-            };
-          })()
-          : msg
-      )));
-    } finally {
-      setIsTyping(false);
-    }
+      },
+    });
   };
 
   const handleContinueAnswer = async (messageId: string) => {
     if (isTyping || !sessionId || !token) return;
-    setIsTyping(true);
-    let receivedContinuationToken = false;
-    try {
-      const response = await fetch(`/chat/sessions/${sessionId}/continue-stream`, {
-        method: "POST",
-        headers: { "Authorization": `Bearer ${token}` },
-      });
-      if (!response.ok) throw new Error(`Continuation failed with status ${response.status}`);
-      if (!response.body) throw new Error("Streaming response body is unavailable.");
-      const result = await consumeSSEStream(response.body, (payload) => {
-        if (payload.type !== "token") return;
-        receivedContinuationToken = true;
-        setMessages(prev => prev.map(message => message.id !== messageId ? message : {
-          ...message,
-          text: (message.text || "") + String(payload.content || ""),
-        }));
-      });
-      const finalPayload = result.final as any;
-      setMessages(prev => prev.map(message => message.id !== messageId ? message : {
-        ...message,
-        text: finalPayload.answer || message.text,
-        sources: finalPayload.sources || message.sources,
-        details: buildResponseDetails(finalPayload, message.query || ""),
-      }));
-    } catch {
-      setMessages(prev => prev.map(message => message.id !== messageId ? message : {
-        ...message,
-        details: {
-          ...message.details,
-          completionStatus: receivedContinuationToken
-            ? "interrupted"
-            : message.details?.completionStatus,
-          canContinue: receivedContinuationToken || Boolean(message.details?.canContinue),
-        },
-      }));
-    } finally {
-      setIsTyping(false);
-    }
+    const existing = messages.find((message) => message.id === messageId);
+    if (!existing) return;
+    const activeSessionId = sessionId;
+    startTask({
+      id: `video-continue:${activeSessionId}:${messageId}:${Date.now()}`,
+      ownerKey: `video:${resourceId}`,
+      surface: "video",
+      query: existing.query || "",
+      targetMessageId: messageId,
+      initialAnswer: existing.text,
+      runner: async ({ signal, appendText, complete }) => {
+        const response = await fetch(`/chat/sessions/${activeSessionId}/continue-stream`, {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${token}` },
+          signal,
+        });
+        if (!response.ok) throw new Error(`Continuation failed with status ${response.status}`);
+        if (!response.body) throw new Error("Streaming response body is unavailable.");
+        const result = await consumeSSEStream(response.body, (payload) => {
+          if (payload.type === "token") appendText(String(payload.content || ""));
+        });
+        const finalPayload = result.final as any;
+        complete({
+          ...(finalPayload?.answer ? { answer: finalPayload.answer } : {}),
+          sources: finalPayload?.sources || existing.sources || [],
+          details: buildResponseDetails(
+            finalPayload || {},
+            existing.query || "",
+          ) as Record<string, unknown>,
+        });
+      },
+    });
   };
 
   const clearChat = async () => {
+    if (resourceId) clearOwner(`video:${resourceId}`);
     if (!sessionId || !token) {
       setMessages([]);
       return;
@@ -847,8 +872,9 @@ export function AskAiView({ isActive, initialQuestion, onClearInitialQuestion, t
                         <TypewriterMessage
                           content={msg.text || ''}
                           msgId={msg.id}
-                          animate={isTyping && messages[messages.length - 1]?.id === msg.id && msg.sender === 'ai'}
-                          streaming={isTyping && messages[messages.length - 1]?.id === msg.id && msg.sender === 'ai'}
+                          animate={videoTasks.some((task) => task.targetMessageId === msg.id && task.status === "running")}
+                          streaming={videoTasks.some((task) => task.targetMessageId === msg.id && task.status === "running")}
+                          timelineStartedAt={videoTasks.find((task) => task.targetMessageId === msg.id)?.firstContentAt}
                           formatTextContent={(text) => (
                             <InlineCitationContent text={text} sources={msg.sources} onSeek={onSeek} theme={document.documentElement.classList.contains("dark") ? "dark" : "light"} />
                           )}

@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
 import TypewriterMessage from './chat/TypewriterMessage';
+import { useBackgroundAiTasks } from '../lib/backgroundAiTasks';
 
 // ---------- Types ----------
 interface CitationSource {
@@ -122,13 +123,21 @@ const HOME_MARKDOWN_COMPONENTS: Components = {
 
 // ---------- Main component ----------
 export default function AskAIResult({ query, submissionId, onClose, onLoadingChange }: AskAIResultProps) {
-  const [answer, setAnswer] = useState('');
-  const [sources, setSources] = useState<CitationSource[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const latestRequestIdRef = useRef(0);
   const onLoadingChangeRef = useRef(onLoadingChange);
+  const {
+    getLatest,
+    startTask,
+    dismissTask,
+  } = useBackgroundAiTasks();
+  const task = getLatest('home');
+  const answer = task?.query === query ? task.answer : '';
+  const sources = task?.query === query ? task.sources as CitationSource[] : [];
+  const loading = task?.query === query && task.status === 'running';
+  const error =
+    task?.query === query && (task.status === 'error' || task.status === 'interrupted')
+      ? task.error || 'Something went wrong.'
+      : null;
 
   const cleanAnswer = stripHomeCitations(answer);
 
@@ -137,22 +146,20 @@ export default function AskAIResult({ query, submissionId, onClose, onLoadingCha
   }, [onLoadingChange]);
 
   useEffect(() => {
+    onLoadingChangeRef.current?.(loading);
+  }, [loading]);
+
+  useEffect(() => {
     const trimmedQuery = query.trim();
     if (!trimmedQuery) return;
+    if (task?.query === trimmedQuery && task.id === `home-ask-ai-${submissionId}`) return;
 
-    const controller = new AbortController();
-    const requestId = latestRequestIdRef.current + 1;
-    latestRequestIdRef.current = requestId;
-
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setLoading(true);
-    onLoadingChangeRef.current?.(true);
-    setError(null);
-    setAnswer('');
-    setSources([]);
-
-    const fetchAnswer = async () => {
-      try {
+    startTask({
+      id: `home-ask-ai-${submissionId}`,
+      ownerKey: 'home',
+      surface: 'home',
+      query: trimmedQuery,
+      runner: async ({ signal, complete }) => {
         const token = localStorage.getItem('access_token');
         const res = await fetch('/library/ask', {
           method: 'POST',
@@ -161,7 +168,7 @@ export default function AskAIResult({ query, submissionId, onClose, onLoadingCha
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },
           body: JSON.stringify({ question: trimmedQuery, concise: true }),
-          signal: controller.signal,
+          signal,
         });
 
         if (!res.ok) {
@@ -170,29 +177,19 @@ export default function AskAIResult({ query, submissionId, onClose, onLoadingCha
         }
 
         const data = await res.json();
-        if (controller.signal.aborted || latestRequestIdRef.current !== requestId) return;
+        complete({
+          answer: data.answer ?? '',
+          sources: data.sources ?? [],
+          firstContentAt: Date.now(),
+        });
+      },
+    });
+  }, [query, startTask, submissionId, task?.id, task?.query]);
 
-        const nextAnswer = data.answer ?? '';
-        setAnswer(nextAnswer);
-        setSources(data.sources ?? []);
-      } catch (e: unknown) {
-        if (controller.signal.aborted || latestRequestIdRef.current !== requestId) return;
-
-        const msg = e instanceof Error ? e.message : 'Something went wrong.';
-        setError(msg);
-      } finally {
-        if (!controller.signal.aborted && latestRequestIdRef.current === requestId) {
-          setLoading(false);
-          onLoadingChangeRef.current?.(false);
-        }
-      }
-    };
-
-    void fetchAnswer();
-    return () => {
-      controller.abort();
-    };
-  }, [query, submissionId]);
+  const handleClose = () => {
+    if (task) dismissTask(task.id);
+    onClose();
+  };
 
   // Copy answer
   const [copied, setCopied] = useState(false);
@@ -292,7 +289,7 @@ export default function AskAIResult({ query, submissionId, onClose, onLoadingCha
             {/* Close */}
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleClose}
               className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
               title="Close"
             >
@@ -359,7 +356,8 @@ export default function AskAIResult({ query, submissionId, onClose, onLoadingCha
                           msgId={`home-ask-ai-${submissionId}`}
                           animate={Boolean(cleanAnswer)}
                           streaming={false}
-                          speed={16}
+                          speed={12}
+                          timelineStartedAt={task?.firstContentAt || task?.completedAt}
                           formatTextContent={(text) => (
                             <ReactMarkdown remarkPlugins={[remarkGfm]} components={HOME_MARKDOWN_COMPONENTS}>
                               {text}

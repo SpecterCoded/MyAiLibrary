@@ -24,6 +24,14 @@ import {
   isConfirmedPartialInterruption,
   normalizeStreamTerminalState,
 } from '../../lib/streamCompletion';
+import {
+  activateComposerControlFromKeyboardClick,
+  activateComposerControlFromPointer,
+} from './composerControlActivation';
+import {
+  useBackgroundAiTasks,
+  type BackgroundAiTask,
+} from '../../lib/backgroundAiTasks';
 
 
 // --- TYPES ---
@@ -347,16 +355,44 @@ export default function ChatApp({ user }: ChatAppProps) {
   const displayName = user?.username || user?.email?.split('@')[0] || 'User';
   const userAvatarUrl = user?.avatar_url || localStorage.getItem(`user_avatar_${user?.user_id}`);
   const userInitial = displayName.charAt(0).toUpperCase();
+  const chatViewStorageKey = `main_chat_view_${user?.user_id || 'anonymous'}`;
+  const chatSessionStorageKey = `main_chat_session_${user?.user_id || 'anonymous'}`;
 
-  const [currentView, setCurrentView] = useState<'home' | 'chat' | 'history'>('home');
+  const [currentView, setCurrentView] = useState<'home' | 'chat' | 'history'>(() => {
+    const stored = sessionStorage.getItem(chatViewStorageKey);
+    return stored === 'chat' || stored === 'history' ? stored : 'home';
+  });
   const [inputValue, setInputValue] = useState('');
   const [chats, setChats] = useState<ChatSession[]>([]);
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(
+    () => sessionStorage.getItem(chatSessionStorageKey),
+  );
   const [isGenerating, setIsGenerating] = useState(false);
   const [isAnswerStreaming, setIsAnswerStreaming] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState<'newest' | 'oldest'>('newest');
   const [isGlobeOn, setIsGlobeOn] = useState(false);
+  const {
+    tasks: backgroundTasks,
+    startTask,
+    cancelOwner,
+    clearOwner,
+  } = useBackgroundAiTasks();
+  const mainChatTasks = backgroundTasks.filter(
+    (task) => task.surface === 'main-chat',
+  );
+
+  useEffect(() => {
+    sessionStorage.setItem(chatViewStorageKey, currentView);
+  }, [chatViewStorageKey, currentView]);
+
+  useEffect(() => {
+    if (activeSessionId) {
+      sessionStorage.setItem(chatSessionStorageKey, activeSessionId);
+    } else {
+      sessionStorage.removeItem(chatSessionStorageKey);
+    }
+  }, [activeSessionId, chatSessionStorageKey]);
 
   const [selectedResources, setSelectedResources] = useState<any[]>([]);
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
@@ -851,6 +887,9 @@ export default function ChatApp({ user }: ChatAppProps) {
   };
 
   const handleStopGeneration = () => {
+    if (activeSessionId && cancelOwner(`main-chat:${activeSessionId}`)) {
+      return;
+    }
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
@@ -1504,6 +1543,68 @@ export default function ChatApp({ user }: ChatAppProps) {
     setChats(updatedChats);
   };
 
+  const mergeMainChatTasksIntoChats = (
+    baseChats: ChatSession[],
+  ): ChatSession[] => {
+    let merged = baseChats;
+    for (const task of mainChatTasks) {
+      const sessionId = task.ownerKey.replace(/^main-chat:/, '');
+      const targetMessageId = task.targetMessageId;
+      if (!sessionId || !targetMessageId) continue;
+      merged = merged.map((chat) => {
+        if (chat.id !== sessionId) return chat;
+        const existing = chat.messages.find(
+          (message) => message.id === targetMessageId,
+        );
+        const content =
+          task.answer ||
+          (task.status === 'error' ? `Error: ${task.error || 'The AI request failed.'}` : '');
+        const completionStatus =
+          task.status === 'running'
+            ? existing?.details?.completionStatus
+            : task.status === 'completed'
+              ? String(task.details?.completionStatus || 'complete')
+              : task.status;
+        const nextMessage: Message = {
+          ...(existing || {
+            id: targetMessageId,
+            role: 'assistant' as const,
+            timestamp: new Date(task.startedAt).toLocaleTimeString([], {
+              hour: '2-digit',
+              minute: '2-digit',
+            }),
+          }),
+          content,
+          query: task.query,
+          sources: task.sources.length > 0
+            ? task.sources as Source[]
+            : existing?.sources,
+          details: {
+            ...existing?.details,
+            ...(task.details as Partial<RAGResponseDetails> | undefined),
+            completionStatus,
+            canContinue:
+              task.status === 'interrupted' ||
+              task.status === 'stopped' ||
+              Boolean(task.details?.canContinue),
+          },
+        };
+        const messages = existing
+          ? chat.messages.map((message) =>
+              message.id === targetMessageId ? nextMessage : message
+            )
+          : [...chat.messages, nextMessage];
+        return {
+          ...chat,
+          messages,
+          preview:
+            content.length > 120 ? `${content.substring(0, 120)}...` : content,
+        };
+      });
+    }
+    return merged;
+  };
+
   const loadChatsFromBackend = async () => {
     const token = localStorage.getItem('access_token');
     if (!token) {
@@ -1553,7 +1654,7 @@ export default function ChatApp({ user }: ChatAppProps) {
         }),
       );
 
-      setChats(hydratedChats);
+      setChats(mergeMainChatTasksIntoChats(hydratedChats));
     } catch (error) {
       console.error('Failed to load chat history from backend:', error);
       setChats([]);
@@ -1588,6 +1689,15 @@ export default function ChatApp({ user }: ChatAppProps) {
   useEffect(() => {
     void loadChatsFromBackend();
   }, []);
+
+  useEffect(() => {
+    setChats((current) => mergeMainChatTasksIntoChats(current));
+    const hasRunningTask = mainChatTasks.some(
+      (task) => task.status === 'running',
+    );
+    setIsGenerating(hasRunningTask);
+    setIsAnswerStreaming(hasRunningTask);
+  }, [backgroundTasks]);
 
   // Refresh timeAgo values every 60 seconds
   useEffect(() => {
@@ -1693,7 +1803,7 @@ export default function ChatApp({ user }: ChatAppProps) {
     };
 
     const aiMsgId = (Date.now() + 1).toString();
-    const abortController = new AbortController();
+    let backgroundStarted = false;
 
     try {
       if (!sessionId) {
@@ -1730,8 +1840,6 @@ export default function ChatApp({ user }: ChatAppProps) {
       setIsGenerating(true);
       setIsAnswerStreaming(true);
 
-      abortControllerRef.current = abortController;
-
       // Gather relevant structured history to feed the backend
       const sessionObj = updatedChats.find(s => s.id === sessionId);
       const messageHistory = sessionObj ? sessionObj.messages : [newUserMessage];
@@ -1758,78 +1866,63 @@ export default function ChatApp({ user }: ChatAppProps) {
       setChats(withAiMsg);
       saveChatsToStorage(withAiMsg);
 
-      const response = await fetch('/api/chat-stream', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-        },
-        body: JSON.stringify({
-          session_id: sessionId,
-          messages: messageHistory,
-          ...chatScope,
-          globe_on: isGlobeOn,
-        }),
-        signal: abortController.signal
-      });
+      const finalSessionId = sessionId;
+      startTask({
+        id: `main-chat-task:${finalSessionId}:${aiMsgId}`,
+        ownerKey: `main-chat:${finalSessionId}`,
+        surface: 'main-chat',
+        query: trimmed,
+        targetMessageId: aiMsgId,
+        runner: async ({ signal, appendText, patch, complete }) => {
+          try {
+            const response = await fetch('/api/chat-stream', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+              },
+              body: JSON.stringify({
+                session_id: finalSessionId,
+                messages: messageHistory,
+                ...chatScope,
+                globe_on: isGlobeOn,
+              }),
+              signal,
+            });
 
-      if (!response.ok) {
-        let detail = `Request failed with status ${response.status}`;
-        try {
-          const errorBody = await response.json();
-          if (typeof errorBody?.detail === 'string' && errorBody.detail.trim()) {
-            detail = errorBody.detail.trim();
-          }
-        } catch {}
-        throw new Error(detail);
-      }
+            if (!response.ok) {
+              let detail = `Request failed with status ${response.status}`;
+              try {
+                const errorBody = await response.json();
+                if (typeof errorBody?.detail === 'string' && errorBody.detail.trim()) {
+                  detail = errorBody.detail.trim();
+                }
+              } catch {}
+              throw new Error(detail);
+            }
+            if (!response.body) {
+              throw new Error("Streaming response body is unavailable.");
+            }
 
-      if (!response.body) {
-        throw new Error("Streaming response body is unavailable.");
-      }
-
-      const result = await consumeSSEStream(response.body, (payload) => {
-          if (payload.type === "final" || payload.type === "error") {
-            setIsAnswerStreaming(false);
-          }
-          if (payload.type === "token") {
-            setChats(prev => prev.map(c => {
-              if (c.id !== sessionId) return c;
-              const msgs = c.messages.map(m => {
-                if (m.id !== aiMsgId) return m;
-                return { ...m, content: m.content + String(payload.content || "") };
-              });
-              return { ...c, messages: msgs };
-            }));
-          } else if (payload.type === "sources") {
-            setChats(prev => prev.map(c => {
-              if (c.id !== sessionId) return c;
-              const msgs = c.messages.map(m => {
-                if (m.id !== aiMsgId) return m;
-                return { ...m, sources: (payload.sources as Source[] | undefined) || m.sources };
-              });
-              return { ...c, messages: msgs };
-            }));
-          }
-      });
-      const finalPayload = result.final as any;
-
-      setChats(prev => {
-        const finalizedChats = prev.map(c => {
-          if (c.id !== sessionId) return c;
-          const finalContent = finalPayload?.answer || c.messages.find(m => m.id === aiMsgId)?.content || "";
-          const msgs = c.messages.map(m => {
-            if (m.id !== aiMsgId) return m;
+            const result = await consumeSSEStream(response.body, (payload) => {
+              if (payload.type === 'token') {
+                appendText(String(payload.content || ''));
+              } else if (payload.type === 'sources') {
+                patch({ sources: (payload.sources as Source[] | undefined) || [] });
+              }
+            });
+            const finalPayload = result.final as any;
+            const finalContent =
+              finalPayload?.answer || '';
             const terminal = normalizeStreamTerminalState({
               completionStatus: finalPayload?.completion_status,
               finishReason: finalPayload?.finish_reason,
               canContinue: finalPayload?.can_continue,
               hasAnswer: Boolean(finalContent),
             });
-            return {
-              ...m,
-              content: finalContent,
-              sources: finalPayload?.sources || m.sources,
+            complete({
+              ...(finalContent ? { answer: finalContent } : {}),
+              sources: finalPayload?.sources || [],
               details: finalPayload ? {
                 confidence: finalPayload.confidence,
                 confidenceLabel: finalPayload.confidence_label,
@@ -1846,18 +1939,14 @@ export default function ChatApp({ user }: ChatAppProps) {
                 continuationCount: finalPayload.continuation_count,
                 canContinue: terminal.canContinue,
                 assistantMessageId: finalPayload.assistant_message_id,
-              } : m.details,
-            };
-          });
-          return {
-            ...c,
-            messages: msgs,
-            preview: finalContent.length > 120 ? finalContent.substring(0, 120) + '...' : finalContent
-          };
-        });
-        saveChatsToStorage(finalizedChats);
-        return finalizedChats;
+              } : undefined,
+            });
+          } finally {
+            playNotificationSound();
+          }
+        },
       });
+      backgroundStarted = true;
     } catch (e: any) {
       if (e.name === 'AbortError') {
         console.log('Generation stopped by user');
@@ -1911,12 +2000,9 @@ export default function ChatApp({ user }: ChatAppProps) {
         return finalizedChats;
       });
     } finally {
-      setIsAnswerStreaming(false);
-      setIsGenerating(false);
-      if (abortControllerRef.current === abortController) {
-        abortControllerRef.current = null;
-      }
-      if (abortControllerRef.current === null) {
+      if (!backgroundStarted) {
+        setIsAnswerStreaming(false);
+        setIsGenerating(false);
         playNotificationSound();
       }
     }
@@ -1926,114 +2012,87 @@ export default function ChatApp({ user }: ChatAppProps) {
     if (isGenerating || !activeSessionId) return;
     const token = localStorage.getItem('access_token');
     if (!token) return;
+    const existingMessage = activeSession?.messages.find(
+      (message) => message.id === msgId,
+    );
+    if (!existingMessage) return;
     setIsGenerating(true);
     setIsAnswerStreaming(true);
-    const abortController = new AbortController();
-    abortControllerRef.current = abortController;
-    let receivedContinuationToken = false;
-    try {
-      const response = await fetch(`/chat/sessions/${activeSessionId}/continue-stream`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` },
-        signal: abortController.signal,
-      });
-      if (!response.ok) throw new Error(`Continuation failed with status ${response.status}`);
-      if (!response.body) throw new Error('Streaming response body is unavailable.');
-      const result = await consumeSSEStream(response.body, (payload) => {
-        if (payload.type === 'final' || payload.type === 'error') {
-          setIsAnswerStreaming(false);
-        }
-        if (payload.type !== 'token') return;
-        receivedContinuationToken = true;
-        setChats(prev => prev.map(chat => chat.id !== activeSessionId ? chat : {
-          ...chat,
-          messages: chat.messages.map(message => message.id !== msgId ? message : {
-            ...message,
-            content: message.content + String(payload.content || ''),
-          }),
-        }));
-      });
-      const finalPayload = result.final as any;
-      setChats(prev => {
-        const updated = prev.map(chat => chat.id !== activeSessionId ? chat : {
-          ...chat,
-          messages: chat.messages.map(message => {
-            if (message.id !== msgId) return message;
-            const content = finalPayload.answer || message.content;
-            const terminal = normalizeStreamTerminalState({
-              completionStatus: finalPayload.completion_status,
-              finishReason: finalPayload.finish_reason,
-              canContinue: finalPayload.can_continue,
-              hasAnswer: Boolean(content),
-            });
-            return {
-              ...message,
-              content,
-              sources: finalPayload.sources || message.sources,
-              details: {
-                ...message.details,
-                chatMode: finalPayload.chat_mode,
-                finishReason: terminal.finishReason,
-                completionStatus: terminal.completionStatus,
-                continuationCount: finalPayload.continuation_count,
-                canContinue: terminal.canContinue,
-                assistantMessageId: finalPayload.assistant_message_id,
-              },
-            };
-          }),
+    const sessionId = activeSessionId;
+    startTask({
+      id: `main-chat-continuation:${sessionId}:${msgId}:${Date.now()}`,
+      ownerKey: `main-chat:${sessionId}`,
+      surface: 'main-chat',
+      query: existingMessage.query || '',
+      targetMessageId: msgId,
+      initialAnswer: existingMessage.content,
+      runner: async ({ signal, appendText, complete }) => {
+        const response = await fetch(`/chat/sessions/${sessionId}/continue-stream`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` },
+          signal,
         });
-        saveChatsToStorage(updated);
-        return updated;
-      });
-    } catch (error: any) {
-      if (error?.name !== 'AbortError') showToast(error?.message || 'The answer was interrupted.');
-      setChats(prev => prev.map(chat => chat.id !== activeSessionId ? chat : {
-        ...chat,
-        messages: chat.messages.map(message => message.id !== msgId ? message : {
-          ...message,
+        if (!response.ok) throw new Error(`Continuation failed with status ${response.status}`);
+        if (!response.body) throw new Error('Streaming response body is unavailable.');
+        const result = await consumeSSEStream(response.body, (payload) => {
+          if (payload.type === 'token') appendText(String(payload.content || ''));
+        });
+        const finalPayload = result.final as any;
+        const terminal = normalizeStreamTerminalState({
+          completionStatus: finalPayload?.completion_status,
+          finishReason: finalPayload?.finish_reason,
+          canContinue: finalPayload?.can_continue,
+          hasAnswer: Boolean(finalPayload?.answer),
+        });
+        complete({
+          ...(finalPayload?.answer ? { answer: finalPayload.answer } : {}),
+          sources: finalPayload?.sources || [],
           details: {
-            ...message.details,
-            completionStatus:
-              error?.name === 'AbortError'
-                ? 'stopped'
-                : receivedContinuationToken
-                  ? 'interrupted'
-                  : message.details?.completionStatus,
-            canContinue: receivedContinuationToken || Boolean(message.details?.canContinue),
+            ...existingMessage.details,
+            chatMode: finalPayload?.chat_mode,
+            finishReason: terminal.finishReason,
+            completionStatus: terminal.completionStatus,
+            continuationCount: finalPayload?.continuation_count,
+            canContinue: terminal.canContinue,
+            assistantMessageId: finalPayload?.assistant_message_id,
           },
-        }),
-      }));
-    } finally {
-      setIsAnswerStreaming(false);
-      setIsGenerating(false);
-      if (abortControllerRef.current === abortController) {
-        abortControllerRef.current = null;
-      }
-    }
+        });
+      },
+    });
   };
 
   // Re-generate specific AI message segment and replace it with updated AI response
   const handleRegenerate = async (msgId: string) => {
     if (isGenerating || !activeSessionId) return;
 
-    let updatedChats = [...chats];
-    const sessionObj = updatedChats.find(s => s.id === activeSessionId);
+    const sessionObj = chats.find(s => s.id === activeSessionId);
     if (!sessionObj) return;
 
-    // Locate indices
     const targetIdx = sessionObj.messages.findIndex(m => m.id === msgId);
     if (targetIdx === -1) return;
 
-    // Get preceding messages up to target assistant message item
     const messageHistory = sessionObj.messages.slice(0, targetIdx);
     if (messageHistory.length === 0) return;
+    const query =
+      [...messageHistory].reverse().find((item) => item.role === 'user')?.content || '';
+    const replacementMessageId = `assistant-regenerate-${Date.now()}`;
+    const replacementMessage: Message = {
+      id: replacementMessageId,
+      role: 'assistant',
+      content: '',
+      timestamp: new Date().toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+      query,
+      sources: [],
+    };
 
-    // Temporarily truncate chat messages to that specific user question setup
-    updatedChats = updatedChats.map(c => {
+    const updatedChats = chats.map(c => {
       if (c.id === activeSessionId) {
         return {
           ...c,
-          messages: messageHistory,
+          messages: [...messageHistory, replacementMessage],
           timeAgo: 'Just now'
         };
       }
@@ -2041,109 +2100,65 @@ export default function ChatApp({ user }: ChatAppProps) {
     });
 
     saveChatsToStorage(updatedChats);
-    setIsGenerating(true);
-    setIsAnswerStreaming(true);
+    showToast('Regenerating answer...');
+    const chatScope = buildChatScope(
+      selectedResources.map((resource) => ({ id: resource.id })),
+    );
+    const sessionId = activeSessionId;
+    startTask({
+      id: `main-chat-regenerate:${sessionId}:${replacementMessageId}`,
+      ownerKey: `main-chat:${sessionId}`,
+      surface: 'main-chat',
+      query,
+      targetMessageId: replacementMessageId,
+      runner: async ({ signal, complete }) => {
+        try {
+          const token = localStorage.getItem('access_token');
+          const response = await fetch('/api/chat', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify({
+              session_id: sessionId,
+              messages: messageHistory,
+              ...chatScope,
+              globe_on: isGlobeOn,
+            }),
+            signal,
+          });
 
-    const abortController = new AbortController();
-    try {
-      abortControllerRef.current = abortController;
+          const data = await response.json().catch(() => ({}));
 
-      showToast('Regenerating campaign recommendation...');
-      const chatScope = buildChatScope(selectedResources.map((resource) => ({ id: resource.id })));
-      const token = localStorage.getItem('access_token');
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-        },
-        body: JSON.stringify({
-          session_id: activeSessionId,
-          messages: messageHistory,
-          ...chatScope,
-          globe_on: isGlobeOn,
-        }),
-        signal: abortController.signal
-      });
+          if (!response.ok) {
+            const detail =
+              typeof data.detail === 'string'
+                ? data.detail
+                : data.detail
+                  ? JSON.stringify(data.detail)
+                  : data.error || 'Server returned an error';
+            throw new Error(detail);
+          }
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        const errMsg = typeof data.detail === 'string'
-          ? data.detail
-          : (data.detail ? JSON.stringify(data.detail) : (data.error || 'Server returned an error'));
-        throw new Error(errMsg);
-      }
-
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: data.content || "Hmm, I couldn't get a refreshed response. Please try again.",
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        sources: data.sources || [],
-        details: buildInitialResponseDetails(
-          data,
-          [...messageHistory].reverse().find((item) => item.role === 'user')?.content || ''
-        ),
-        query: [...messageHistory].reverse().find((item) => item.role === 'user')?.content || ''
-      };
-
-      const finalizedChats = updatedChats.map(c => {
-        if (c.id === activeSessionId) {
-          const finalMsgs = [...c.messages, assistantMessage];
-          return {
-            ...c,
-            messages: finalMsgs,
-            preview: assistantMessage.content.length > 120
-              ? assistantMessage.content.substring(0, 120) + '...'
-              : assistantMessage.content
-          };
+          const answer =
+            data.content ||
+            "Hmm, I couldn't get a refreshed response. Please try again.";
+          complete({
+            answer,
+            sources: data.sources || [],
+            details: buildInitialResponseDetails(
+              data,
+              query,
+            ) as unknown as Record<string, unknown>,
+          });
+          showToast('Answer regenerated successfully!');
+        } finally {
+          playNotificationSound();
         }
-        return c;
-      });
+      },
+    });
 
-      saveChatsToStorage(finalizedChats);
-      showToast('Recommendation updated successfully! ⚡');
-    } catch (e: any) {
-      if (e.name === 'AbortError') {
-        console.log('Generation stopped by user');
-        return;
-      }
-      console.error(e);
-      const msg = e.message || '';
-      if (msg.includes('not configured') || msg.includes('API Key') || msg.includes('Settings')) {
-        showToast('Please configure your AI settings in Settings > AI Models.');
-      } else if (msg.includes('insufficient') || msg.includes('402') || msg.includes('balance') || msg.includes('credits')) {
-        showToast('Your AI provider account has insufficient balance. Please add credits.');
-      } else if (msg.includes('rate limit') || msg.includes('429')) {
-        showToast('Rate limit exceeded. Please wait a moment and try again.');
-      }
-      const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: `Error: ${e.message}`,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      };
-
-      const finalizedChats = updatedChats.map(c => {
-        if (c.id === activeSessionId) {
-          return {
-            ...c,
-            messages: [...c.messages, errorMessage],
-            preview: errorMessage.content
-          };
-        }
-        return c;
-      });
-      saveChatsToStorage(finalizedChats);
-    } finally {
-      setIsAnswerStreaming(false);
-      setIsGenerating(false);
-      if (abortControllerRef.current === abortController) {
-        abortControllerRef.current = null;
-      }
-      playNotificationSound();
-    }
   };
 
   // Duplicate session
@@ -2164,6 +2179,7 @@ export default function ChatApp({ user }: ChatAppProps) {
 
   // Delete session
   const handleDeleteSession = async (id: string) => {
+    clearOwner(`main-chat:${id}`);
     const token = localStorage.getItem('access_token');
     if (token) {
       try {
@@ -2410,6 +2426,7 @@ export default function ChatApp({ user }: ChatAppProps) {
                 session={activeSession}
                 isGenerating={isGenerating}
                 isAnswerStreaming={isAnswerStreaming}
+                backgroundTasks={mainChatTasks}
                 onBack={() => setCurrentView('home')}
                 messagesEndRef={messagesEndRef}
                 onToggleReaction={handleToggleReaction}
@@ -2635,7 +2652,14 @@ export default function ChatApp({ user }: ChatAppProps) {
                 >
                   <button
                     type="button"
-                    onClick={() => setIsGlobeOn(!isGlobeOn)}
+                    onPointerDown={(event) => activateComposerControlFromPointer(
+                      event,
+                      () => setIsGlobeOn((current) => !current),
+                    )}
+                    onClick={(event) => activateComposerControlFromKeyboardClick(
+                      event,
+                      () => setIsGlobeOn((current) => !current),
+                    )}
                     className={`flex items-center justify-center w-10 h-10 rounded-full transition-colors shrink-0 ${isGlobeOn
                       ? 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-[0_0_12px_rgba(79,70,229,0.4)]'
                       : 'bg-gray-50 hover:bg-gray-100 text-gray-500'
@@ -2647,7 +2671,14 @@ export default function ChatApp({ user }: ChatAppProps) {
 
                   <button
                     type="button"
-                    onClick={() => setIsSearchModalOpen(true)}
+                    onPointerDown={(event) => activateComposerControlFromPointer(
+                      event,
+                      () => setIsSearchModalOpen(true),
+                    )}
+                    onClick={(event) => activateComposerControlFromKeyboardClick(
+                      event,
+                      () => setIsSearchModalOpen(true),
+                    )}
                     className={`flex items-center justify-center w-10 h-10 rounded-full transition-colors shrink-0 ${isSearchModalOpen
                       ? 'bg-slate-900 text-white hover:bg-slate-800'
                       : 'bg-gray-50 hover:bg-gray-100 text-gray-500'
@@ -2668,7 +2699,14 @@ export default function ChatApp({ user }: ChatAppProps) {
                   {/* Web Speech Dictation mic activator */}
                   <button
                     type="button"
-                    onClick={toggleListening}
+                    onPointerDown={(event) => activateComposerControlFromPointer(
+                      event,
+                      toggleListening,
+                    )}
+                    onClick={(event) => activateComposerControlFromKeyboardClick(
+                      event,
+                      toggleListening,
+                    )}
                     className={`flex items-center justify-center w-10 h-10 rounded-full transition-all duration-300 shrink-0 select-none relative ${isListening
                       ? 'bg-rose-500 text-white shadow-[0_0_12px_rgba(239,68,68,0.5)]'
                       : 'bg-gray-50 hover:bg-gray-100 text-gray-500'
@@ -3476,6 +3514,7 @@ function ChatView({
   session,
   isGenerating,
   isAnswerStreaming,
+  backgroundTasks,
   onBack,
   messagesEndRef,
   onToggleReaction,
@@ -3493,6 +3532,7 @@ function ChatView({
   session: ChatSession | null;
   isGenerating: boolean;
   isAnswerStreaming: boolean;
+  backgroundTasks: BackgroundAiTask[];
   onBack: () => void;
   messagesEndRef: RefObject<HTMLDivElement | null>;
   onToggleReaction: (msgId: string, type: 'like' | 'dislike') => void;
@@ -3600,8 +3640,9 @@ function ChatView({
                       <TypewriterMessage
                         content={msg.content}
                         msgId={msg.id}
-                        animate={isAnswerStreaming && session.messages[session.messages.length - 1].id === msg.id}
-                        streaming={isAnswerStreaming && session.messages[session.messages.length - 1].id === msg.id}
+                        animate={backgroundTasks.some((task) => task.targetMessageId === msg.id && task.status === 'running')}
+                        streaming={backgroundTasks.some((task) => task.targetMessageId === msg.id && task.status === 'running')}
+                        timelineStartedAt={backgroundTasks.find((task) => task.targetMessageId === msg.id)?.firstContentAt}
                         formatTextContent={(text) => formatTextContent(text, msg.sources)}
                       />
                     </div>

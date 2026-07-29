@@ -4,6 +4,36 @@ All notable changes to My AI Library are documented here. Every release also has
 
 This project follows semantic versioning. Beta builds use the Testing update channel; Stable updates remain disabled until signed Windows packages are available.
 
+## [0.1.0-beta.7] - 2026-07-29
+
+### Added
+
+- Added an authenticated application-level AI task registry shared by Chat, Home Ask AI, Video Ask AI, and Audio Ask AI.
+- Added wall-clock response progress so answers catch up after navigation, workspace-tab changes, minimization, tray hiding, or application focus changes.
+- Added production-renderer release validation for background generation, hidden result panels, explicit cancellation, late subscribers, and wall-clock catch-up.
+
+### Improved
+
+- AI requests now continue while their page or result panel is not visible, provided My AI Library remains running.
+- Adaptive typing is faster while retaining Unicode-safe grapheme animation, Markdown-safe boundaries, reserve protection, and smooth final draining.
+- Completed answers return in their correct final state instead of replaying when the user revisits a page.
+- Globe, attachment, and microphone controls now perform their action on the first pointer interaction even when the composer starts collapsed.
+- The native tray menu now uses the clearer `Open My AI Library` and `Quit My AI Library` actions, with no separator and an updated application tooltip.
+
+### Reliability
+
+- Navigation, tab switching, minimization, hiding to the tray, lost focus, and result-panel dismissal no longer cancel active generation.
+- Stop Generation preserves partial text, while Clear Conversation, logout, and application shutdown cancel and remove the appropriate background tasks.
+- Main Chat reconciles active task snapshots with conversation history; Home, Video, and Audio restore tasks using their surface and resource identities.
+- Independent AI tasks can run on different surfaces while each conversation or resource keeps only one active generation.
+
+### Release safeguards
+
+- Expanded frontend regression coverage for tasks without subscribers, late subscribers, concurrent surfaces, replacement, cancellation, errors, logout cleanup, remount reconciliation, and historical-message behavior.
+- Added packaged production-renderer validation for deterministic AI completion across a simulated page unmount and return.
+- The release workflow validates the complete Beta 6 to Beta 7 version order and exercises update discovery, download, installation, restart, version reporting, and application-data preservation before publication.
+- Beta 7 remains an unsigned Windows x64 prerelease on the Testing channel; Stable updates remain disabled until signed packages are available.
+
 ## [0.1.0-beta.6] - 2026-07-29
 
 ### Added
