@@ -111,7 +111,7 @@ jobs:
 
       - name: Smoke test packaged Electron startup and secure session storage
         shell: pwsh
-        run: ./desktop/scripts/smoke-packaged-app.ps1 -ExecutablePath ./desktop/release/win-unpacked/MyAILibrary.exe
+        run: ./desktop/scripts/smoke-packaged-app.ps1 -ExecutablePath ./desktop/release/win-unpacked/MyAiLibrary.exe
 
       - name: Verify Authenticode and generate checksum
         shell: pwsh
@@ -133,9 +133,9 @@ jobs:
           $tag = "${{ github.ref_name }}"
           gh release view $tag *> $null
           if ($LASTEXITCODE -eq 0) {
-            gh release edit $tag --title "My AI Library $($tag.TrimStart('v'))" --notes-file "$env:RELEASE_NOTES_FILE" --latest
+            gh release edit $tag --title "MyAiLibrary $($tag.TrimStart('v'))" --notes-file "$env:RELEASE_NOTES_FILE" --latest
           } else {
-            gh release create $tag --title "My AI Library $($tag.TrimStart('v'))" --notes-file "$env:RELEASE_NOTES_FILE" --latest --verify-tag
+            gh release create $tag --title "MyAiLibrary $($tag.TrimStart('v'))" --notes-file "$env:RELEASE_NOTES_FILE" --latest --verify-tag
           }
           if ($LASTEXITCODE -ne 0) { throw "Failed to create or update GitHub release $tag." }
           gh release upload $tag desktop/release/MyAI-Library-Setup-*-x64.exe desktop/release/MyAI-Library-Setup-*-x64.exe.blockmap desktop/release/stable.yml desktop/release/SHA256SUMS.txt --clobber

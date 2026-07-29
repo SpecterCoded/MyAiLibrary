@@ -83,7 +83,7 @@ def _verify_directory_is_writable(path: str) -> None:
             pass
     except OSError as exc:
         raise WorkspaceStorageError(
-            f"My AI Library cannot write to this workspace directory: {exc}",
+            f"MyAiLibrary cannot write to this workspace directory: {exc}",
             status_code=400,
         ) from exc
 

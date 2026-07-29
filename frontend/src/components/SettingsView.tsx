@@ -725,7 +725,7 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
         onUserUpdate?.();
         window.dispatchEvent(new Event('workspace-changed'));
       }
-      setSuccessMessage('Workspace and all of its My AI Library data were permanently deleted.');
+      setSuccessMessage('Workspace and all of its MyAiLibrary data were permanently deleted.');
       setTimeout(() => setSuccessMessage(null), 4000);
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : 'The workspace could not be deleted.');
@@ -3743,8 +3743,8 @@ export default function SettingsView({ user, onUserUpdate, theme: propTheme, set
         title="Permanently delete workspace?"
         message={workspaceToDelete
           ? workspaceToDelete.is_app_managed
-            ? `This permanently deletes "${workspaceToDelete.name}", all of its My AI Library data, indexes, generated content, and the app-owned folder at ${workspaceToDelete.path}. This cannot be undone.`
-            : `This permanently deletes all My AI Library data, indexes, generated content, and tracked files for "${workspaceToDelete.name}". The existing folder at ${workspaceToDelete.path} and unrelated personal files will be preserved. This cannot be undone.`
+            ? `This permanently deletes "${workspaceToDelete.name}", all of its MyAiLibrary data, indexes, generated content, and the app-owned folder at ${workspaceToDelete.path}. This cannot be undone.`
+            : `This permanently deletes all MyAiLibrary data, indexes, generated content, and tracked files for "${workspaceToDelete.name}". The existing folder at ${workspaceToDelete.path} and unrelated personal files will be preserved. This cannot be undone.`
           : ''}
         confirmText="Delete workspace"
         cancelText="Keep workspace"

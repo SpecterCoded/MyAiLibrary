@@ -115,7 +115,7 @@ def write_embedded_svg(icon: Image.Image, destination: Path) -> None:
     encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
     destination.write_text(
         "\n".join([
-            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="My AI Library">',
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="MyAiLibrary">',
             f'  <image width="1024" height="1024" href="data:image/png;base64,{encoded}"/>',
             "</svg>",
             "",

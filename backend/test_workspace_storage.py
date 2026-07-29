@@ -220,7 +220,7 @@ class WorkspaceStorageTests(unittest.TestCase):
 
     def test_adopted_workspace_preserves_root_and_unrelated_files(self):
         workspace = Path(self.temp_directory.name) / "adopted"
-        tracked = workspace / "My AI Library" / "Generated"
+        tracked = workspace / "MyAiLibrary" / "Generated"
         unrelated = workspace / "personal"
         tracked.mkdir(parents=True)
         unrelated.mkdir(parents=True)

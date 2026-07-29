@@ -526,7 +526,7 @@ function createTray(): void {
 
   const trayIcon = nativeImage.createFromPath(iconPath)
   tray = new Tray(trayIcon)
-  tray.setToolTip('My AI Library')
+  tray.setToolTip('MyAiLibrary')
   tray.setContextMenu(Menu.buildFromTemplate(buildTrayMenuTemplate({
     open: showMainWindow,
     quit: () => app.quit(),

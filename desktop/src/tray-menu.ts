@@ -9,7 +9,7 @@ export function buildTrayMenuTemplate(
   actions: TrayMenuActions,
 ): MenuItemConstructorOptions[] {
   return [
-    { label: 'Open My AI Library', click: actions.open },
-    { label: 'Quit My AI Library', click: actions.quit },
+    { label: 'Open MyAiLibrary', click: actions.open },
+    { label: 'Quit MyAiLibrary', click: actions.quit },
   ]
 }

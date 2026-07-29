@@ -3,7 +3,7 @@ const test = require('node:test')
 
 const { buildTrayMenuTemplate } = require('../dist/tray-menu.js')
 
-test('tray menu uses the native two-row My AI Library layout', () => {
+test('tray menu uses the native two-row MyAiLibrary layout', () => {
   let opened = 0
   let quit = 0
   const template = buildTrayMenuTemplate({
@@ -12,8 +12,8 @@ test('tray menu uses the native two-row My AI Library layout', () => {
   })
 
   assert.deepEqual(template.map((item) => item.label), [
-    'Open My AI Library',
-    'Quit My AI Library',
+    'Open MyAiLibrary',
+    'Quit MyAiLibrary',
   ])
   assert.equal(template.some((item) => item.type === 'separator'), false)
 

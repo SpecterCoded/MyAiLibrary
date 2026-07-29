@@ -115,7 +115,7 @@ jobs:
         shell: pwsh
         run: |
           ./desktop/scripts/smoke-packaged-app.ps1 `
-            -ExecutablePath ./desktop/release/win-unpacked/MyAILibrary.exe `
+            -ExecutablePath ./desktop/release/win-unpacked/MyAiLibrary.exe `
             -TestWtpModel `
             -EvaluationTimeoutSeconds 1800
 
@@ -164,7 +164,7 @@ jobs:
         run: |
           $tag = "v$env:RELEASE_VERSION"
           $versionParts = $env:RELEASE_VERSION -split "-beta\."
-          $releaseTitle = "My AI Library v$($versionParts[0]) Beta $($versionParts[1])"
+          $releaseTitle = "MyAiLibrary v$($versionParts[0]) Beta $($versionParts[1])"
           gh release view $tag *> $null
           if ($LASTEXITCODE -eq 0) {
             gh release edit $tag --title $releaseTitle --notes-file "$env:RELEASE_NOTES_FILE" --prerelease --draft

@@ -85,7 +85,7 @@ def update_task_progress(task_id: str, progress: int, status: str = None):
 def download_social_profile(task_id: str, url: str, folder_id: str, db_session: Session, current_user: User):
     """
     Downloads profile media from Twitter/Instagram using gallery-dl.
-    Registers downloaded files as resources in My AI Library under the username's folder.
+    Registers downloaded files as resources in MyAiLibrary under the username's folder.
     """
     from main import _get_folder_path
     

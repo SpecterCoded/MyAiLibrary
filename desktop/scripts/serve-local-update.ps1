@@ -21,7 +21,7 @@ if (-not (Test-Path -LiteralPath $pythonPath -PathType Leaf)) {
     throw "Python environment was not found at $pythonPath."
 }
 
-Write-Host "Serving My AI Library engineering update $Version"
+Write-Host "Serving MyAiLibrary engineering update $Version"
 Write-Host "Feed URL: http://127.0.0.1:$Port"
 Write-Host 'Keep this terminal open during the update test. Press Ctrl+C to stop.'
 & $pythonPath -m http.server $Port --bind 127.0.0.1 --directory $releaseDirectory

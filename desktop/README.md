@@ -1,4 +1,4 @@
-# My AI Library Desktop
+# MyAiLibrary Desktop
 
 This package supervises the local FastAPI process and packages the React UI as a Windows x64 Electron application.
 

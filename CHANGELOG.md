@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to My AI Library are documented here. Every release also has detailed, version-specific notes in `desktop/release-notes/`.
+All notable changes to MyAiLibrary are documented here. Every release also has detailed, version-specific notes in `desktop/release-notes/`.
 
 This project follows semantic versioning. Beta builds use the Testing update channel; Stable updates remain disabled until signed Windows packages are available.
 
@@ -14,11 +14,13 @@ This project follows semantic versioning. Beta builds use the Testing update cha
 
 ### Improved
 
-- AI requests now continue while their page or result panel is not visible, provided My AI Library remains running.
+- AI requests now continue while their page or result panel is not visible, provided MyAiLibrary remains running.
 - Adaptive typing is faster while retaining Unicode-safe grapheme animation, Markdown-safe boundaries, reserve protection, and smooth final draining.
 - Completed answers return in their correct final state instead of replaying when the user revisits a page.
 - Globe, attachment, and microphone controls now perform their action on the first pointer interaction even when the composer starts collapsed.
-- The native tray menu now uses the clearer `Open My AI Library` and `Quit My AI Library` actions, with no separator and an updated application tooltip.
+- The native tray menu now uses the clearer `Open MyAiLibrary` and `Quit MyAiLibrary` actions, with no separator and an updated application tooltip.
+- Standardized the visible product, executable, shortcut, splash, installer, and release name as `MyAiLibrary`.
+- Set the Windows installer to the built-in Segoe UI font for reliable, crisp rendering without an external font dependency.
 
 ### Reliability
 
@@ -51,7 +53,7 @@ This project follows semantic versioning. Beta builds use the Testing update cha
 - Hardened workspace schema migration and persistence behavior for existing accounts and registered storage folders.
 - Included the dynamically loaded `skops.io.old` compatibility modules required by packaged WtP/SaT models.
 - Prevented sidebar navigation links and the account avatar from being dragged as links or images.
-- Ensured a newly started development or packaged session removes only stale My AI Library processes it owns instead of accumulating old renderer and backend tasks.
+- Ensured a newly started development or packaged session removes only stale MyAiLibrary processes it owns instead of accumulating old renderer and backend tasks.
 
 ### Release safeguards
 
@@ -79,8 +81,8 @@ This project follows semantic versioning. Beta builds use the Testing update cha
 ### Data safety
 
 - Workspace deletion removes its library records, resources, notes, generated study data, conversations, diagnostics, vector index, tracked files, and app-owned generated directories.
-- If My AI Library created the workspace root, a matching ownership marker is required before the root can be removed.
-- If the user selected an existing folder, its root and unrelated personal files are preserved; only My AI Library-owned data and tracked files are removed.
+- If MyAiLibrary created the workspace root, a matching ownership marker is required before the root can be removed.
+- If the user selected an existing folder, its root and unrelated personal files are preserved; only MyAiLibrary-owned data and tracked files are removed.
 - Deleting the active secondary workspace safely switches the account back to its protected default workspace.
 - Schema migration marks the first existing workspace per account as the protected onboarding workspace without requiring a database reset.
 

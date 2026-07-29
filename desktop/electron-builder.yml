@@ -37,7 +37,7 @@ win:
       arch:
         - x64
   icon: build/icon.ico
-  executableName: MyAILibrary
+  executableName: MyAiLibrary
   verifyUpdateCodeSignature: true
 
 nsis:

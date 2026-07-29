@@ -115,7 +115,7 @@ function Wait-PageTarget {
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     while ([DateTime]::UtcNow -lt $deadline) {
         if ($Process.HasExited) {
-            throw "My AI Library exited before its renderer became available."
+            throw "MyAiLibrary exited before its renderer became available."
         }
         try {
             $targets = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/json" -TimeoutSec 2
@@ -129,7 +129,7 @@ function Wait-PageTarget {
             Start-Sleep -Milliseconds 400
         }
     }
-    throw "My AI Library did not expose a renderer within $TimeoutSeconds seconds."
+    throw "MyAiLibrary did not expose a renderer within $TimeoutSeconds seconds."
 }
 
 function Stop-IsolatedProcesses {
@@ -194,7 +194,7 @@ try {
         throw "Beta 6 isolated installation failed with exit code $($installer.ExitCode)."
     }
 
-    $installedExecutable = Join-Path $installRoot "MyAILibrary.exe"
+    $installedExecutable = Join-Path $installRoot "MyAiLibrary.exe"
     $installedAsar = Join-Path $installRoot "resources\app.asar"
     if (
         -not (Test-Path -LiteralPath $installedExecutable -PathType Leaf) -or

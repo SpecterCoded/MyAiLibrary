@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible problem in My AI Library
+description: Report a reproducible problem in MyAiLibrary
 title: "[Bug]: "
 labels:
   - bug
@@ -7,7 +7,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for helping improve My AI Library.
+        Thanks for helping improve MyAiLibrary.
 
         Before submitting, remove API keys, access tokens, private file contents, and other sensitive information from screenshots and logs.
 
