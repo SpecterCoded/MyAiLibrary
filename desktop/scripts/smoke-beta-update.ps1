@@ -441,12 +441,51 @@ try {
         id = 3
         method = "Runtime.evaluate"
         params = @{
-            expression = "setTimeout(() => void window.desktop.installUpdate(), 100); true"
+            expression = "(() => { void window.desktop.installUpdate(); return true; })()"
             returnByValue = $true
         }
     } -TimeoutSeconds 30
     if ($installResponse.result.exceptionDetails -or $installResponse.result.result.value -ne $true) {
         throw "The updater bridge did not accept the Beta 7 install request."
+    }
+
+    $installState = $null
+    $installStartDeadline = [DateTime]::UtcNow.AddMinutes(3)
+    $installPollId = 10
+    while ([DateTime]::UtcNow -lt $installStartDeadline -and -not $appProcess.HasExited) {
+        Start-Sleep -Seconds 1
+        $installPollId += 1
+        try {
+            $stateResponse = Invoke-CdpCommand -WebSocketUrl $pageTarget.webSocketDebuggerUrl -Message @{
+                id = $installPollId
+                method = "Runtime.evaluate"
+                params = @{
+                    expression = "(async () => await window.desktop.getUpdateState())()"
+                    awaitPromise = $true
+                    returnByValue = $true
+                }
+            } -TimeoutSeconds 10
+            if (-not $stateResponse.result.exceptionDetails) {
+                $installState = $stateResponse.result.result.value
+                if ($installState.status -eq "error") {
+                    $summary = $installState | ConvertTo-Json -Depth 8 -Compress
+                    throw "Beta 6 rejected the install during its pre-update safety gate. State: $summary"
+                }
+            }
+        } catch {
+            if (-not $appProcess.HasExited -and $_.Exception.Message -like "Beta 6 rejected*") {
+                throw
+            }
+            # The DevTools socket disappears as Electron exits for NSIS.
+        }
+    }
+    if (-not $appProcess.HasExited) {
+        $summary = if ($installState) {
+            $installState | ConvertTo-Json -Depth 8 -Compress
+        } else {
+            "unavailable"
+        }
+        throw "Beta 6 did not exit to start the installer. Last updater state: $summary"
     }
 
     $updateDeadline = [DateTime]::UtcNow.AddMinutes(8)
@@ -510,6 +549,15 @@ try {
     Write-Host "Beta 6 to Beta 7 discovery, download, ready state, installation, restart, version, and data-preservation checks passed."
     $succeeded = $true
 } catch {
+    $updaterLog = Join-Path $localAppData "MyAILibrary\logs\updater.log"
+    if (Test-Path -LiteralPath $updaterLog -PathType Leaf) {
+        Write-Warning "Sanitized updater log tail:"
+        Get-Content -LiteralPath $updaterLog -Tail 120 |
+            ForEach-Object {
+                $_ -replace '(?i)(?:ghp|github_pat|token)[-_A-Za-z0-9]+', '[redacted]'
+            } |
+            Write-Warning
+    }
     Write-Warning "Update smoke-test logs were retained at $testRoot"
     throw
 } finally {
