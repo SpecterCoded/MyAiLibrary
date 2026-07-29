@@ -19,7 +19,7 @@ This project follows semantic versioning. Beta builds use the Testing update cha
 - Completed answers return in their correct final state instead of replaying when the user revisits a page.
 - Globe, attachment, and microphone controls now perform their action on the first pointer interaction even when the composer starts collapsed.
 - The native tray menu now uses the clearer `Open MyAiLibrary` and `Quit MyAiLibrary` actions, with no separator and an updated application tooltip.
-- Standardized the visible product, executable, shortcut, splash, installer, and release name as `MyAiLibrary`.
+- Standardized the visible product, shortcut, splash, installer, and release name as `MyAiLibrary`.
 - Set the Windows installer to the built-in Segoe UI font for reliable, crisp rendering without an external font dependency.
 
 ### Reliability

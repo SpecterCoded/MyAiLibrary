@@ -247,7 +247,7 @@ try {
         throw "Beta 6 isolated installation failed with exit code $($installer.ExitCode)."
     }
 
-    $installedExecutable = Join-Path $installRoot "MyAiLibrary.exe"
+    $installedExecutable = Join-Path $installRoot "MyAILibrary.exe"
     $installedAsar = Join-Path $installRoot "resources\app.asar"
     if (
         -not (Test-Path -LiteralPath $installedExecutable -PathType Leaf) -or

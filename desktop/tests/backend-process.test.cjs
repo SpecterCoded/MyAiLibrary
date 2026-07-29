@@ -9,7 +9,7 @@ const {
 } = require('../dist/backend-process.js')
 
 test('packaged backend ownership requires both exact executable and data directory', () => {
-  const expectedExecutable = String.raw`C:\Program Files\MyAiLibrary\resources\backend\myailibrary-backend.exe`
+  const expectedExecutable = String.raw`C:\Program Files\MyAILibrary\resources\backend\myailibrary-backend.exe`
   const expectedDataDir = String.raw`C:\Users\Example\AppData\Local\MyAILibrary`
   const owned = {
     processId: 120,
@@ -29,7 +29,7 @@ test('packaged backend ownership requires both exact executable and data directo
   )
   assert.equal(
     isOwnedBackendProcess(
-      { ...owned, commandLine: owned.commandLine.replace('MyAILibrary', 'OtherLibrary') },
+      { ...owned, commandLine: owned.commandLine.replace(expectedDataDir, String.raw`D:\OtherLibrary`) },
       expectedExecutable,
       expectedDataDir,
     ),

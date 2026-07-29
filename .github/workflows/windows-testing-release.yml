@@ -115,7 +115,7 @@ jobs:
         shell: pwsh
         run: |
           ./desktop/scripts/smoke-packaged-app.ps1 `
-            -ExecutablePath ./desktop/release/win-unpacked/MyAiLibrary.exe `
+            -ExecutablePath ./desktop/release/win-unpacked/MyAILibrary.exe `
             -TestWtpModel `
             -EvaluationTimeoutSeconds 1800
 

@@ -111,7 +111,7 @@ jobs:
 
       - name: Smoke test packaged Electron startup and secure session storage
         shell: pwsh
-        run: ./desktop/scripts/smoke-packaged-app.ps1 -ExecutablePath ./desktop/release/win-unpacked/MyAiLibrary.exe
+        run: ./desktop/scripts/smoke-packaged-app.ps1 -ExecutablePath ./desktop/release/win-unpacked/MyAILibrary.exe
 
       - name: Verify Authenticode and generate checksum
         shell: pwsh

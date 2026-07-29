@@ -84,7 +84,7 @@ try {
         throw "NSIS silent installation failed with exit code $($installer.ExitCode)."
     }
 
-    $installedExecutable = Join-Path $installRoot "MyAiLibrary.exe"
+    $installedExecutable = Join-Path $installRoot "MyAILibrary.exe"
     if (-not (Test-Path -LiteralPath $installedExecutable -PathType Leaf)) {
         throw "The installed application executable was not found at $installedExecutable."
     }

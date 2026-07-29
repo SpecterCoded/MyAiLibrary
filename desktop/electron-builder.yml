@@ -37,7 +37,9 @@ win:
       arch:
         - x64
   icon: build/icon.ico
-  executableName: MyAiLibrary
+  # Keep the legacy internal filename so existing Beta 6 installations can be
+  # replaced in place. Windows displays productName (MyAiLibrary) to users.
+  executableName: MyAILibrary
   verifyUpdateCodeSignature: true
 
 nsis:
