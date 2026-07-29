@@ -160,7 +160,9 @@ try {
     if (-not (Test-Path -LiteralPath $asarTool -PathType Leaf)) {
         throw "The Electron ASAR tool is missing. Run npm ci in desktop first."
     }
-    $checksumText = [string](Invoke-WebRequest -Uri $previousChecksumUrl -UseBasicParsing -TimeoutSec 60).Content
+    $checksumPath = Join-Path $cacheRoot "SHA256SUMS-$PreviousVersion.txt"
+    Invoke-WebRequest -Uri $previousChecksumUrl -OutFile $checksumPath -TimeoutSec 60
+    $checksumText = Get-Content -LiteralPath $checksumPath -Raw -Encoding utf8
     $checksumPattern = "(?im)^(?<hash>[0-9a-f]{64})\s+\*?MyAI-Library-Setup-$([Regex]::Escape($PreviousVersion))-x64\.exe\s*$"
     $checksumMatch = [Regex]::Match($checksumText, $checksumPattern)
     if (-not $checksumMatch.Success) {
