@@ -4,6 +4,32 @@ All notable changes to My AI Library are documented here. Every release also has
 
 This project follows semantic versioning. Beta builds use the Testing update channel; Stable updates remain disabled until signed Windows packages are available.
 
+## [0.1.0-beta.6] - 2026-07-29
+
+### Added
+
+- Introduced the final frameless book identity across the Windows executable, installer, system tray, splash screen, loading view, sidebar, and browser favicon.
+- Added adaptive AI response animation shared by Chat, Home Ask AI, Video Ask AI, and Audio Ask AI.
+- Added packaged Windows validation for WtP/Canine model download, loading, and sentence segmentation.
+- Added an isolated NSIS installation smoke test and a non-publishing GitHub preflight workflow.
+
+### Fixed
+
+- Removed visible pauses between streamed AI paragraphs by forwarding provider chunks immediately and adapting the typewriter speed to the live text reserve.
+- Stopped complete provider streams from being incorrectly labelled as interrupted when the provider ends cleanly without a finish reason.
+- Preserved distinct completed, stopped, length-limited, and genuinely interrupted response states across new answers and continuations.
+- Hardened workspace schema migration and persistence behavior for existing accounts and registered storage folders.
+- Included the dynamically loaded `skops.io.old` compatibility modules required by packaged WtP/SaT models.
+- Prevented sidebar navigation links and the account avatar from being dragged as links or images.
+- Ensured a newly started development or packaged session removes only stale My AI Library processes it owns instead of accumulating old renderer and backend tasks.
+
+### Release safeguards
+
+- Expanded frontend regression coverage for uneven token arrival, Markdown-safe animation boundaries, final draining, historical messages, and stream completion classification.
+- Expanded backend coverage for clean provider EOF, explicit completion, empty streams, provider failures, continuation behavior, and exact final-then-done ordering.
+- Added desktop process-lifecycle tests for graceful shutdown, ownership-scoped cleanup, and process-tree fallback behavior.
+- The release pipeline now performs a full GitHub-hosted preflight before tagging, verifies packaging resources, tests the unpacked and installed applications, validates Beta 5 to Beta 6 update metadata, and publishes only after every gate succeeds.
+
 ## [0.1.0-beta.5] - 2026-07-28
 
 ### Added

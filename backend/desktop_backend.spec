@@ -10,6 +10,7 @@ for package in (
     "chromadb",
     "huggingface_hub",
     "sentence_transformers",
+    "skops",
     "transformers",
     "wtpsplit",
     "youtube_transcript_api",
@@ -17,6 +18,11 @@ for package in (
 ):
     hiddenimports += collect_submodules(package)
     datas += collect_data_files(package)
+
+# skops.io.old is a PEP 420 namespace package, so collecting the skops root
+# does not discover its compatibility deserializers. WTP loads these modules
+# dynamically when reading the packaged SaT model.
+hiddenimports += collect_submodules("skops.io.old")
 
 # Passlib resolves password hash handlers by registry name at runtime.
 hiddenimports += collect_submodules("passlib.handlers")

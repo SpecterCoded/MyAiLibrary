@@ -86,6 +86,61 @@ class ChatStreamReliabilityTests(unittest.TestCase):
         self.assertEqual(state["completion_status"], "blocked")
         self.assertFalse(state["can_continue"])
 
+    def test_clean_provider_eof_with_output_is_complete(self):
+        output, state, _ = self._generate(
+            [[_chunk("A complete answer without a finish reason.")]]
+        )
+        self.assertEqual(output, "A complete answer without a finish reason.")
+        self.assertEqual(state["finish_reason"], "provider_eof")
+        self.assertEqual(state["completion_status"], "complete")
+        self.assertFalse(state["can_continue"])
+
+    def test_literal_unknown_finish_reason_on_clean_eof_is_complete(self):
+        output, state, _ = self._generate(
+            [[
+                _chunk("A complete answer with an unknown sentinel."),
+                _chunk(finish_reason="unknown"),
+            ]]
+        )
+        self.assertEqual(output, "A complete answer with an unknown sentinel.")
+        self.assertEqual(state["finish_reason"], "provider_eof")
+        self.assertEqual(state["completion_status"], "complete")
+        self.assertFalse(state["can_continue"])
+
+    def test_clean_empty_provider_eof_is_an_error(self):
+        with self.assertRaisesRegex(RuntimeError, "empty response"):
+            self._generate([[]])
+
+    def test_transport_failure_preserves_interrupted_state(self):
+        state = {}
+
+        def broken_stream():
+            yield _chunk("Partial answer")
+            raise ConnectionError("provider connection closed")
+
+        with (
+            patch.object(
+                llm_service,
+                "_create_chat_completion",
+                return_value=(broken_stream(), "test-model"),
+            ),
+            patch.object(llm_service, "record_stream_completion_usage", return_value={}),
+        ):
+            with self.assertRaises(RuntimeError):
+                "".join(
+                    llm_service.generate_answer_stream(
+                        "PRIVATE QUESTION",
+                        "PRIVATE CONTEXT",
+                        user_id="user-1",
+                        resource_id="resource-1",
+                        stream_state=state,
+                    )
+                )
+
+        self.assertEqual(state["completion_status"], "interrupted")
+        self.assertEqual(state["finish_reason"], "unknown")
+        self.assertTrue(state["can_continue"])
+        self.assertEqual(state["output_character_count"], len("Partial answer"))
 
 if __name__ == "__main__":
     unittest.main()

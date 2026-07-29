@@ -1067,8 +1067,6 @@ def run_rag_pipeline_stream(
             ["query_rewrite", "semantic_cache_lookup", "query_routing", "retrieval_orchestration"],
             "globe_mode",
         )
-        buffer = ""
-        THRESHOLD = 30
         with trace.phase("answer_generation", {"mode": "globe"}):
             for token in generate_answer_stream(
                 question=question,
@@ -1085,12 +1083,10 @@ def run_rag_pipeline_stream(
                 stream_state=stream_state,
             ):
                 full_answer += token
-                buffer += token
-                if len(buffer) >= THRESHOLD or re.search(r'[.!?](\s|$)', buffer):
-                    yield {"type": "token", "content": buffer}
-                    buffer = ""
-            if buffer:
-                yield {"type": "token", "content": buffer}
+                # Preserve the provider's natural cadence. Presentation
+                # smoothing belongs to the shared frontend typewriter; an
+                # additional server-side buffer creates visible bursts.
+                yield {"type": "token", "content": token}
         with trace.phase("response_normalization"):
             full_answer = normalize_response_markup(full_answer)
         _skip_trace_phases(
@@ -1352,9 +1348,6 @@ def run_rag_pipeline_stream(
             "context": context
         }
 
-        buffer = ""
-        THRESHOLD = 30
-
         with trace.phase("answer_generation", {"chunkCount": len(reranked_results)}):
             stream_state = {}
             answer_stream = retrieval_agent.execute_workflow_node(
@@ -1369,16 +1362,9 @@ def run_rag_pipeline_stream(
             )
             for token in answer_stream:
                 full_answer += token
-                buffer += token
-
-                if len(buffer) >= THRESHOLD or re.search(r'[.!?](\s|$)', buffer):
-                    yield {"type": "token", "content": buffer}
-                    buffer = ""
+                yield {"type": "token", "content": token}
 
         execution_report.modules_executed.append("answer_generation")
-
-        if buffer:
-            yield {"type": "token", "content": buffer}
         with trace.phase("citation_enforcement", {"chunkCount": len(reranked_results)}):
             full_answer = enforce_inline_chunk_citations(full_answer, reranked_results)
         with trace.phase("response_normalization"):

@@ -20,6 +20,10 @@ import InlineCitationContent from '../rag/InlineCitationContent';
 import type { RAGResponseDetails, RAGSource } from '../rag/types';
 import TypewriterMessage from './TypewriterMessage';
 import { consumeSSEStream } from '../../lib/sseStream';
+import {
+  isConfirmedPartialInterruption,
+  normalizeStreamTerminalState,
+} from '../../lib/streamCompletion';
 
 
 // --- TYPES ---
@@ -1816,6 +1820,12 @@ export default function ChatApp({ user }: ChatAppProps) {
           const finalContent = finalPayload?.answer || c.messages.find(m => m.id === aiMsgId)?.content || "";
           const msgs = c.messages.map(m => {
             if (m.id !== aiMsgId) return m;
+            const terminal = normalizeStreamTerminalState({
+              completionStatus: finalPayload?.completion_status,
+              finishReason: finalPayload?.finish_reason,
+              canContinue: finalPayload?.can_continue,
+              hasAnswer: Boolean(finalContent),
+            });
             return {
               ...m,
               content: finalContent,
@@ -1831,10 +1841,10 @@ export default function ChatApp({ user }: ChatAppProps) {
                 modulesExecuted: finalPayload.modules_executed,
                 reasoning: finalPayload.reasoning,
                 chatMode: finalPayload.chat_mode,
-                finishReason: finalPayload.finish_reason || 'stop',
-                completionStatus: finalPayload.completion_status || 'complete',
+                finishReason: terminal.finishReason,
+                completionStatus: terminal.completionStatus,
                 continuationCount: finalPayload.continuation_count,
-                canContinue: finalPayload.can_continue,
+                canContinue: terminal.canContinue,
                 assistantMessageId: finalPayload.assistant_message_id,
               } : m.details,
             };
@@ -1883,10 +1893,15 @@ export default function ChatApp({ user }: ChatAppProps) {
           if (c.id !== sessionId) return c;
           const msgs = c.messages.map(m => {
             if (m.id !== aiMsgId) return m;
+            const hasPartialAnswer = Boolean(m.content);
             return {
               ...m,
               content: m.content || `Error: ${e.message}`,
-              details: { ...m.details, completionStatus: 'interrupted', canContinue: Boolean(m.content) },
+              details: {
+                ...m.details,
+                completionStatus: hasPartialAnswer ? 'interrupted' : 'error',
+                canContinue: hasPartialAnswer,
+              },
             };
           });
           const preserved = msgs.find(m => m.id === aiMsgId)?.content || `Error: ${e.message}`;
@@ -1915,6 +1930,7 @@ export default function ChatApp({ user }: ChatAppProps) {
     setIsAnswerStreaming(true);
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
+    let receivedContinuationToken = false;
     try {
       const response = await fetch(`/chat/sessions/${activeSessionId}/continue-stream`, {
         method: 'POST',
@@ -1928,6 +1944,7 @@ export default function ChatApp({ user }: ChatAppProps) {
           setIsAnswerStreaming(false);
         }
         if (payload.type !== 'token') return;
+        receivedContinuationToken = true;
         setChats(prev => prev.map(chat => chat.id !== activeSessionId ? chat : {
           ...chat,
           messages: chat.messages.map(message => message.id !== msgId ? message : {
@@ -1940,19 +1957,29 @@ export default function ChatApp({ user }: ChatAppProps) {
       setChats(prev => {
         const updated = prev.map(chat => chat.id !== activeSessionId ? chat : {
           ...chat,
-          messages: chat.messages.map(message => message.id !== msgId ? message : {
-            ...message,
-            content: finalPayload.answer || message.content,
-            sources: finalPayload.sources || message.sources,
-            details: {
-              ...message.details,
-              chatMode: finalPayload.chat_mode,
-              finishReason: finalPayload.finish_reason || 'stop',
-              completionStatus: finalPayload.completion_status || 'complete',
-              continuationCount: finalPayload.continuation_count,
-              canContinue: Boolean(finalPayload.can_continue),
-              assistantMessageId: finalPayload.assistant_message_id,
-            },
+          messages: chat.messages.map(message => {
+            if (message.id !== msgId) return message;
+            const content = finalPayload.answer || message.content;
+            const terminal = normalizeStreamTerminalState({
+              completionStatus: finalPayload.completion_status,
+              finishReason: finalPayload.finish_reason,
+              canContinue: finalPayload.can_continue,
+              hasAnswer: Boolean(content),
+            });
+            return {
+              ...message,
+              content,
+              sources: finalPayload.sources || message.sources,
+              details: {
+                ...message.details,
+                chatMode: finalPayload.chat_mode,
+                finishReason: terminal.finishReason,
+                completionStatus: terminal.completionStatus,
+                continuationCount: finalPayload.continuation_count,
+                canContinue: terminal.canContinue,
+                assistantMessageId: finalPayload.assistant_message_id,
+              },
+            };
           }),
         });
         saveChatsToStorage(updated);
@@ -1966,8 +1993,13 @@ export default function ChatApp({ user }: ChatAppProps) {
           ...message,
           details: {
             ...message.details,
-            completionStatus: error?.name === 'AbortError' ? 'stopped' : 'interrupted',
-            canContinue: true,
+            completionStatus:
+              error?.name === 'AbortError'
+                ? 'stopped'
+                : receivedContinuationToken
+                  ? 'interrupted'
+                  : message.details?.completionStatus,
+            canContinue: receivedContinuationToken || Boolean(message.details?.canContinue),
           },
         }),
       }));
@@ -3568,13 +3600,14 @@ function ChatView({
                       <TypewriterMessage
                         content={msg.content}
                         msgId={msg.id}
-                        isLatest={isAnswerStreaming && session.messages[session.messages.length - 1].id === msg.id}
+                        animate={isAnswerStreaming && session.messages[session.messages.length - 1].id === msg.id}
+                        streaming={isAnswerStreaming && session.messages[session.messages.length - 1].id === msg.id}
                         formatTextContent={(text) => formatTextContent(text, msg.sources)}
                       />
                     </div>
-                    {(msg.details?.completionStatus === 'interrupted' || msg.details?.completionStatus === 'stopped') && (
+                    {(isConfirmedPartialInterruption(msg.details) || msg.details?.completionStatus === 'stopped') && (
                       <p className={`mt-3 text-xs font-medium ${isDarkMode ? 'text-amber-300/80' : 'text-amber-600'}`}>
-                        {msg.details.completionStatus === 'stopped' ? 'Answer stopped' : 'Answer interrupted'} — partial response preserved.
+                        {msg.details?.completionStatus === 'stopped' ? 'Answer stopped' : 'Answer interrupted'} — partial response preserved.
                       </p>
                     )}
 

@@ -14,6 +14,13 @@ import {
 export type BackendState = 'starting' | 'ready' | 'stopping' | 'stopped' | 'failed'
 type BackendChild = ChildProcessByStdio<null, Readable, Readable>
 
+export interface WindowsProcessInfo {
+  processId: number
+  parentProcessId: number
+  executablePath: string
+  commandLine: string
+}
+
 export interface BackendRuntime {
   origin: string
   token: string
@@ -32,6 +39,7 @@ const STRUCTURED_EVENT_PREFIX = 'MYAI_EVENT '
 const RAW_LOG_MAX_BYTES = 20 * 1024 * 1024
 const RAW_LOG_GENERATIONS = 5
 const ANSI_ESCAPE_PATTERN = /\u001b\[[0-?]*[ -/]*[@-~]/g
+const backendStopOperations = new WeakMap<BackendChild, Promise<void>>()
 
 function rotateRawBackendLog(logPath: string): void {
   if (!existsSync(logPath)) return
@@ -164,33 +172,85 @@ function runWindowsCommand(command: string, args: string[]): Promise<{ stdout: s
   })
 }
 
-async function findListeningPids(port: number): Promise<number[]> {
+function normalizedWindowsText(value: string): string {
+  return value.replace(/\//g, '\\').replace(/\\+/g, '\\').toLocaleLowerCase('en-US')
+}
+
+function commandLinePathArgument(commandLine: string, argumentName: string): string | null {
+  const normalized = normalizedWindowsText(commandLine)
+  const marker = `${argumentName.toLocaleLowerCase('en-US')} `
+  const markerIndex = normalized.indexOf(marker)
+  if (markerIndex < 0) return null
+  const valueStart = markerIndex + marker.length
+  if (normalized[valueStart] === '"') {
+    const valueEnd = normalized.indexOf('"', valueStart + 1)
+    return valueEnd < 0 ? null : normalized.slice(valueStart + 1, valueEnd)
+  }
+  return normalized.slice(valueStart).split(/\s/, 1)[0] ?? null
+}
+
+export function isOwnedBackendProcess(
+  processInfo: WindowsProcessInfo,
+  expectedExecutable: string,
+  expectedDataDir: string,
+  developmentEntryPath?: string,
+): boolean {
+  if (!Number.isFinite(processInfo.processId) || processInfo.processId <= 0 || processInfo.processId === process.pid) {
+    return false
+  }
+
+  const dataDir = normalizedWindowsText(expectedDataDir)
+  const commandLine = normalizedWindowsText(processInfo.commandLine)
+  if (!commandLine || commandLinePathArgument(processInfo.commandLine, '--data-dir') !== dataDir) return false
+
+  if (developmentEntryPath) {
+    return commandLine.includes(normalizedWindowsText(developmentEntryPath))
+  }
+
+  const executable = normalizedWindowsText(expectedExecutable)
+  const actualExecutable = normalizedWindowsText(processInfo.executablePath)
+  return actualExecutable === executable
+}
+
+export function rootOwnedProcessIds(processes: WindowsProcessInfo[]): number[] {
+  const ownedIds = new Set(processes.map((item) => item.processId))
+  return processes
+    .filter((item) => !ownedIds.has(item.parentProcessId))
+    .map((item) => item.processId)
+}
+
+async function listWindowsBackendCandidates(development: boolean): Promise<WindowsProcessInfo[]> {
   if (process.platform !== 'win32') return []
-
+  const processFilter = development
+    ? "Name = 'python.exe' OR Name = 'pythonw.exe'"
+    : "Name = 'myailibrary-backend.exe'"
+  const script = [
+    '$ErrorActionPreference = "Stop"',
+    `$items = @(Get-CimInstance Win32_Process -Filter "${processFilter}" | Select-Object ProcessId, ParentProcessId, ExecutablePath, CommandLine)`,
+    '$items | ConvertTo-Json -Compress',
+  ].join('; ')
   try {
-    const { stdout } = await runWindowsCommand('netstat.exe', ['-ano', '-p', 'tcp'])
-    const pids = new Set<number>()
-
-    for (const line of stdout.split(/\r?\n/)) {
-      if (!line.includes('LISTENING')) continue
-      const columns = line.trim().split(/\s+/)
-      if (columns.length < 5) continue
-
-      const localAddress = columns[1] ?? ''
-      const pid = Number(columns[4])
-      if (!Number.isFinite(pid) || pid <= 0 || pid === process.pid) continue
-
-      if (
-        localAddress === `127.0.0.1:${port}` ||
-        localAddress === `0.0.0.0:${port}` ||
-        localAddress === `[::]:${port}` ||
-        localAddress.endsWith(`:${port}`)
-      ) {
-        pids.add(pid)
-      }
-    }
-
-    return [...pids]
+    const { stdout } = await runWindowsCommand('powershell.exe', [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      script,
+    ])
+    const parsed = JSON.parse(stdout || '[]') as unknown
+    const items = Array.isArray(parsed) ? parsed : parsed ? [parsed] : []
+    return items.flatMap((item): WindowsProcessInfo[] => {
+      if (!item || typeof item !== 'object') return []
+      const candidate = item as Record<string, unknown>
+      const processId = Number(candidate.ProcessId)
+      const parentProcessId = Number(candidate.ParentProcessId)
+      if (!Number.isFinite(processId) || !Number.isFinite(parentProcessId)) return []
+      return [{
+        processId,
+        parentProcessId,
+        executablePath: typeof candidate.ExecutablePath === 'string' ? candidate.ExecutablePath : '',
+        commandLine: typeof candidate.CommandLine === 'string' ? candidate.CommandLine : '',
+      }]
+    })
   } catch {
     return []
   }
@@ -216,37 +276,24 @@ async function stopWindowsProcessTree(pid: number): Promise<void> {
   })
 }
 
-async function stopPackagedBackendOrphans(): Promise<void> {
+async function cleanupStaleBackendBeforeStart(
+  expectedExecutable: string,
+  expectedDataDir: string,
+  developmentEntryPath?: string,
+): Promise<void> {
   if (process.platform !== 'win32') return
 
-  await new Promise<void>((resolve) => {
-    const killer = spawn('taskkill.exe', ['/IM', 'myailibrary-backend.exe', '/T', '/F'], {
-      windowsHide: true,
-      stdio: 'ignore',
-    })
-    const timer = setTimeout(resolve, 5_000)
-    killer.once('error', () => {
-      clearTimeout(timer)
-      resolve()
-    })
-    killer.once('exit', () => {
-      clearTimeout(timer)
-      resolve()
-    })
-  })
-}
-
-async function cleanupStaleBackendBeforeStart(): Promise<void> {
-  if (process.platform !== 'win32') return
-
-  if (app.isPackaged) {
-    await stopPackagedBackendOrphans()
-    return
-  }
-
-  for (const pid of await findListeningPids(8000)) {
+  const allProcesses = await listWindowsBackendCandidates(Boolean(developmentEntryPath))
+  const ownedProcesses = allProcesses.filter((item) => isOwnedBackendProcess(
+    item,
+    expectedExecutable,
+    expectedDataDir,
+    developmentEntryPath,
+  ))
+  for (const pid of rootOwnedProcessIds(ownedProcesses)) {
     await stopWindowsProcessTree(pid)
   }
+
 }
 
 async function waitForHealth(origin: string, token: string, child: BackendChild): Promise<void> {
@@ -280,15 +327,12 @@ export async function startBackend(options: BackendStartOptions): Promise<Backen
   const logPath = path.join(logDir, 'backend.log')
   rotateRawBackendLog(logPath)
   if (!existsSync(logPath)) writeFileSync(logPath, '', 'utf8')
-  await cleanupStaleBackendBeforeStart()
-  const port = await reservePort(app.isPackaged ? undefined : 8000)
-  const origin = `http://127.0.0.1:${port}`
-
   const uiDir = app.isPackaged ? path.join(process.resourcesPath, 'ui') : ''
   const ffmpegDir = app.isPackaged ? path.join(process.resourcesPath, 'ffmpeg') : ''
   let executable: string
   let args: string[]
   let cwd: string
+  let developmentEntryPath: string | undefined
 
   if (app.isPackaged) {
     executable = path.join(process.resourcesPath, 'backend', 'myailibrary-backend.exe')
@@ -297,13 +341,18 @@ export async function startBackend(options: BackendStartOptions): Promise<Backen
   } else {
     const projectRoot = path.resolve(__dirname, '..', '..')
     executable = path.join(projectRoot, 'backend', 'venv', 'Scripts', 'python.exe')
-    args = [path.join(projectRoot, 'backend', 'desktop_entry.py')]
+    developmentEntryPath = path.join(projectRoot, 'backend', 'desktop_entry.py')
+    args = [developmentEntryPath]
     cwd = path.join(projectRoot, 'backend')
   }
 
   if (!existsSync(executable)) {
     throw new Error(`Backend executable was not found: ${executable}`)
   }
+
+  await cleanupStaleBackendBeforeStart(executable, options.dataDir, developmentEntryPath)
+  const port = await reservePort(app.isPackaged ? undefined : 8000)
+  const origin = `http://127.0.0.1:${port}`
 
   args.push(
     '--port', String(port),
@@ -360,12 +409,30 @@ export async function startBackend(options: BackendStartOptions): Promise<Backen
     return { origin, token: options.token, process: child, logPath }
   } catch (error) {
     options.onState('failed', error instanceof Error ? error.message : String(error))
-    if (child.exitCode === null) child.kill()
+    if (child.exitCode === null && child.pid) {
+      if (process.platform === 'win32') await stopWindowsProcessTree(child.pid)
+      else child.kill('SIGKILL')
+    }
     throw error
   }
 }
 
-export async function stopBackend(runtime: BackendRuntime | null, onState: BackendStartOptions['onState']): Promise<void> {
+async function waitForBackendExit(processToWaitFor: BackendChild, timeoutMs: number): Promise<boolean> {
+  if (processToWaitFor.exitCode !== null) return true
+  return await new Promise<boolean>((resolve) => {
+    const timer = setTimeout(() => {
+      processToWaitFor.removeListener('exit', onExit)
+      resolve(false)
+    }, timeoutMs)
+    const onExit = () => {
+      clearTimeout(timer)
+      resolve(true)
+    }
+    processToWaitFor.once('exit', onExit)
+  })
+}
+
+async function stopBackendOnce(runtime: BackendRuntime, onState: BackendStartOptions['onState']): Promise<void> {
   if (!runtime || runtime.process.exitCode !== null) return
   onState('stopping', 'Stopping local AI service...')
   try {
@@ -378,34 +445,26 @@ export async function stopBackend(runtime: BackendRuntime | null, onState: Backe
     // The fallback below handles an unresponsive backend.
   }
 
-  const exited = await new Promise<boolean>((resolve) => {
-    const timer = setTimeout(() => resolve(false), 4_000)
-    runtime.process.once('exit', () => {
-      clearTimeout(timer)
-      resolve(true)
-    })
-  })
+  const exited = await waitForBackendExit(runtime.process, 4_000)
 
   if (!exited && runtime.process.exitCode === null) {
     if (process.platform === 'win32' && runtime.process.pid) {
-      await new Promise<void>((resolve) => {
-        const killer = spawn('taskkill.exe', ['/PID', String(runtime.process.pid), '/T', '/F'], {
-          windowsHide: true,
-          stdio: 'ignore',
-        })
-        const timer = setTimeout(resolve, 5_000)
-        killer.once('error', () => {
-          clearTimeout(timer)
-          resolve()
-        })
-        killer.once('exit', () => {
-          clearTimeout(timer)
-          resolve()
-        })
-      })
+      await stopWindowsProcessTree(runtime.process.pid)
     } else {
       runtime.process.kill('SIGKILL')
     }
+    await waitForBackendExit(runtime.process, 2_000)
   }
   onState('stopped', 'Local AI service stopped.')
+}
+
+export async function stopBackend(runtime: BackendRuntime | null, onState: BackendStartOptions['onState']): Promise<void> {
+  if (!runtime || runtime.process.exitCode !== null) return
+  const existingOperation = backendStopOperations.get(runtime.process)
+  if (existingOperation) return existingOperation
+
+  const operation = stopBackendOnce(runtime, onState)
+    .finally(() => backendStopOperations.delete(runtime.process))
+  backendStopOperations.set(runtime.process, operation)
+  return operation
 }

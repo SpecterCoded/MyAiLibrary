@@ -18,6 +18,7 @@ from sqlalchemy.engine import Engine
 
 LEGACY_SCHEMA_VERSION = "0001_legacy_schema"
 SEMANTIC_CACHE_OWNERSHIP_VERSION = "0002_semantic_cache_ownership"
+WORKSPACE_STORAGE_LIFECYCLE_VERSION = "0003_workspace_storage_lifecycle"
 
 
 def _sha256(path: Path) -> str:

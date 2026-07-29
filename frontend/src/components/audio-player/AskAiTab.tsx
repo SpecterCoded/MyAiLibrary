@@ -7,6 +7,10 @@ import TypewriterMessage from "../chat/TypewriterMessage";
 import { SavedContentLoader, SavedContentReveal, holdSavedContentLoader } from "../common/SavedContentLoader";
 import type { RAGResponseDetails } from "../rag/types";
 import { consumeSSEStream } from "../../lib/sseStream";
+import {
+  isConfirmedPartialInterruption,
+  normalizeStreamTerminalState,
+} from "../../lib/streamCompletion";
 
 interface AskAiTabProps {
   isActive?: boolean;
@@ -97,25 +101,33 @@ export default function AskAiTab({ isActive, initialQuestion, onClearInitialQues
     return indexed?.sender === sender ? indexed : undefined;
   };
 
-  const buildResponseDetails = (payload: any, query: string): Partial<RAGResponseDetails> => ({
-    query,
-    confidence: payload.confidence ?? null,
-    confidenceLabel: payload.confidence_label ?? null,
-    retrievalStrategy: payload.retrieval_strategy ?? null,
-    hallucinationCount: Array.isArray(payload.hallucinations) ? payload.hallucinations.length : null,
-    hallucinationCheckPassed: Array.isArray(payload.hallucinations) ? payload.hallucinations.length === 0 : null,
-    processingTimeMs: payload.processing_time_ms ?? null,
-    sourceCount: Array.isArray(payload.sources) ? payload.sources.length : null,
-    modulesExecuted: Array.isArray(payload.modules_executed) ? payload.modules_executed : undefined,
-    reasoning: typeof payload.reasoning === "string" ? payload.reasoning : null,
-    contextPreview: typeof payload.context === "string" ? payload.context : null,
-    chatMode: payload.chat_mode,
-    finishReason: payload.finish_reason ?? "stop",
-    completionStatus: payload.completion_status ?? "complete",
-    continuationCount: payload.continuation_count ?? 0,
-    canContinue: Boolean(payload.can_continue),
-    assistantMessageId: payload.assistant_message_id ?? null,
-  });
+  const buildResponseDetails = (payload: any, query: string): Partial<RAGResponseDetails> => {
+    const terminal = normalizeStreamTerminalState({
+      completionStatus: payload.completion_status,
+      finishReason: payload.finish_reason,
+      canContinue: payload.can_continue,
+      hasAnswer: Boolean(payload.answer),
+    });
+    return {
+      query,
+      confidence: payload.confidence ?? null,
+      confidenceLabel: payload.confidence_label ?? null,
+      retrievalStrategy: payload.retrieval_strategy ?? null,
+      hallucinationCount: Array.isArray(payload.hallucinations) ? payload.hallucinations.length : null,
+      hallucinationCheckPassed: Array.isArray(payload.hallucinations) ? payload.hallucinations.length === 0 : null,
+      processingTimeMs: payload.processing_time_ms ?? null,
+      sourceCount: Array.isArray(payload.sources) ? payload.sources.length : null,
+      modulesExecuted: Array.isArray(payload.modules_executed) ? payload.modules_executed : undefined,
+      reasoning: typeof payload.reasoning === "string" ? payload.reasoning : null,
+      contextPreview: typeof payload.context === "string" ? payload.context : null,
+      chatMode: payload.chat_mode,
+      finishReason: terminal.finishReason,
+      completionStatus: terminal.completionStatus,
+      continuationCount: payload.continuation_count ?? 0,
+      canContinue: terminal.canContinue,
+      assistantMessageId: payload.assistant_message_id ?? null,
+    };
+  };
 
   const SUGGESTIONS_PER_PAGE = 4;
   const totalSuggestionPages = Math.max(1, Math.ceil(suggestions.length / SUGGESTIONS_PER_PAGE));
@@ -523,15 +535,18 @@ export default function AskAiTab({ isActive, initialQuestion, onClearInitialQues
       setError(err.message || "Something went wrong.");
       setMessages((prev) => prev.map((msg) => (
         msg.id === aiMessageId
-          ? {
-            ...msg,
-            text: msg.text || err.message || "I couldn't contact my server because it might still be initializing. Please try again.",
-            details: {
-              ...msg.details,
-              completionStatus: "interrupted",
-              canContinue: Boolean(msg.text),
-            },
-          }
+          ? (() => {
+            const hasPartialAnswer = Boolean(msg.text);
+            return {
+              ...msg,
+              text: msg.text || err.message || "I couldn't contact my server because it might still be initializing. Please try again.",
+              details: {
+                ...msg.details,
+                completionStatus: hasPartialAnswer ? "interrupted" : "error",
+                canContinue: hasPartialAnswer,
+              },
+            };
+          })()
           : msg
       )));
     } finally {
@@ -543,6 +558,7 @@ export default function AskAiTab({ isActive, initialQuestion, onClearInitialQues
     if (loading || !sessionId || !token) return;
     setLoading(true);
     setError(null);
+    let receivedContinuationToken = false;
     try {
       const response = await fetch(`/chat/sessions/${sessionId}/continue-stream`, {
         method: "POST",
@@ -552,6 +568,7 @@ export default function AskAiTab({ isActive, initialQuestion, onClearInitialQues
       if (!response.body) throw new Error("Streaming response body is unavailable.");
       const result = await consumeSSEStream(response.body, (payload) => {
         if (payload.type !== "token") return;
+        receivedContinuationToken = true;
         setMessages(prev => prev.map(message => message.id !== messageId ? message : {
           ...message,
           text: (message.text || "") + String(payload.content || ""),
@@ -568,7 +585,13 @@ export default function AskAiTab({ isActive, initialQuestion, onClearInitialQues
       setError(err.message || "The answer was interrupted.");
       setMessages(prev => prev.map(message => message.id !== messageId ? message : {
         ...message,
-        details: { ...message.details, completionStatus: "interrupted", canContinue: true },
+        details: {
+          ...message.details,
+          completionStatus: receivedContinuationToken
+            ? "interrupted"
+            : message.details?.completionStatus,
+          canContinue: receivedContinuationToken || Boolean(message.details?.canContinue),
+        },
       }));
     } finally {
       setLoading(false);
@@ -798,15 +821,16 @@ export default function AskAiTab({ isActive, initialQuestion, onClearInitialQues
                         <TypewriterMessage
                           content={m.text || ''}
                           msgId={m.id}
-                          isLatest={loading && messages[messages.length - 1]?.id === m.id && m.sender === 'ai'}
+                          animate={loading && messages[messages.length - 1]?.id === m.id && m.sender === 'ai'}
+                          streaming={loading && messages[messages.length - 1]?.id === m.id && m.sender === 'ai'}
                           formatTextContent={(text) => (
                             <InlineCitationContent text={text} sources={m.sources} onSeek={onSeek} theme={document.documentElement.classList.contains("dark") ? "dark" : "light"} />
                           )}
                         />
                       </div>
-                      {(m.details?.completionStatus === "interrupted" || m.details?.completionStatus === "stopped") && (
+                      {(isConfirmedPartialInterruption(m.details) || m.details?.completionStatus === "stopped") && (
                         <p className="mt-3 text-xs font-medium text-amber-600 dark:text-amber-300/80">
-                          {m.details.completionStatus === "stopped" ? "Answer stopped" : "Answer interrupted"} — partial response preserved.
+                          {m.details?.completionStatus === "stopped" ? "Answer stopped" : "Answer interrupted"} — partial response preserved.
                         </p>
                       )}
                       {m.details?.canContinue && messages[messages.length - 1]?.id === m.id && (

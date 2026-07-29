@@ -6,7 +6,12 @@ param(
 
     [string]$ApplicationPath = "",
 
-    [string]$FirebaseApiKey = $env:VITE_FIREBASE_API_KEY
+    [string]$FirebaseApiKey = $env:VITE_FIREBASE_API_KEY,
+
+    [switch]$TestWtpModel,
+
+    [ValidateRange(30, 3600)]
+    [int]$EvaluationTimeoutSeconds = 120
 )
 
 $ErrorActionPreference = "Stop"
@@ -20,6 +25,7 @@ $stderrPath = Join-Path $testRoot "stderr.log"
 $defaultWorkspacePath = Join-Path $testRoot "app-created-default-workspace"
 $workspacePath = Join-Path $testRoot "selected-existing-workspace"
 $workspaceSentinelPath = Join-Path $workspacePath "preserve-me.txt"
+$wtpDestinationPath = Join-Path $testRoot "wtp-models"
 New-Item -ItemType Directory -Path $chromiumData, $localAppData, $workspacePath | Out-Null
 Set-Content -LiteralPath $workspaceSentinelPath -Value "workspace sentinel" -Encoding utf8
 
@@ -45,7 +51,7 @@ function Invoke-CdpCommand {
             [Threading.CancellationToken]::None
         ).GetAwaiter().GetResult()
 
-        $cancellation = [Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds(75))
+        $cancellation = [Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds($EvaluationTimeoutSeconds))
         try {
             while (-not $cancellation.IsCancellationRequested) {
                 $buffer = New-Object byte[] 65536
@@ -163,6 +169,8 @@ try {
     $firebaseUsernameJson = $firebaseUsername | ConvertTo-Json -Compress
     $defaultWorkspacePathJson = $defaultWorkspacePath | ConvertTo-Json -Compress
     $workspacePathJson = $workspacePath | ConvertTo-Json -Compress
+    $wtpDestinationPathJson = $wtpDestinationPath | ConvertTo-Json -Compress
+    $testWtpModelJson = [bool]$TestWtpModel | ConvertTo-Json -Compress
     $expression = @'
 (async () => {
   const firebaseToken = __FIREBASE_TOKEN__;
@@ -170,6 +178,8 @@ try {
   const expectedUsername = __FIREBASE_USERNAME__;
   const defaultWorkspaceRoot = __DEFAULT_WORKSPACE_PATH__;
   const workspaceRoot = __WORKSPACE_PATH__;
+  const wtpDestinationRoot = __WTP_DESTINATION_PATH__;
+  const testWtpModel = __TEST_WTP_MODEL__;
   const findSignInControls = () => ({
     email: document.querySelector('input[placeholder="Enter your email or username"]'),
     password: document.querySelector('input[type="password"]'),
@@ -194,6 +204,8 @@ try {
   let secureStorageRoundTrip = false;
   let workspaceStorageRoundTrip = false;
   let workspaceDiagnostics = {};
+  let wtpModelRoundTrip = !testWtpModel;
+  let wtpDiagnostics = {};
   let localStorageIsClean = false;
   const authStatuses = {};
   try {
@@ -361,6 +373,70 @@ try {
         deletionFallbackPath: normalizePath(deletedWorkspace.active_path),
         finalProfilePath: normalizePath(profileAfterDelete.storage_root)
       };
+
+      if (testWtpModel) {
+        let finalDownloadEvent = {};
+        let downloadError = '';
+        const downloadResponse = await fetch(
+          `/api/settings/download-wtp-model?model=sat-3l&dest_path=${encodeURIComponent(wtpDestinationRoot)}`,
+          { cache: 'no-store' }
+        );
+        authStatuses.wtpDownload = downloadResponse.status;
+        if (downloadResponse.ok && downloadResponse.body) {
+          const reader = downloadResponse.body.getReader();
+          const decoder = new TextDecoder();
+          let buffered = '';
+          while (true) {
+            const { done, value } = await reader.read();
+            buffered += decoder.decode(value || new Uint8Array(), { stream: !done });
+            const events = buffered.split(/\r?\n\r?\n/);
+            buffered = events.pop() || '';
+            for (const event of events) {
+              for (const line of event.split(/\r?\n/)) {
+                if (!line.startsWith('data:')) continue;
+                try {
+                  const payload = JSON.parse(line.slice(5).trim());
+                  if (payload.error) downloadError = String(payload.error);
+                  if (payload.status === 'completed') finalDownloadEvent = payload;
+                } catch {
+                  downloadError = 'invalid_sse_payload';
+                }
+              }
+            }
+            if (done) break;
+          }
+        }
+        const downloadedPath = String(finalDownloadEvent.final_path || '');
+        const testResponse = downloadedPath
+          ? await fetch('/ai/test-local-dependency', {
+              method: 'POST',
+              headers: {
+                ...workspaceHeaders,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                type: 'wtp',
+                wtp_model_path: downloadedPath
+              })
+            })
+          : { ok: false, status: 0, json: async () => ({}) };
+        authStatuses.wtpModelTest = testResponse.status;
+        const testPayload = await testResponse.json().catch(() => ({}));
+        wtpModelRoundTrip = Boolean(
+          downloadResponse.ok &&
+          !downloadError &&
+          downloadedPath &&
+          testResponse.ok &&
+          testPayload.success === true &&
+          testPayload.normalized_path
+        );
+        wtpDiagnostics = {
+          downloadError: downloadError || undefined,
+          downloadCompleted: Boolean(downloadedPath),
+          modelTestSuccess: testPayload.success === true,
+          modelTestCode: testPayload.code
+        };
+      }
     }
 
     usernameResolutionRoundTrip = Boolean(
@@ -423,6 +499,8 @@ try {
     secureStorageRoundTrip,
     workspaceStorageRoundTrip,
     workspaceDiagnostics,
+    wtpModelRoundTrip,
+    wtpDiagnostics,
     localStorageIsClean,
     firebaseLoginRejectedSafely,
     authStatuses
@@ -434,6 +512,8 @@ try {
     $expression = $expression.Replace("__FIREBASE_USERNAME__", $firebaseUsernameJson)
     $expression = $expression.Replace("__DEFAULT_WORKSPACE_PATH__", $defaultWorkspacePathJson)
     $expression = $expression.Replace("__WORKSPACE_PATH__", $workspacePathJson)
+    $expression = $expression.Replace("__WTP_DESTINATION_PATH__", $wtpDestinationPathJson)
+    $expression = $expression.Replace("__TEST_WTP_MODEL__", $testWtpModelJson)
     $response = Invoke-CdpCommand -WebSocketUrl $pageTarget.webSocketDebuggerUrl -Message @{
         id = 1
         method = "Runtime.evaluate"
@@ -465,6 +545,11 @@ try {
         $workspaceSummary = $result.workspaceDiagnostics | ConvertTo-Json -Depth 4 -Compress
         throw "Packaged workspace registration, listing, activation, protection, or deletion failed. HTTP statuses: $statusSummary. Diagnostics: $workspaceSummary"
     }
+    if (-not $result.wtpModelRoundTrip) {
+        $statusSummary = $result.authStatuses | ConvertTo-Json -Compress
+        $wtpSummary = $result.wtpDiagnostics | ConvertTo-Json -Depth 4 -Compress
+        throw "Packaged WtP download or model validation failed. HTTP statuses: $statusSummary. Diagnostics: $wtpSummary"
+    }
     if ((Get-Content -LiteralPath $workspaceSentinelPath -Raw).Trim() -ne "workspace sentinel") {
         throw "Packaged workspace registration or deletion modified an unrelated file."
     }
@@ -476,7 +561,7 @@ try {
     if ($stderr -match "auth/invalid-api-key|auth/api-key-not-valid|Uncaught FirebaseError") {
         throw "Packaged renderer reported an invalid Firebase API key."
     }
-    Write-Host "Packaged Electron startup, authentication, workspace lifecycle, renderer mount, and encrypted-session round trip passed."
+    Write-Host "Packaged Electron startup, authentication, workspace lifecycle, WtP model, renderer mount, and encrypted-session round trip passed."
     $smokeSucceeded = $true
 } catch {
     Write-Warning "Packaged smoke-test logs were retained at $testRoot"

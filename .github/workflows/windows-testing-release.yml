@@ -1,9 +1,10 @@
-name: Windows unsigned beta release
+name: Windows unsigned beta preflight and release
 
 on:
   push:
     tags:
       - "v*-beta.*"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -44,8 +45,14 @@ jobs:
       - name: Validate tag, committed version, and release documentation
         shell: pwsh
         run: |
-          if ("${{ github.ref_type }}" -ne "tag") { throw "Beta releases must run from a pushed tag." }
-          $version = "${{ github.ref_name }}".Substring(1)
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $version = "${{ github.ref_name }}".Substring(1)
+            "PUBLISH_RELEASE=true" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          } else {
+            $package = Get-Content desktop/package.json -Raw | ConvertFrom-Json
+            $version = [string]$package.version
+            "PUBLISH_RELEASE=false" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
           ./desktop/scripts/validate-release.ps1 -Version $version -Channel beta
           $releaseNotes = (Resolve-Path "desktop/release-notes/$version.md" -ErrorAction Stop).Path
           "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
@@ -89,7 +96,9 @@ jobs:
 
       - name: Build application resources
         shell: pwsh
-        run: npm --prefix desktop run build
+        run: |
+          npm --prefix desktop run build
+          npm --prefix desktop run verify:resources
 
       - name: Package unsigned beta NSIS update
         shell: pwsh
@@ -102,9 +111,20 @@ jobs:
             Pop-Location
           }
 
-      - name: Smoke test packaged Electron authentication and secure session storage
+      - name: Smoke test packaged Electron authentication, workspaces, WtP, and secure session storage
         shell: pwsh
-        run: ./desktop/scripts/smoke-packaged-app.ps1 -ExecutablePath ./desktop/release/win-unpacked/MyAILibrary.exe
+        run: |
+          ./desktop/scripts/smoke-packaged-app.ps1 `
+            -ExecutablePath ./desktop/release/win-unpacked/MyAILibrary.exe `
+            -TestWtpModel `
+            -EvaluationTimeoutSeconds 1800
+
+      - name: Smoke test the installed NSIS application
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem desktop/release/MyAI-Library-Setup-*-x64.exe
+          if (@($installer).Count -ne 1) { throw "Expected exactly one NSIS installer." }
+          ./desktop/scripts/smoke-installed-app.ps1 -InstallerPath $installer.FullName -ExpectedVersion $env:RELEASE_VERSION
 
       - name: Verify package and generate checksum
         shell: pwsh
@@ -123,8 +143,14 @@ jobs:
           }
           $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $installer.FullName
           "$($hash.Hash.ToLower())  $($installer.Name)" | Set-Content desktop/release/SHA256SUMS.txt -Encoding ascii
+          ./desktop/scripts/verify-beta-update.ps1 `
+            -MetadataPath ./desktop/release/beta.yml `
+            -InstallerPath $installer.FullName `
+            -PreviousVersion 0.1.0-beta.5 `
+            -ExpectedVersion $env:RELEASE_VERSION
 
       - name: Stage verified beta prerelease as a draft
+        if: env.PUBLISH_RELEASE == 'true'
         shell: pwsh
         run: |
           $tag = "v$env:RELEASE_VERSION"
@@ -141,6 +167,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Failed to upload one or more release assets for $tag." }
 
       - name: Verify staged prerelease metadata and assets
+        if: env.PUBLISH_RELEASE == 'true'
         shell: pwsh
         run: |
           $tag = "v$env:RELEASE_VERSION"
@@ -161,6 +188,7 @@ jobs:
           }
 
       - name: Publish validated beta prerelease
+        if: env.PUBLISH_RELEASE == 'true'
         shell: pwsh
         run: |
           $tag = "v$env:RELEASE_VERSION"

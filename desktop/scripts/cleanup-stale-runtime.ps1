@@ -59,28 +59,74 @@ function Test-IsMyAiRuntimeProcess {
     $commandLine = Get-ProcessCommandLineSafe -ProcessId $ProcessId
     $repoRootText = [string]$repoRoot
 
-    if ($commandLine -and $commandLine.Contains($repoRootText)) {
-        return $true
+    if (
+        -not $commandLine -or
+        $commandLine.IndexOf($repoRootText, [System.StringComparison]::OrdinalIgnoreCase) -lt 0
+    ) {
+        return $false
     }
 
-    if ($commandLine -and $commandLine.Contains("desktop_entry.py")) {
-        return $true
+    if ($Port -eq 8000) {
+        return $commandLine.IndexOf("desktop_entry.py", [System.StringComparison]::OrdinalIgnoreCase) -ge 0
     }
 
-    if ($process.ProcessName -eq "myailibrary-backend") {
-        return $true
-    }
-
-    # In development, 8000 is reserved for the local FastAPI backend and 5173
-    # is reserved for this project's Vite renderer. If command-line lookup is
-    # blocked by Windows, this fallback still cleans the known dev ports.
-    if (($Port -eq 8000 -and $process.ProcessName -match "^(python|pythonw)$") -or
-        ($Port -eq 5173 -and $process.ProcessName -match "^(node|npm|cmd)$")) {
-        return $true
+    if ($Port -eq 5173) {
+        return $commandLine.IndexOf("vite", [System.StringComparison]::OrdinalIgnoreCase) -ge 0
     }
 
     return $false
 }
+
+function Stop-ProcessTreeSafe {
+    param([int]$ProcessId)
+
+    try {
+        $killer = Start-Process -FilePath "taskkill.exe" `
+            -ArgumentList @("/PID", [string]$ProcessId, "/T", "/F") `
+            -WindowStyle Hidden `
+            -Wait `
+            -PassThru `
+            -ErrorAction Stop
+        if ($killer.ExitCode -ne 0) {
+            throw "taskkill exited with code $($killer.ExitCode)"
+        }
+    } catch {
+        throw $_
+    }
+}
+
+function Stop-StaleElectronDevTrees {
+    $repoRootText = [string]$repoRoot
+    try {
+        $electronProcesses = @(
+            Get-CimInstance Win32_Process -Filter "Name = 'electron.exe'" -ErrorAction Stop |
+                Where-Object {
+                    $commandLine = [string]$_.CommandLine
+                    $commandLine -and
+                    $commandLine.IndexOf($repoRootText, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+                    $commandLine.IndexOf("--type=", [System.StringComparison]::OrdinalIgnoreCase) -lt 0
+                }
+        )
+    } catch {
+        Write-Warning "[runtime-cleanup] could not inspect stale Electron processes: $($_.Exception.Message)"
+        return
+    }
+
+    foreach ($electronProcess in $electronProcesses) {
+        $processId = [int]$electronProcess.ProcessId
+        if (-not $processId -or $processId -eq $PID) {
+            continue
+        }
+        Write-Host "[runtime-cleanup] stopping stale MyAiLibrary Electron tree $processId"
+        try {
+            Stop-ProcessTreeSafe -ProcessId $processId
+        } catch {
+            Write-Warning "[runtime-cleanup] could not stop Electron process ${processId}: $($_.Exception.Message)"
+        }
+    }
+}
+
+Stop-StaleElectronDevTrees
 
 foreach ($port in $ports) {
     $pids = Get-ListeningPidsOnPort -Port $port
@@ -90,9 +136,9 @@ foreach ($port in $ports) {
         }
 
         if (Test-IsMyAiRuntimeProcess -ProcessId $pidValue -Port $port) {
-            Write-Host "[runtime-cleanup] stopping stale MyAiLibrary process $pidValue on port $port"
+            Write-Host "[runtime-cleanup] stopping stale MyAiLibrary process tree $pidValue on port $port"
             try {
-                Stop-Process -Id $pidValue -Force -ErrorAction Stop
+                Stop-ProcessTreeSafe -ProcessId $pidValue
             } catch {
                 Write-Warning "[runtime-cleanup] could not stop process $pidValue on port ${port}: $($_.Exception.Message)"
             }

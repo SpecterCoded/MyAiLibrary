@@ -221,6 +221,7 @@ from database import DATABASE_PATH, SessionLocal, engine
 from core.schema_migrations import (
     LEGACY_SCHEMA_VERSION,
     SEMANTIC_CACHE_OWNERSHIP_VERSION,
+    WORKSPACE_STORAGE_LIFECYCLE_VERSION,
     apply_semantic_cache_ownership_migration,
     complete_schema_migration,
     prepare_schema_migration,
@@ -577,6 +578,27 @@ with schema_migration_connection(engine, migration_required) as conn:
 
 if migration_required:
     complete_schema_migration(engine, DATABASE_PATH, LEGACY_SCHEMA_VERSION)
+
+# Workspace ownership/protection columns were introduced after the legacy
+# baseline had already been recorded on existing installations. Apply them
+# under their own version so upgraded Electron development and packaged
+# databases are migrated instead of silently skipping the ALTER statements.
+workspace_storage_migration_required = prepare_schema_migration(
+    engine,
+    DATABASE_PATH,
+    WORKSPACE_STORAGE_LIFECYCLE_VERSION,
+)
+if workspace_storage_migration_required:
+    workspace_inspector = sqlalchemy.inspect(engine)
+    with schema_migration_connection(engine, True) as conn:
+        migrate_storage_paths_schema(conn, workspace_inspector)
+        conn.commit()
+
+    complete_schema_migration(
+        engine,
+        DATABASE_PATH,
+        WORKSPACE_STORAGE_LIFECYCLE_VERSION,
+    )
 
 # Semantic cache rows originally had no owner. Resource-backed rows could be
 # inferred through resources, but global rows cannot be attributed safely, so
@@ -6582,17 +6604,17 @@ def _load_chat_message_details(raw_details: str | None) -> dict | None:
     if not raw_details:
         return None
     details = json.loads(raw_details)
-    # Older streaming payloads occasionally omitted terminal fields. They were
-    # persisted through the old fallback as "interrupted" even though a final
-    # event, full metadata, and canContinue=false had already been received.
+    # A genuine interrupted partial answer is always continuable. Older
+    # provider streams sometimes ended cleanly with an indeterminate finish
+    # reason and were persisted as interrupted despite canContinue=false.
     if (
         details.get("completionStatus") == "interrupted"
         and details.get("canContinue") is False
-        and details.get("finishReason") in (None, "unknown")
-        and details.get("processingTimeMs") is not None
+        and str(details.get("finishReason") or "").strip().lower()
+        in ("", "unknown", "none", "null")
     ):
         details["completionStatus"] = "complete"
-        details["finishReason"] = "stop"
+        details["finishReason"] = "provider_eof"
     return details
 
 

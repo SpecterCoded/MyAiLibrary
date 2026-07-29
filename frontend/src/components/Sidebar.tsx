@@ -1,5 +1,4 @@
 import React, { type ReactNode, useState, useEffect } from 'react';
-import { Sparkles } from 'lucide-react';
 import { type BackendUser } from './DashboardHeader';
 
 interface NavItemBase {
@@ -130,15 +129,23 @@ export default function Sidebar({ user, activeTab = 'home', hasActiveDownloads =
   ];
 
   return (
-    <aside className="app-sidebar-panel relative z-50 flex h-full w-20 shrink-0 select-none flex-col items-center border-r border-slate-200/80 bg-slate-50 px-2 py-4 dark:border-white/10 dark:bg-[#202226]">
+    <aside
+      className="app-sidebar-panel relative z-50 flex h-full w-20 shrink-0 select-none flex-col items-center border-r border-slate-200/80 bg-slate-50 px-2 py-4 dark:border-white/10 dark:bg-[#202226]"
+      onDragStart={(event) => event.preventDefault()}
+    >
       
       {/* Logo Section */}
       <div 
         onClick={() => onTabChange?.('home')}
         className="group relative flex items-center justify-center mb-3 shrink-0 cursor-pointer"
       >
-        <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center shadow-md shadow-blue-500/20 hover:scale-105 active:scale-95 transition-all duration-300">
-          <Sparkles className="w-5 h-5 text-white" strokeWidth={2} />
+        <div className="w-10 h-10 rounded-2xl overflow-hidden bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center shadow-md shadow-blue-500/20 hover:scale-105 active:scale-95 transition-all duration-300">
+          <img
+            src="/brand-mark.png"
+            alt=""
+            draggable={false}
+            className="block w-[72%] h-[72%] object-contain select-none pointer-events-none"
+          />
         </div>
         <div className="absolute left-full ml-5 px-2.5 py-1.5 bg-slate-800 text-white text-[11px] font-bold rounded-lg opacity-0 pointer-events-none whitespace-nowrap shadow-xl z-[100] transition-all duration-200 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0">
           MyAiLibrary
@@ -157,6 +164,7 @@ export default function Sidebar({ user, activeTab = 'home', hasActiveDownloads =
             <a
               key={item.id}
               href="#"
+              draggable={false}
               onClick={(e) => {
                 e.preventDefault();
                 onTabChange?.(item.id);
@@ -226,6 +234,7 @@ export default function Sidebar({ user, activeTab = 'home', hasActiveDownloads =
             <img 
               src={avatarUrl!} 
               alt={displayName} 
+              draggable={false}
               className="w-9 h-9 rounded-full object-cover ring-2 ring-white shadow-sm group-hover:ring-indigo-100 transition-all bg-white" 
             />
           ) : (

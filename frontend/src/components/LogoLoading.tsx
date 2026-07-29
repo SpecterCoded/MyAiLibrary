@@ -1,6 +1,5 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Sparkles } from 'lucide-react';
 
 interface LogoLoadingProps {
   size?: 'sm' | 'md' | 'lg';
@@ -18,12 +17,6 @@ export default function LogoLoading({
     sm: 'w-10 h-10 rounded-xl',
     md: 'w-16 h-16 rounded-[24px]',
     lg: 'w-24 h-24 rounded-[36px]'
-  };
-
-  const iconSizes = {
-    sm: 18,
-    md: 28,
-    lg: 42
   };
 
   const loaderContent = (
@@ -101,7 +94,7 @@ export default function LogoLoading({
           }}
           className={`${containerSizes[size]} bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-600/30 border border-white/25 relative z-10`}
         >
-          {/* Central Logo Sparkles Icon */}
+          {/* Central book logo */}
           <motion.div
             animate={{
               rotate: [0, 15, -15, 0],
@@ -112,11 +105,13 @@ export default function LogoLoading({
               repeat: Infinity,
               ease: "easeInOut"
             }}
+            className="w-full h-full flex items-center justify-center"
           >
-            <Sparkles
-              size={iconSizes[size]}
-              className="text-white drop-shadow-[0_2px_8px_rgba(255,255,255,0.4)]"
-              strokeWidth={2}
+            <img
+              src="/brand-mark.png"
+              alt=""
+              draggable={false}
+              className="block w-[72%] h-[72%] object-contain select-none pointer-events-none drop-shadow-[0_2px_8px_rgba(255,255,255,0.4)]"
             />
           </motion.div>
         </motion.div>

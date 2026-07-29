@@ -17,6 +17,14 @@ from services.workspace_storage_service import (
     register_workspace_path,
     remove_workspace_directory,
 )
+from core.schema_migrations import (
+    LEGACY_SCHEMA_VERSION,
+    SEMANTIC_CACHE_OWNERSHIP_VERSION,
+    WORKSPACE_STORAGE_LIFECYCLE_VERSION,
+    complete_schema_migration,
+    prepare_schema_migration,
+    schema_migration_connection,
+)
 
 
 class WorkspaceStorageTests(unittest.TestCase):
@@ -269,6 +277,79 @@ class WorkspaceStorageTests(unittest.TestCase):
         self.assertEqual(by_id["second-a"]["is_default"], 0)
         self.assertTrue(all(row["is_app_managed"] == 0 for row in rows))
         self.assertTrue(all(row["deletion_pending"] == 0 for row in rows))
+
+    def test_versioned_migration_upgrades_database_with_recorded_legacy_baseline(self):
+        data_root = Path(self.temp_directory.name) / "versioned-workspace-migration"
+        database_path = data_root / "database" / "library.db"
+        database_path.parent.mkdir(parents=True)
+        migration_engine = create_engine(f"sqlite:///{database_path.as_posix()}")
+        with migration_engine.begin() as connection:
+            connection.execute(text(
+                "CREATE TABLE storage_paths ("
+                "id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL, user_id TEXT NOT NULL)"
+            ))
+            connection.execute(text(
+                "INSERT INTO storage_paths (id, name, path, user_id) "
+                "VALUES ('legacy-default', 'Default', 'D:/library', 'legacy-user')"
+            ))
+            connection.execute(text(
+                "CREATE TABLE schema_migrations (version TEXT PRIMARY KEY, applied_at TEXT NOT NULL)"
+            ))
+            connection.execute(
+                text(
+                    "INSERT INTO schema_migrations(version, applied_at) "
+                    "VALUES (:legacy, 'earlier'), (:semantic, 'earlier')"
+                ),
+                {
+                    "legacy": LEGACY_SCHEMA_VERSION,
+                    "semantic": SEMANTIC_CACHE_OWNERSHIP_VERSION,
+                },
+            )
+
+        should_apply = prepare_schema_migration(
+            migration_engine,
+            database_path,
+            WORKSPACE_STORAGE_LIFECYCLE_VERSION,
+        )
+        self.assertTrue(should_apply)
+        inspector = sqlalchemy.inspect(migration_engine)
+        with schema_migration_connection(migration_engine, should_apply) as connection:
+            migrate_storage_paths_schema(connection, inspector)
+            connection.commit()
+        complete_schema_migration(
+            migration_engine,
+            database_path,
+            WORKSPACE_STORAGE_LIFECYCLE_VERSION,
+        )
+
+        migrated_inspector = sqlalchemy.inspect(migration_engine)
+        column_names = {
+            column["name"]
+            for column in migrated_inspector.get_columns("storage_paths")
+        }
+        with migration_engine.connect() as connection:
+            row = connection.execute(text(
+                "SELECT is_default, is_app_managed, deletion_pending "
+                "FROM storage_paths WHERE id = 'legacy-default'"
+            )).mappings().one()
+            migration_recorded = connection.execute(
+                text("SELECT 1 FROM schema_migrations WHERE version = :version"),
+                {"version": WORKSPACE_STORAGE_LIFECYCLE_VERSION},
+            ).scalar()
+
+        self.assertTrue(
+            {"is_default", "is_app_managed", "deletion_pending"}.issubset(column_names)
+        )
+        self.assertEqual(row["is_default"], 1)
+        self.assertEqual(row["is_app_managed"], 0)
+        self.assertEqual(row["deletion_pending"], 0)
+        self.assertEqual(migration_recorded, 1)
+        self.assertFalse(prepare_schema_migration(
+            migration_engine,
+            database_path,
+            WORKSPACE_STORAGE_LIFECYCLE_VERSION,
+        ))
+        migration_engine.dispose()
 
 
 if __name__ == "__main__":

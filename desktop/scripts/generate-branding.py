@@ -1,120 +1,166 @@
-"""Generate Windows/NSIS artwork from the in-app sidebar sparkle brand mark."""
+"""Generate all desktop and frontend artwork from the selected book-logo master."""
 
 from __future__ import annotations
 
+import base64
+import io
 import shutil
+from math import sqrt
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageChops, ImageDraw
 
 
 ROOT = Path(__file__).resolve().parent.parent
+REPOSITORY_ROOT = ROOT.parent
 BUILD = ROOT / "build"
 ASSETS = ROOT / "assets"
+FRONTEND_PUBLIC = REPOSITORY_ROOT / "frontend" / "public"
+MASTER = ASSETS / "logo-master.png"
+ICON_SIZES = [(16, 16), (20, 20), (24, 24), (32, 32), (40, 40), (48, 48), (64, 64), (128, 128), (256, 256)]
+MARK_WIDTH_RATIO = 0.90
+ICON_MARK_WIDTH_RATIO = 0.90
+
 BUILD.mkdir(parents=True, exist_ok=True)
 ASSETS.mkdir(parents=True, exist_ok=True)
+FRONTEND_PUBLIC.mkdir(parents=True, exist_ok=True)
 
 
-def gradient(size: tuple[int, int], start=(37, 99, 235), end=(79, 70, 229), mode="RGB") -> Image.Image:
+def brand_gradient(size: tuple[int, int], mode: str = "RGB") -> Image.Image:
+    """Recreate the selected electric-blue/indigo background without raster artifacts."""
+    width, height = size
     image = Image.new(mode, size)
     pixels = image.load()
-    width, height = size
+    start = (0, 77, 253)
+    end = (29, 10, 158)
+
     for y in range(height):
+        vertical = y / max(1, height - 1)
         for x in range(width):
-            t = (x / max(1, width - 1) + y / max(1, height - 1)) / 2
-            rgb = tuple(round(a + (b - a) * t) for a, b in zip(start, end))
+            horizontal = x / max(1, width - 1)
+            progress = min(1.0, max(0.0, (horizontal * 0.64 + vertical * 0.36) ** 0.88))
+            glow_distance = sqrt(((horizontal - 0.18) / 0.95) ** 2 + ((vertical - 0.24) / 0.95) ** 2)
+            glow = max(0.0, 1.0 - glow_distance) * 14
+            rgb = (
+                round(start[0] + (end[0] - start[0]) * progress),
+                round(start[1] + (end[1] - start[1]) * progress),
+                min(255, round(start[2] + (end[2] - start[2]) * progress + glow)),
+            )
             pixels[x, y] = (*rgb, 255) if mode == "RGBA" else rgb
     return image
 
 
-def draw_gradient_rounded_rect(base: Image.Image, box: tuple[int, int, int, int], radius: int) -> None:
-    x1, y1, x2, y2 = box
-    rect = gradient((x2 - x1, y2 - y1), mode="RGBA")
-    mask = Image.new("L", rect.size, 0)
-    ImageDraw.Draw(mask).rounded_rectangle((0, 0, rect.size[0] - 1, rect.size[1] - 1), radius, fill=255)
-    base.paste(rect, (x1, y1), mask)
+def extract_book_mark() -> Image.Image:
+    """Extract a clean antialiased white mark from the approved generated master."""
+    if not MASTER.is_file():
+        raise RuntimeError(f"Selected logo master is missing: {MASTER}")
+
+    with Image.open(MASTER) as source:
+        source = source.convert("RGB")
+        if source.width != source.height or min(source.size) < 1024:
+            raise RuntimeError(f"Logo master must be a square image of at least 1024px; got {source.size}.")
+        red, green, blue = source.split()
+        minimum_channel = ImageChops.darker(red, ImageChops.darker(green, blue))
+
+    cutoff = 22
+    opaque = 238
+    alpha = minimum_channel.point(
+        lambda value: 0 if value <= cutoff else 255 if value >= opaque else round((value - cutoff) * 255 / (opaque - cutoff))
+    )
+    bounds = alpha.getbbox()
+    if bounds is None:
+        raise RuntimeError("The selected logo master does not contain a white book mark.")
+
+    mark = Image.new("RGBA", source.size, (255, 255, 255, 0))
+    mark.putalpha(alpha)
+    return mark.crop(bounds)
 
 
-def _scale_point(point: tuple[float, float], icon_left: float, icon_top: float, scale: float) -> tuple[int, int]:
-    return (round(icon_left + point[0] * scale), round(icon_top + point[1] * scale))
+BOOK_MARK = extract_book_mark()
 
 
-def draw_round_line(draw: ImageDraw.ImageDraw, points: list[tuple[int, int]], width: int, fill: tuple[int, int, int, int], closed=False) -> None:
-    if closed:
-        points = [*points, points[0]]
-    draw.line(points, fill=fill, width=width, joint="curve")
-    radius = width / 2
-    for x, y in points:
-        draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=fill)
+def render_icon(size: int, mark_width_ratio: float = ICON_MARK_WIDTH_RATIO) -> Image.Image:
+    """Render only the large blue book mark on transparency."""
+    return render_blue_transparent_mark(size, mark_width_ratio)
 
 
-def draw_lucide_sparkles(draw: ImageDraw.ImageDraw, size: int, icon_ratio: float = 0.84) -> None:
-    # Sidebar source: <Sparkles className="w-5 h-5 text-white" strokeWidth={2} />
-    # inside a 40x40 rounded-2xl gradient square.
-    icon_size = size * icon_ratio
-    icon_left = (size - icon_size) / 2
-    icon_top = (size - icon_size) / 2
-    scale = icon_size / 24
-    stroke = max(2, round(2 * scale))
-    white = (255, 255, 255, 255)
-
-    main_shape = [
-        (12.0, 2.814),
-        (14.034, 9.966),
-        (21.186, 12.0),
-        (14.034, 14.034),
-        (12.0, 21.186),
-        (9.966, 14.034),
-        (2.814, 12.0),
-        (9.966, 9.966),
-    ]
-    draw_round_line(draw, [_scale_point(p, icon_left, icon_top, scale) for p in main_shape], stroke, white, closed=True)
-    draw_round_line(draw, [_scale_point((20, 2), icon_left, icon_top, scale), _scale_point((20, 6), icon_left, icon_top, scale)], stroke, white)
-    draw_round_line(draw, [_scale_point((18, 4), icon_left, icon_top, scale), _scale_point((22, 4), icon_left, icon_top, scale)], stroke, white)
-
-    cx, cy = _scale_point((4, 20), icon_left, icon_top, scale)
-    r = 2 * scale
-    draw.ellipse((cx - r, cy - r, cx + r, cy + r), outline=white, width=stroke)
+def render_transparent_mark(size: int, mark_width_ratio: float = MARK_WIDTH_RATIO) -> Image.Image:
+    canvas = Image.new("RGBA", (size, size), (255, 255, 255, 0))
+    target_width = max(1, round(size * mark_width_ratio))
+    target_height = max(1, round(target_width * BOOK_MARK.height / BOOK_MARK.width))
+    mark = BOOK_MARK.resize((target_width, target_height), Image.Resampling.LANCZOS)
+    left = round((size - target_width) / 2)
+    top = round(size * 0.51 - target_height / 2)
+    canvas.alpha_composite(mark, (left, top))
+    return canvas
 
 
-def draw_mark(size: int, *, radius_ratio: float = 0.4, icon_ratio: float = 0.84) -> Image.Image:
-    image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(image)
-    margin = 0
-    radius = round(size * radius_ratio)
-    draw_gradient_rounded_rect(image, (margin, margin, size - margin, size - margin), radius)
-    draw_lucide_sparkles(draw, size, icon_ratio)
-    return image
+def render_blue_transparent_mark(size: int, mark_width_ratio: float = 0.84) -> Image.Image:
+    """Render the book itself in the brand gradient with no surrounding frame."""
+    canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    target_width = max(1, round(size * mark_width_ratio))
+    target_height = max(1, round(target_width * BOOK_MARK.height / BOOK_MARK.width))
+    mark_alpha = BOOK_MARK.resize((target_width, target_height), Image.Resampling.LANCZOS).getchannel("A")
+    colored_mark = brand_gradient((target_width, target_height), mode="RGBA")
+    colored_mark.putalpha(mark_alpha)
+    left = round((size - target_width) / 2)
+    top = round(size * 0.51 - target_height / 2)
+    canvas.alpha_composite(colored_mark, (left, top))
+    return canvas
 
 
-mark = draw_mark(1024)
-mark.save(ASSETS / "icon.png", optimize=True)
-mark.save(
-    BUILD / "icon.ico",
-    sizes=[(16, 16), (20, 20), (24, 24), (32, 32), (40, 40), (48, 48), (64, 64), (128, 128), (256, 256)],
-)
+def write_embedded_svg(icon: Image.Image, destination: Path) -> None:
+    buffer = io.BytesIO()
+    icon.save(buffer, format="PNG", optimize=True)
+    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+    destination.write_text(
+        "\n".join([
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="My AI Library">',
+            f'  <image width="1024" height="1024" href="data:image/png;base64,{encoded}"/>',
+            "</svg>",
+            "",
+        ]),
+        encoding="utf-8",
+    )
+
+
+app_icon = render_icon(1024)
+app_icon.save(ASSETS / "icon.png", optimize=True)
+app_icon.save(BUILD / "icon.ico", sizes=ICON_SIZES)
 shutil.copyfile(BUILD / "icon.ico", BUILD / "installerIcon.ico")
 shutil.copyfile(BUILD / "icon.ico", BUILD / "uninstallerIcon.ico")
 
-# The Windows notification area is physically tiny. A dedicated high-resolution
-# mark with squarer corners and a larger sparkle uses substantially more of the
-# available tray pixels than the full application artwork.
-tray_mark = draw_mark(512, radius_ratio=0.26, icon_ratio=0.84)
-tray_mark.save(ASSETS / "tray-icon.png", optimize=True)
-tray_mark.save(
-    ASSETS / "tray-icon.ico",
-    sizes=[(16, 16), (20, 20), (24, 24), (32, 32), (40, 40), (48, 48), (64, 64), (128, 128), (256, 256)],
-)
+# Windows controls the physical notification-area slot. Supplying every useful
+# ICO frame from the exact application ICO keeps frame and mark proportions
+# identical while filling the maximum safe area at every DPI.
+tray_icon = render_icon(512)
+tray_icon.save(ASSETS / "tray-icon.png", optimize=True)
+shutil.copyfile(BUILD / "icon.ico", ASSETS / "tray-icon.ico")
 
-sidebar = gradient((164, 314), (14, 18, 33), (31, 41, 72))
-sidebar_mark = mark.resize((104, 104), Image.Resampling.LANCZOS)
-sidebar.paste(sidebar_mark, (30, 42), sidebar_mark)
-ImageDraw.Draw(sidebar).rounded_rectangle((22, 186, 142, 190), 2, fill=(99, 102, 241))
-sidebar.save(BUILD / "installerSidebar.bmp")
+frontend_icon = app_icon.copy()
+frontend_mark = render_transparent_mark(1024)
+blue_splash_mark = render_blue_transparent_mark(1024)
+frontend_icon.save(FRONTEND_PUBLIC / "brand-icon.png", optimize=True)
+frontend_mark.save(FRONTEND_PUBLIC / "brand-mark.png", optimize=True)
+blue_splash_mark.save(ASSETS / "logo-mark-blue.png", optimize=True)
+frontend_icon.resize((256, 256), Image.Resampling.LANCZOS).save(FRONTEND_PUBLIC / "favicon.png", optimize=True)
+write_embedded_svg(app_icon, ASSETS / "logo.svg")
 
-header = gradient((150, 57), (248, 250, 252), (226, 232, 240))
-header_mark = mark.resize((46, 46), Image.Resampling.LANCZOS)
-header.paste(header_mark, (96, 5), header_mark)
-header.save(BUILD / "installerHeader.bmp")
+installer_sidebar = Image.new("RGB", (164, 314))
+sidebar_pixels = installer_sidebar.load()
+for y in range(installer_sidebar.height):
+    progress = y / max(1, installer_sidebar.height - 1)
+    color = tuple(round(start + (end - start) * progress) for start, end in zip((14, 18, 33), (31, 41, 72)))
+    for x in range(installer_sidebar.width):
+        sidebar_pixels[x, y] = color
+sidebar_mark = app_icon.resize((124, 124), Image.Resampling.LANCZOS)
+installer_sidebar.paste(sidebar_mark, (20, 32), sidebar_mark)
+ImageDraw.Draw(installer_sidebar).rounded_rectangle((22, 186, 142, 190), 2, fill=(99, 102, 241))
+installer_sidebar.save(BUILD / "installerSidebar.bmp")
 
-print(f"Generated temporary branding in {BUILD}")
+installer_header = Image.new("RGB", (150, 57), (248, 250, 252))
+header_mark = app_icon.resize((52, 52), Image.Resampling.LANCZOS)
+installer_header.paste(header_mark, (95, 2), header_mark)
+installer_header.save(BUILD / "installerHeader.bmp")
+
+print(f"Generated book-logo branding from {MASTER}")

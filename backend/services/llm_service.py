@@ -799,33 +799,45 @@ Question:
             if trace
             else nullcontext({})
         )
-        with stream_phase:
-            for chunk in response:
-                if request_id is None:
-                    request_id = getattr(chunk, "id", None)
-                choices = getattr(chunk, "choices", None) or []
-                if not choices:
-                    continue
-                choice = choices[0]
-                chunk_finish = getattr(choice, "finish_reason", None)
-                if chunk_finish is not None:
-                    finish_reason = str(chunk_finish)
-                delta = getattr(choice, "delta", None)
-                content = getattr(delta, "content", None) if delta else None
-                if not content:
-                    continue
-                segment += content
-                if not prefix_resolved:
-                    prefix_pending += content
-                    if len(prefix_pending) < 512:
+        try:
+            with stream_phase:
+                for chunk in response:
+                    if request_id is None:
+                        request_id = getattr(chunk, "id", None)
+                    choices = getattr(chunk, "choices", None) or []
+                    if not choices:
                         continue
-                    overlap = _longest_boundary_overlap(full_output, prefix_pending)
-                    content = prefix_pending[overlap:]
-                    prefix_pending = ""
-                    prefix_resolved = True
-                if content:
-                    full_output += content
-                    yield content
+                    choice = choices[0]
+                    chunk_finish = getattr(choice, "finish_reason", None)
+                    if chunk_finish is not None:
+                        finish_reason = str(chunk_finish)
+                    delta = getattr(choice, "delta", None)
+                    content = getattr(delta, "content", None) if delta else None
+                    if not content:
+                        continue
+                    segment += content
+                    if not prefix_resolved:
+                        prefix_pending += content
+                        if len(prefix_pending) < 512:
+                            continue
+                        overlap = _longest_boundary_overlap(full_output, prefix_pending)
+                        content = prefix_pending[overlap:]
+                        prefix_pending = ""
+                        prefix_resolved = True
+                    if content:
+                        full_output += content
+                        yield content
+        except Exception as error:
+            state.update(
+                {
+                    "finish_reason": finish_reason or "unknown",
+                    "completion_status": "interrupted",
+                    "continuation_count": continuation_count,
+                    "can_continue": bool(full_output),
+                    "output_character_count": len(full_output),
+                }
+            )
+            raise RuntimeError(_classify_api_error(error)) from error
 
         if not prefix_resolved:
             overlap = _longest_boundary_overlap(full_output, prefix_pending)
@@ -876,9 +888,21 @@ Question:
             ]
         )
 
+    # Some OpenAI-compatible providers cleanly exhaust the stream after
+    # delivering the complete response but omit the optional finish_reason
+    # field. Iterator exhaustion is distinguishable from a transport failure
+    # (which raises above), so a non-empty clean EOF is a successful terminal
+    # state rather than an interrupted answer.
+    normalized_finish_reason = str(finish_reason or "").strip().lower()
+    if normalized_finish_reason in {"", "unknown", "none", "null"} and full_output:
+        finish_reason = "provider_eof"
+
+    if normalized_finish_reason in {"", "unknown", "none", "null"} and not full_output:
+        raise RuntimeError("The AI provider returned an empty response.")
+
     completion_status = (
         "complete"
-        if finish_reason in {"stop", "tool_calls", "function_call"}
+        if finish_reason in {"stop", "tool_calls", "function_call", "provider_eof"}
         else "incomplete"
         if finish_reason == "length"
         else "blocked"

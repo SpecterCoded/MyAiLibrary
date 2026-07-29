@@ -128,8 +128,6 @@ export default function AskAIResult({ query, submissionId, onClose, onLoadingCha
   const [error, setError] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const latestRequestIdRef = useRef(0);
-  const typewriterCloseTimerRef = useRef<number | null>(null);
-  const [typewriterStreaming, setTypewriterStreaming] = useState(false);
   const onLoadingChangeRef = useRef(onLoadingChange);
 
   const cleanAnswer = stripHomeCitations(answer);
@@ -152,11 +150,6 @@ export default function AskAIResult({ query, submissionId, onClose, onLoadingCha
     setError(null);
     setAnswer('');
     setSources([]);
-    setTypewriterStreaming(false);
-    if (typewriterCloseTimerRef.current !== null) {
-      window.clearTimeout(typewriterCloseTimerRef.current);
-      typewriterCloseTimerRef.current = null;
-    }
 
     const fetchAnswer = async () => {
       try {
@@ -182,13 +175,6 @@ export default function AskAIResult({ query, submissionId, onClose, onLoadingCha
         const nextAnswer = data.answer ?? '';
         setAnswer(nextAnswer);
         setSources(data.sources ?? []);
-        if (nextAnswer) {
-          setTypewriterStreaming(true);
-          typewriterCloseTimerRef.current = window.setTimeout(() => {
-            setTypewriterStreaming(false);
-            typewriterCloseTimerRef.current = null;
-          }, 50);
-        }
       } catch (e: unknown) {
         if (controller.signal.aborted || latestRequestIdRef.current !== requestId) return;
 
@@ -205,10 +191,6 @@ export default function AskAIResult({ query, submissionId, onClose, onLoadingCha
     void fetchAnswer();
     return () => {
       controller.abort();
-      if (typewriterCloseTimerRef.current !== null) {
-        window.clearTimeout(typewriterCloseTimerRef.current);
-        typewriterCloseTimerRef.current = null;
-      }
     };
   }, [query, submissionId]);
 
@@ -375,7 +357,8 @@ export default function AskAIResult({ query, submissionId, onClose, onLoadingCha
                         <TypewriterMessage
                           content={cleanAnswer}
                           msgId={`home-ask-ai-${submissionId}`}
-                          isLatest={typewriterStreaming}
+                          animate={Boolean(cleanAnswer)}
+                          streaming={false}
                           speed={16}
                           formatTextContent={(text) => (
                             <ReactMarkdown remarkPlugins={[remarkGfm]} components={HOME_MARKDOWN_COMPONENTS}>
