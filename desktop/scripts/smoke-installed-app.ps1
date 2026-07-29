@@ -24,6 +24,55 @@ $succeeded = $false
 
 New-Item -ItemType Directory -Path $testRoot, $chromiumData, $localAppData | Out-Null
 
+function Invoke-CdpCommand {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$WebSocketUrl,
+
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Message
+    )
+
+    $socket = [Net.WebSockets.ClientWebSocket]::new()
+    try {
+        $socket.ConnectAsync([Uri]$WebSocketUrl, [Threading.CancellationToken]::None).GetAwaiter().GetResult()
+        $json = $Message | ConvertTo-Json -Depth 8 -Compress
+        $bytes = [Text.Encoding]::UTF8.GetBytes($json)
+        $socket.SendAsync(
+            [ArraySegment[byte]]::new($bytes),
+            [Net.WebSockets.WebSocketMessageType]::Text,
+            $true,
+            [Threading.CancellationToken]::None
+        ).GetAwaiter().GetResult()
+
+        $cancellation = [Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds(30))
+        try {
+            while (-not $cancellation.IsCancellationRequested) {
+                $buffer = New-Object byte[] 65536
+                $stream = [IO.MemoryStream]::new()
+                try {
+                    do {
+                        $received = $socket.ReceiveAsync(
+                            [ArraySegment[byte]]::new($buffer),
+                            $cancellation.Token
+                        ).GetAwaiter().GetResult()
+                        $stream.Write($buffer, 0, $received.Count)
+                    } while (-not $received.EndOfMessage)
+                    $response = [Text.Encoding]::UTF8.GetString($stream.ToArray()) | ConvertFrom-Json
+                    if ($response.id -eq $Message.id) { return $response }
+                } finally {
+                    $stream.Dispose()
+                }
+            }
+            throw "Timed out waiting for installed-app CDP response."
+        } finally {
+            $cancellation.Dispose()
+        }
+    } finally {
+        $socket.Dispose()
+    }
+}
+
 try {
     $installer = Start-Process `
         -FilePath $resolvedInstaller `
@@ -40,8 +89,9 @@ try {
         throw "The installed application executable was not found at $installedExecutable."
     }
     $installedVersion = (Get-Item -LiteralPath $installedExecutable).VersionInfo.ProductVersion
-    if (-not $installedVersion -or $installedVersion -notlike "$ExpectedVersion*") {
-        throw "Installed executable version '$installedVersion' does not match $ExpectedVersion."
+    $expectedWindowsVersionPrefix = ($ExpectedVersion -split "-", 2)[0]
+    if (-not $installedVersion -or $installedVersion -notlike "$expectedWindowsVersionPrefix.*") {
+        throw "Installed executable Windows version '$installedVersion' does not match $expectedWindowsVersionPrefix."
     }
 
     $env:LOCALAPPDATA = $localAppData
@@ -79,6 +129,23 @@ try {
         throw "Installed application did not expose its renderer within 60 seconds."
     }
 
+    $versionResponse = Invoke-CdpCommand -WebSocketUrl $pageTarget.webSocketDebuggerUrl -Message @{
+        id = 1
+        method = "Runtime.evaluate"
+        params = @{
+            expression = "(async () => await window.desktop?.getVersion?.())()"
+            awaitPromise = $true
+            returnByValue = $true
+        }
+    }
+    if ($versionResponse.result.exceptionDetails) {
+        throw "Installed application version bridge raised an exception."
+    }
+    $applicationVersion = [string]$versionResponse.result.result.value
+    if ($applicationVersion -ne $ExpectedVersion) {
+        throw "Installed application reports version '$applicationVersion' instead of $ExpectedVersion."
+    }
+
     $backendProcesses = @(
         Get-CimInstance Win32_Process -Filter "Name='myailibrary-backend.exe'" -ErrorAction SilentlyContinue |
             Where-Object { $_.CommandLine -and $_.CommandLine.Contains($localAppData) }
@@ -87,7 +154,7 @@ try {
         throw "Expected one installed backend process, found $($backendProcesses.Count)."
     }
 
-    Write-Host "NSIS installation, version, renderer startup, and single backend process checks passed."
+    Write-Host "NSIS installation, application version, renderer startup, and single backend process checks passed."
     $succeeded = $true
 } catch {
     Write-Warning "Installed-app smoke-test logs were retained at $testRoot"
