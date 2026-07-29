@@ -544,6 +544,7 @@ try {
         -WindowStyle Hidden `
         -PassThru
     $updatedTarget = Wait-PageTarget -Process $appProcess -Port $postUpdatePort
+    Wait-DesktopUpdateBridge -Process $appProcess -WebSocketUrl $updatedTarget.webSocketDebuggerUrl
     $versionResponse = Invoke-CdpCommand -WebSocketUrl $updatedTarget.webSocketDebuggerUrl -Message @{
         id = 4
         method = "Runtime.evaluate"
@@ -554,7 +555,8 @@ try {
         }
     } -TimeoutSeconds 60
     if ($versionResponse.result.exceptionDetails) {
-        throw "The updated Beta 7 renderer raised an exception."
+        $exceptionSummary = $versionResponse.result.exceptionDetails | ConvertTo-Json -Depth 8 -Compress
+        throw "The updated Beta 7 renderer raised an exception: $exceptionSummary"
     }
     $updated = $versionResponse.result.result.value
     if ($updated.version -ne $ExpectedVersion) {
